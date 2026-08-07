@@ -28,13 +28,21 @@ func (t *Terminal) loadInputConfig(cfg *config.Config) {
 		if !ok {
 			continue
 		}
+		mask := int(s.Mask)
+		if mask == 0 {
+			mask = XKAnyMod
+		}
 		t.shortcuts = append(t.shortcuts, shortcut{
-			keysym: ks, mask: int(s.Mask), action: s.Action, arg: s.Arg,
+			keysym: ks, mask: mask, action: s.Action, arg: s.Arg,
 		})
 	}
 	for _, ms := range cfg.Mshortcuts {
+		mask := int(ms.Mask)
+		if mask == 0 {
+			mask = XKAnyMod
+		}
 		t.mshortcuts = append(t.mshortcuts, mShortcut{
-			mask: int(ms.Mask), button: byte(ms.Button),
+			mask: mask, button: byte(ms.Button),
 			action: ms.Action, arg: ms.Arg, release: ms.Release,
 		})
 	}
@@ -316,14 +324,11 @@ func (t *Terminal) kmap(keysym uint, state uint) (string, bool) {
 	return "", false
 }
 
-// match implements st's match(): mask is a set of required modifiers,
-// XKAnyMod matches any, XKNoMod matches none.
+// match implements st's match(): the mask must equal the state exactly, or
+// be XKAnyMod. Callers pass state with ignoremod already masked out.
 func match(mask int, state int) bool {
 	if mask == XKAnyMod {
 		return true
 	}
-	if mask == XKNoMod {
-		return state == 0
-	}
-	return state&mask == mask
+	return mask == state
 }

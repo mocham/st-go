@@ -244,8 +244,13 @@ func (t *Terminal) SetPointerMotion(on bool)      {}
 func (t *Terminal) LoadCols()                     {}
 
 func (t *Terminal) SetCursor(shape int) bool {
+	// st's xsetcursor returns 0 on success, 1 on error. The Hooks bool
+	// mirrors that: false = success, true = error (invalid cursor shape).
+	if shape < 0 || shape > 7 {
+		return true // error -> csihandle reports unknown sequence
+	}
 	t.cursorShape = shape
-	return true
+	return false // success
 }
 
 func (t *Terminal) setWinMode(set bool, mode uint) {

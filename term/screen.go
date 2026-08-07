@@ -680,3 +680,9 @@ func (t *Term) WinMode() uint { return t.winMode }
 // Rows returns the number of screen rows (test/debug helper).
 func (t *Term) Rows() int { return t.row }
 
+
+// CursorX returns the cursor column (test helper).
+func (t *Term) CursorX() int { return t.c.x }
+
+// CursorY returns the cursor row (test helper).
+func (t *Term) CursorY() int { return t.c.y }

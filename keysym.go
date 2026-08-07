@@ -13,8 +13,8 @@ const (
 	Mod4Mask    = 1 << 6
 	Mod5Mask    = 1 << 7
 
-	XKAnyMod = 0x0000 // sentinel: matches any modifiers
-	XKNoMod  = 0xFFFF // sentinel: matches no modifiers
+	XKAnyMod = 0xFFFFFFFF // sentinel: matches any modifiers (st: UINT_MAX)
+	XKNoMod  = 0x00000000 // sentinel: matches no modifiers (st: 0)
 
 	// misc editing keys
 	XKBackSpace = 0xFF08

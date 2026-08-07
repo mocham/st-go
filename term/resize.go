@@ -8,6 +8,9 @@ func (t *Term) tresize(col, row int) {
 		logf("tresize: error resizing to %dx%d\n", col, row)
 		return
 	}
+	// snapshot old size before we mutate it
+	minrow := min(row, t.row)
+	mincol := min(col, t.col)
 
 	// slide screen to keep cursor where we expect it
 	i := 0
@@ -44,7 +47,6 @@ func (t *Term) tresize(col, row int) {
 	}
 
 	// resize each row to new width, zero-pad if needed
-	minrow := min(row, t.row)
 	for i := 0; i < minrow; i++ {
 		t.line[i] = resizeLine(t.line[i], col)
 		t.alt[i] = resizeLine(t.alt[i], col)
@@ -83,7 +85,7 @@ func (t *Term) tresize(col, row int) {
 	// Clearing both screens (it makes dirty all lines)
 	c := t.c
 	for i = 0; i < 2; i++ {
-		if mincol := min(col, t.col); mincol < col && 0 < minrow {
+		if mincol < col && 0 < minrow {
 			t.tclearregion(mincol, 0, col-1, minrow-1)
 		}
 		if 0 < col && minrow < row {

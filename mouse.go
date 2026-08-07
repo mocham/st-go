@@ -13,8 +13,8 @@ type mouseSel struct {
 	active     bool
 	oldx, oldy int
 	selx, sely int
-	lastButton uint
-	lastTime   time.Time
+	tclick1    time.Time
+	tclick2    time.Time
 }
 
 var msel mouseSel
@@ -50,12 +50,13 @@ func (t *Terminal) bpress(e xproto.ButtonPressEvent) {
 	if btn == 1 {
 		now := time.Now()
 		snap := 0
-		if now.Sub(msel.lastTime) < time.Duration(t.tripleClick)*time.Millisecond {
+		if now.Sub(msel.tclick2) < time.Duration(t.tripleClick)*time.Millisecond {
 			snap = 2 // SNAP_LINE
-		} else if now.Sub(msel.lastTime) < time.Duration(t.doubleClick)*time.Millisecond {
+		} else if now.Sub(msel.tclick1) < time.Duration(t.doubleClick)*time.Millisecond {
 			snap = 1 // SNAP_WORD
 		}
-		msel.lastTime = now
+		msel.tclick2 = msel.tclick1
+		msel.tclick1 = now
 		msel.active = true
 		msel.selx, msel.sely = x, y
 		t.termCore.SelStart(x, y, snap)
@@ -116,6 +117,8 @@ func (t *Terminal) brelease(e xproto.ButtonReleaseEvent) {
 func (t *Terminal) mouseaction(button byte, state uint16, release bool) bool {
 	// ignore Button<N>mask for Button<N> - it's set on release
 	state &^= uint16(buttonmask(button))
+	// ignore numlock/layout modifiers (st's match does this internally)
+	state &^= uint16(t.ignoreMod)
 
 	for _, ms := range t.mshortcuts {
 		if ms.release == release && ms.button == button &&

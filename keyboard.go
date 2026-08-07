@@ -34,7 +34,7 @@ func (t *Terminal) keysymForEvent(keycode xproto.Keycode, state uint16) uint {
 		return 0
 	}
 	col := 0
-	if state&ShiftMask != 0 || state&LockMask != 0 {
+	if (state&ShiftMask != 0 || state&LockMask != 0) && int(keysymsPer) > 1 {
 		col = 1
 	}
 	ks := uint(keymapReply.Keysyms[idx+col])

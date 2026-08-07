@@ -25,24 +25,19 @@ func xtermColorMap(argb uint32, i int) uint32 {
 	if i < 16 {
 		return argb
 	}
-	if i >= 232 {
-		gray := 8 + 10*(i-232)
-		return 0xFF000000 | uint32(gray)<<16 | uint32(gray)<<8 | uint32(gray)
+	if i >= 6*6*6+16 {
+		v := 8 + 10*(i-(6*6*6+16))
+		if v > 255 {
+			v = 255
+		}
+		return 0xFF000000 | uint32(v)<<16 | uint32(v)<<8 | uint32(v)
 	}
-	// cube
-	v := i - 16
-	r := (v / 36) * 40 + 55
-	g := ((v % 36) / 6) * 40 + 55
-	b := (v % 6) * 40 + 55
-	if r > 255 {
-		r = 255
-	}
-	if g > 255 {
-		g = 255
-	}
-	if b > 255 {
-		b = 255
-	}
+	// cube with standard xterm levels {0,95,135,175,215,255}
+	lvl := [6]int{0, 95, 135, 175, 215, 255}
+	n := i - 16
+	r := lvl[n/36%6]
+	g := lvl[n/6%6]
+	b := lvl[n%6]
 	return 0xFF000000 | uint32(r)<<16 | uint32(g)<<8 | uint32(b)
 }
 
