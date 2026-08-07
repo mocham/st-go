@@ -86,6 +86,8 @@ func (t *Terminal) handleEvent(ev xgb.Event) {
 		if t.termCore.WinMode()&term.ModeFocus != 0 {
 			t.termCore.WriteToTTY([]byte("\x1b[I"), false)
 		}
+		// st draws after every event; redraw so the cursor reflects focus.
+		t.termCore.Redraw()
 	case xproto.FocusOutEvent:
 		if e.Mode == 1 || e.Mode == 2 {
 			break
@@ -94,6 +96,9 @@ func (t *Terminal) handleEvent(ev xgb.Event) {
 		if t.termCore.WinMode()&term.ModeFocus != 0 {
 			t.termCore.WriteToTTY([]byte("\x1b[O"), false)
 		}
+		// st draws after every event; redraw so the cursor reflects the
+		// focus-loss outline instead of staying in the focused shape.
+		t.termCore.Redraw()
 	case xproto.ClientMessageEvent:
 		if e.Type == t.atoms["WM_PROTOCOLS"] &&
 			xproto.Atom(e.Data.Data32[0]) == t.atoms["WM_DELETE_WINDOW"] {

@@ -867,3 +867,31 @@ func TestDcsGlobPath(t *testing.T) {
 		t.Fatalf("wildcard path './*.png' did not expand and decode")
 	}
 }
+
+// TestFocusToggleRedraw: FocusOut must clear ModeFocused (so DrawCursor draws
+// the unfocused outline box) and FocusIn restore it, mirroring st's focus()
+// handler which is followed by a draw on every event.
+func TestFocusToggleRedraw(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_foc", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	trm.loadInputConfig(cfg)
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+	trm.setWinMode(true, term.ModeFocused)
+
+	trm.handleEvent(xproto.FocusOutEvent{Mode: 0})
+	if trm.winModeIs(term.ModeFocused) {
+		t.Fatalf("ModeFocused still set after FocusOut")
+	}
+	trm.handleEvent(xproto.FocusInEvent{Mode: 0})
+	if !trm.winModeIs(term.ModeFocused) {
+		t.Fatalf("ModeFocused not restored after FocusIn")
+	}
+}
