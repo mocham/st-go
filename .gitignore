@@ -1,0 +1,21 @@
+# Binaries
+/st
+/st-go
+
+# Editor swap files
+.*.swp
+*.swp
+
+# Logs
+*.log
+
+# Font files
+*.ttf
+*.ttc
+
+# The embedded default font is required at build time by go:embed,
+# so it is tracked despite the generic font ignore above.
+!Monaco_Linux.ttf
+
+# Third-party (downloaded by the Makefile)
+/third_party/
