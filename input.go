@@ -199,6 +199,10 @@ func addFunctionKeys() []keyDef {
 // fallback: composed string (XLookupString equivalent).
 // When Ctrl is held, translate Latin-1 keysyms to control bytes per Xlib.
 func (t *Terminal) kpress(e xproto.KeyPressEvent) {
+	// st: DECSET 2 locks the keyboard.
+	if t.termCore.WinMode()&term.ModeKbdLock != 0 {
+		return
+	}
 	// resolve keysym (Shift-aware, Control-independent)
 	ks := t.keysymForEvent(e.Detail, e.State)
 	state := uint(e.State) &^ t.ignoreMod

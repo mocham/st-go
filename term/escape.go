@@ -83,17 +83,19 @@ func (t *Term) tsetattr(attr []int, l int) {
 		case 29:
 			t.c.attr.Mode &^= ATTRStruck
 		case 38:
-			if idx, npar := t.tdefcolor(attr, i, l); idx >= 0 {
+			idx, npar := t.tdefcolor(attr, i, l)
+			if idx >= 0 {
 				t.c.attr.Fg = uint32(idx)
-				i = npar
 			}
+			i = npar
 		case 39:
 			t.c.attr.Fg = uint32(t.cfg.DefaultFg)
 		case 48:
-			if idx, npar := t.tdefcolor(attr, i, l); idx >= 0 {
+			idx, npar := t.tdefcolor(attr, i, l)
+			if idx >= 0 {
 				t.c.attr.Bg = uint32(idx)
-				i = npar
 			}
+			i = npar
 		case 49:
 			t.c.attr.Bg = uint32(t.cfg.DefaultBg)
 		default:

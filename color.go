@@ -73,17 +73,25 @@ func (t *Terminal) colorAt(idx uint32) uint32 {
 	return 0xFF000000
 }
 
-// SetColorName sets palette entry idx to a hex color; returns error if invalid.
+// SetColorName sets palette entry idx to a hex color; returns true if invalid
+// (error). With an empty name, mirrors st's xloadcolor(idx, NULL): indices
+// 16..255 reset to the xterm cube color.
 func (t *Terminal) SetColorName(idx int, name string) bool {
-	if name == "" {
-		return true // reset handled elsewhere
-	}
-	argb, ok := parseHexColor(name)
-	if !ok {
-		return false
-	}
 	if idx < 0 || idx >= len(t.colors) {
-		return false
+		return true
+	}
+	var argb uint32
+	if name == "" {
+		if !between(idx, 16, 255) {
+			return true
+		}
+		argb = xtermColorMap(0, idx)
+	} else {
+		var ok bool
+		argb, ok = parseHexColor(name)
+		if !ok {
+			return true
+		}
 	}
 	t.colors[idx] = Color{argb: argb, pixel: argb & 0x00FFFFFF}
 	return false // success

@@ -19,7 +19,7 @@ func (t *Terminal) selrequest(e xproto.SelectionRequestEvent) {
 				Requestor: e.Requestor,
 				Selection: e.Selection,
 				Target:    e.Target,
-				Property:  e.Property,
+				Property:  prop,
 			}.Bytes()))
 	}
 	fail := func() {

@@ -19,7 +19,7 @@ const Version = "0.9.2"
 
 func main() {
 	var cfgPath string
-	flag.StringVar(&cfgPath, "config", "config.json", "path to JSON config")
+	flag.StringVar(&cfgPath, "config", "", "path to JSON config (default: <exe-dir>/config.json, else embedded)")
 	var glyphOut string
 	flag.StringVar(&glyphOut, "glyphtest", "", "render a glyph to PPM and exit")
 	var dumpText string
@@ -67,9 +67,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.LoadResolved(cfgPath)
 	if err != nil {
-		log.Printf("config: %v (using defaults)", err)
+		log.Printf("config: %v (using embedded)", err)
 		cfg = config.Default()
 	}
 

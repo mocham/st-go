@@ -83,6 +83,18 @@ func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
 	if wide {
 		w *= 2
 	}
+	if py < 0 || py >= fbH {
+		return
+	}
+	if px < 0 || px >= fbW {
+		return
+	}
+	if px+w > fbW {
+		w = fbW - px
+	}
+	if py+t.ch > fbH {
+		return
+	}
 	for yy := 0; yy < t.ch; yy++ {
 		dst := (py+yy)*fbW + px
 		src := yy * w

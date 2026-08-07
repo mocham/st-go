@@ -642,3 +642,143 @@ func TestActualRowsColsMatchesWindow(t *testing.T) {
 	}
 	t.Logf("actualRowsCols=%dx%d cfg=%dx%d", rows, cols, cfg.Rows, cfg.Cols)
 }
+
+// TestClipboardRoundTrip: the terminal claims CLIPBOARD; a second client
+// requests it and must receive the text. Regression for the selrequest bug
+// where the SelectionNotify advertised e.Property (None) instead of the
+// resolved property, breaking copy.
+func TestClipboardRoundTrip(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_cliprt", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	trm.loadInputConfig(cfg)
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+
+	trm.selectionText = "HELLO_CLIP"
+	xproto.SetSelectionOwner(trm.conn, trm.win, trm.atoms["CLIPBOARD"], xproto.TimeCurrentTime)
+
+	req, err := xgb.NewConnDisplay(":0")
+	if err != nil {
+		t.Skipf("req conn: %v", err)
+	}
+	defer req.Close()
+	scr := xproto.Setup(req).DefaultScreen(req)
+	clipAtom, _ := xproto.InternAtom(req, true, 9, "CLIPBOARD").Reply()
+	utf8Atom, _ := xproto.InternAtom(req, true, 11, "UTF8_STRING").Reply()
+	wid, _ := xproto.NewWindowId(req)
+	xproto.CreateWindow(req, scr.RootDepth, wid, scr.Root, 0, 0, 1, 1, 0,
+		xproto.WindowClassInputOutput, scr.RootVisual, 0, nil)
+	req.Sync()
+	xproto.ConvertSelection(req, wid, clipAtom.Atom, utf8Atom.Atom, 0, xproto.TimeCurrentTime)
+
+	go func() {
+		for {
+			ev, err := trm.conn.WaitForEvent()
+			if err != nil || ev == nil {
+				return
+			}
+			if se, ok := ev.(xproto.SelectionRequestEvent); ok {
+				trm.selrequest(se)
+			}
+		}
+	}()
+
+	for {
+		ev, err := req.WaitForEvent()
+		if err != nil || ev == nil {
+			t.Fatalf("req conn error: %v", err)
+		}
+		if sn, ok := ev.(xproto.SelectionNotifyEvent); ok {
+			if sn.Property == 0 {
+				t.Fatalf("selection notify property is 0 (transfer failed)")
+			}
+			gp, _ := xproto.GetProperty(req, false, wid, sn.Property, 0, 0, 1024).Reply()
+			if gp == nil || string(gp.Value) != "HELLO_CLIP" {
+				t.Fatalf("wrong text: %q", gp.Value)
+			}
+			return
+		}
+	}
+}
+
+// TestClipboardPaste: another client owns CLIPBOARD; the terminal's clippaste
+// + selnotify must write the text to the pty. Regression for paste.
+func TestClipboardPaste(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_clippaste", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	trm.loadInputConfig(cfg)
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+	written := []byte{}
+	core.SetWriter(func(b []byte) { written = append(written, b...) })
+
+	owner, err := xgb.NewConnDisplay(":0")
+	if err != nil {
+		t.Skipf("owner conn: %v", err)
+	}
+	defer owner.Close()
+	scr := xproto.Setup(owner).DefaultScreen(owner)
+	owin, _ := xproto.NewWindowId(owner)
+	xproto.CreateWindow(owner, scr.RootDepth, owin, scr.Root, 0, 0, 1, 1, 0,
+		xproto.WindowClassInputOutput, scr.RootVisual, 0, nil)
+	owner.Sync()
+	clipAtom, _ := xproto.InternAtom(owner, true, 9, "CLIPBOARD").Reply()
+	utf8Atom, _ := xproto.InternAtom(owner, true, 11, "UTF8_STRING").Reply()
+	xproto.SetSelectionOwner(owner, owin, clipAtom.Atom, xproto.TimeCurrentTime)
+	owner.Sync()
+
+	trm.clippaste()
+	trm.conn.Sync()
+
+	go func() {
+		for {
+			ev, err := owner.WaitForEvent()
+			if err != nil || ev == nil {
+				return
+			}
+			if se, ok := ev.(xproto.SelectionRequestEvent); ok {
+				prop := se.Property
+				if prop == 0 {
+					prop = se.Target
+				}
+				xproto.ChangeProperty(owner, xproto.PropModeReplace, se.Requestor,
+					prop, utf8Atom.Atom, 8, uint32(len("PASTE_ME")), []byte("PASTE_ME"))
+				xproto.SendEvent(owner, false, se.Requestor, 0,
+					string(xproto.SelectionNotifyEvent{
+						Time: se.Time, Requestor: se.Requestor, Selection: se.Selection,
+						Target: se.Target, Property: prop,
+					}.Bytes()))
+				owner.Sync()
+			}
+		}
+	}()
+
+	for {
+		ev, err := trm.conn.WaitForEvent()
+		if err != nil || ev == nil {
+			t.Fatalf("trm conn: %v", err)
+		}
+		if sn, ok := ev.(xproto.SelectionNotifyEvent); ok {
+			trm.selnotify(sn)
+			trm.conn.Sync()
+			break
+		}
+	}
+	if string(written) != "PASTE_ME" {
+		t.Fatalf("paste text %q != PASTE_ME", string(written))
+	}
+}

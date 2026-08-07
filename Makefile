@@ -27,7 +27,7 @@ STB_C       = third_party_wrapper/stb_image.c
 STB_URL     = https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 
 BIN         = st
-CFG         = config.json
+CFG         = config/config.json
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
 LDFLAGS     = -linkmode external -extldflags "-static"
@@ -70,7 +70,7 @@ $(STB_H):
 
 # --- st -----------------------------------------------------------------
 $(BIN): $(FT_A) $(STB_O) $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
-        $(wildcard ptyutil/*.go) $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h)
+        $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h)
 	go build -o "$(BIN)" -ldflags "$(LDFLAGS)" .
 
 install: $(BIN)

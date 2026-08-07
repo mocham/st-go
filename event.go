@@ -35,6 +35,9 @@ func (t *Terminal) run(termCore *term.Term) {
 	for {
 		ev, err := t.conn.WaitForEvent()
 		if err != nil {
+			if t.closed() {
+				return
+			}
 			log.Printf("x: %v", err)
 			continue
 		}
@@ -75,11 +78,22 @@ func (t *Terminal) handleEvent(ev xgb.Event) {
 	case xproto.ConfigureNotifyEvent:
 		t.resize(int(e.Width), int(e.Height))
 	case xproto.FocusInEvent:
+		// st: ignore grab/ungrab focus changes (NotifyGrab=1, NotifyUngrab=2)
+		if e.Mode == 1 || e.Mode == 2 {
+			break
+		}
 		t.setWinMode(true, term.ModeFocused)
-		t.termCore.Redraw()
+		if t.termCore.WinMode()&term.ModeFocus != 0 {
+			t.termCore.WriteToTTY([]byte("\x1b[I"), false)
+		}
 	case xproto.FocusOutEvent:
+		if e.Mode == 1 || e.Mode == 2 {
+			break
+		}
 		t.setWinMode(false, term.ModeFocused)
-		t.termCore.Redraw()
+		if t.termCore.WinMode()&term.ModeFocus != 0 {
+			t.termCore.WriteToTTY([]byte("\x1b[O"), false)
+		}
 	case xproto.ClientMessageEvent:
 		if e.Type == t.atoms["WM_PROTOCOLS"] &&
 			xproto.Atom(e.Data.Data32[0]) == t.atoms["WM_DELETE_WINDOW"] {
@@ -110,6 +124,7 @@ func (t *Terminal) resize(w, h int) {
 	}
 	t.cols, t.rows = newCols, newRows
 	ensureFramebuffer(w, h)
+	t.clearFramebuffer() // st's xresize -> xclear: fill the new buffer with bg
 	t.termCore.Tresize(newCols, newRows)
 	// propagate the new size to the pty so the app (vim, etc.) sees it
 	if t.ttyResize != nil {

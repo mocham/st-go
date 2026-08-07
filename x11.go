@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/BurntSushi/xgb"
@@ -48,6 +49,8 @@ type Terminal struct {
 
 	colors []Color
 
+	cfg *config.Config
+
 	title       string
 	iconTitle   string
 	cursorShape int
@@ -80,7 +83,15 @@ type Terminal struct {
 
 	selectionText string
 
-	mu sync.Mutex
+	mu       sync.Mutex
+	isClosed int32
+}
+
+// closed reports whether the terminal connection has been closed (e.g. the
+// WM_DELETE_WINDOW handler), so the event loop can stop instead of spinning
+// on the dead connection.
+func (t *Terminal) closed() bool {
+	return atomic.LoadInt32(&t.isClosed) != 0
 }
 
 // shortcut from config
@@ -146,6 +157,7 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 		conn:        xc,
 		xu:          xu,
 		scr:         scr,
+		cfg:         cfg,
 		cols:        int(cfg.Cols),
 		rows:        int(cfg.Rows),
 		cw:          cw,
@@ -202,7 +214,8 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 			xproto.EventMaskKeyRelease | xproto.EventMaskStructureNotify |
 			xproto.EventMaskButtonPress | xproto.EventMaskButtonRelease |
 			xproto.EventMaskButtonMotion | xproto.EventMaskPointerMotion |
-			xproto.EventMaskFocusChange | xproto.EventMaskVisibilityChange),
+			xproto.EventMaskFocusChange | xproto.EventMaskVisibilityChange |
+			xproto.EventMaskPropertyChange),
 	}
 	// Unchecked CreateWindow + all identity properties in ONE request batch,
 	// before any round-trip. The tiling WM (gowinmgr) receives CreateNotify
@@ -445,7 +458,14 @@ func (t *Terminal) setTitle(s string) {
 
 func (t *Terminal) SetMode(set bool, mode uint) { t.setWinMode(set, mode) }
 func (t *Terminal) SetPointerMotion(on bool)      {}
-func (t *Terminal) LoadCols()                     {}
+
+// LoadCols mirrors st's xloadcols(): reset the palette to config defaults.
+func (t *Terminal) LoadCols() {
+	if t.cfg == nil {
+		return
+	}
+	t.loadColors(t.cfg)
+}
 
 func (t *Terminal) SetCursor(shape int) bool {
 	// st's xsetcursor returns 0 on success, 1 on error. The Hooks bool
@@ -458,11 +478,16 @@ func (t *Terminal) SetCursor(shape int) bool {
 }
 
 func (t *Terminal) setWinMode(set bool, mode uint) {
-	// mirror into a field; called from term core via hook
+	old := t.winMode
 	if set {
 		t.winMode |= mode
 	} else {
 		t.winMode &^= mode
+	}
+	// st's xsetmode redraws when the reverse-video mode changes.
+	if (t.winMode&term.ModeReverse) != (old&term.ModeReverse) &&
+		t.termCore != nil {
+		t.termCore.Redraw()
 	}
 }
 
@@ -476,6 +501,7 @@ func uint32Bytes(v uint32) []byte {
 }
 
 func (t *Terminal) Close() {
+	atomic.StoreInt32(&t.isClosed, 1)
 	if t.pixmap != 0 {
 		xproto.FreePixmap(t.conn, t.pixmap)
 	}
