@@ -782,3 +782,88 @@ func TestClipboardPaste(t *testing.T) {
 		t.Fatalf("paste text %q != PASTE_ME", string(written))
 	}
 }
+
+// TestDcsSetPwdResolves: the image-viewer script emits "setpwd '<dir>'" then
+// relative "open './x.png'". The terminal must resolve the relative path
+// against the recorded pwd even when its own CWD differs. Regression for the
+// all-black image viewer caused by relative paths resolving against st's CWD.
+func TestDcsSetPwdResolves(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_pwd", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+
+	// a tiny 1x1 PNG (red) written to a temp dir; relative path via setpwd
+	dir := t.TempDir()
+	png := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02,
+		0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xD7, 0x63, 0xF8, 0xFF, 0xFF, 0x3F, 0x00, 0x05, 0xFE, 0x02, 0xFE, 0xDC,
+		0xCC, 0x59, 0xE7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60,
+		0x82}
+	if err := os.WriteFile(dir+"/pic.png", png, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	core.Twrite([]byte("\x1bPsetpwd '"+dir+"'\x1b\\"), false)
+	core.Twrite([]byte("\x1bPopen './pic.png' fit-height\x1b\\"), false)
+	core.Redraw()
+	found := false
+	for y := 0; y < core.Rows(); y++ {
+		for x := 0; x < core.Cols(); x++ {
+			if core.LineAt(x, y).U == term.ImageRune {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("setpwd + relative path did not decode image")
+	}
+}
+
+// TestDcsGlobPath: the DSL must expand a wildcard image path (as a shell
+// would) so a script may pass './*.png' literally.
+func TestDcsGlobPath(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_glob", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+	dir := t.TempDir()
+	png := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02,
+		0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xD7, 0x63, 0xF8, 0xFF, 0xFF, 0x3F, 0x00, 0x05, 0xFE, 0x02, 0xFE, 0xDC,
+		0xCC, 0x59, 0xE7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60,
+		0x82}
+	if err := os.WriteFile(dir+"/pic.png", png, 0644); err != nil {
+		t.Fatal(err)
+	}
+	core.Twrite([]byte("\x1bPsetpwd '"+dir+"'\x1b\\"), false)
+	core.Twrite([]byte("\x1bPopen './*.png' fit-height\x1b\\"), false)
+	core.Redraw()
+	found := false
+	for y := 0; y < core.Rows(); y++ {
+		for x := 0; x < core.Cols(); x++ {
+			if core.LineAt(x, y).U == term.ImageRune {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("wildcard path './*.png' did not expand and decode")
+	}
+}

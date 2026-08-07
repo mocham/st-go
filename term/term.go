@@ -206,6 +206,7 @@ type Term struct {
 	strescseq STREscape
 
 	// image display (DCS DSL)
+	pwd string // base directory for relative image paths (setpwd)
 
 	// writer receives bytes destined for the pty (set by the frontend).
 	writer func([]byte)

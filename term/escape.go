@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -579,6 +580,8 @@ func (t *Term) dcs() {
 		switch args[0] {
 		case "open":
 			t.dslOpen(args[1:])
+		case "setpwd":
+			t.dslSetPwd(args[1:])
 		case "clear":
 			t.dslClear()
 		case "delete":
@@ -587,6 +590,59 @@ func (t *Term) dcs() {
 			log.Printf("dsl: unknown command %q\n", args[0])
 		}
 	}
+}
+
+// dslSetPwd records the shell's current working directory so relative image
+// paths in subsequent "open" commands resolve against it (the terminal has
+// no idea what the shell's PWD is). A leading "~" is expanded to $HOME.
+func (t *Term) dslSetPwd(args []string) {
+	if len(args) == 0 {
+		return
+	}
+	p := args[0]
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			if p == "~" {
+				p = home
+			} else {
+				p = home + p[1:]
+			}
+		}
+	}
+	t.pwd = p
+}
+
+// resolveImagePath resolves a path from an "open" command against the pwd set
+// by "setpwd" (falling back to the terminal's own CWD). Handles "~", relative,
+// absolute and glob (wildcard) paths.
+func (t *Term) resolveImagePath(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			if p == "~" {
+				return home
+			}
+			return home + p[1:]
+		}
+	}
+	if !filepath.IsAbs(p) {
+		base := t.pwd
+		if base == "" {
+			if wd, err := os.Getwd(); err == nil {
+				base = wd
+			} else {
+				base = "."
+			}
+		}
+		p = filepath.Join(base, p)
+	}
+	// expand a wildcard if present (like the shell would have done): use the
+	// first match so the DSL accepts a glob path even when passed literally.
+	if strings.ContainsAny(p, "*?[") {
+		if matches, err := filepath.Glob(p); err == nil && len(matches) > 0 {
+			return matches[0]
+		}
+	}
+	return p
 }
 
 // dslOpen loads an image file and displays it. Options (in any order after
@@ -601,7 +657,7 @@ func (t *Term) dslOpen(args []string) {
 		log.Printf("dsl: open requires a path\n")
 		return
 	}
-	path := args[0]
+	path := t.resolveImagePath(args[0])
 	fitW, fitH := false, false
 	for _, a := range args[1:] {
 		switch a {
