@@ -29,10 +29,25 @@ func buttonmask(btn byte) uint {
 	return 1 << (btn - 1)
 }
 
+// evcol/evrow mirror st's evcol/evrow: clamp the pointer position to the
+// window area before dividing by cell size, so clicks near (or past) the
+// window edges never yield out-of-bounds cell coordinates (st: LIMIT(x,0,tw-1)).
+func (t *Terminal) evcol(px int) int {
+	x := px - t.borderpx
+	x = clampInt(x, 0, t.cols*t.cw-1)
+	return x / t.cw
+}
+
+func (t *Terminal) evrow(py int) int {
+	y := py - t.borderpx
+	y = clampInt(y, 0, t.rows*t.ch-1)
+	return y / t.ch
+}
+
 func (t *Terminal) bpress(e xproto.ButtonPressEvent) {
 	btn := byte(e.Detail)
-	x := (int(e.EventX) - t.borderpx) / t.cw
-	y := (int(e.EventY) - t.borderpx) / t.ch
+	x := t.evcol(int(e.EventX))
+	y := t.evrow(int(e.EventY))
 
 	if 1 <= btn && btn <= 11 {
 		buttons |= buttonmask(btn)
@@ -64,8 +79,8 @@ func (t *Terminal) bpress(e xproto.ButtonPressEvent) {
 }
 
 func (t *Terminal) bmotion(e xproto.MotionNotifyEvent) {
-	x := (int(e.EventX) - t.borderpx) / t.cw
-	y := (int(e.EventY) - t.borderpx) / t.ch
+	x := t.evcol(int(e.EventX))
+	y := t.evrow(int(e.EventY))
 
 	if t.termCore.WinMode()&term.ModeMouse != 0 && e.State&t.forceMouseMod == 0 {
 		t.mousereport(0, e.State, x, y, evMotion)
@@ -85,8 +100,8 @@ func (t *Terminal) bmotion(e xproto.MotionNotifyEvent) {
 
 func (t *Terminal) brelease(e xproto.ButtonReleaseEvent) {
 	btn := byte(e.Detail)
-	x := (int(e.EventX) - t.borderpx) / t.cw
-	y := (int(e.EventY) - t.borderpx) / t.ch
+	x := t.evcol(int(e.EventX))
+	y := t.evrow(int(e.EventY))
 
 	if 1 <= btn && btn <= 11 {
 		buttons &^= buttonmask(btn)

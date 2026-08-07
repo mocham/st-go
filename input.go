@@ -274,13 +274,19 @@ func (t *Terminal) lookupString(ks uint, ctrl bool) ([]byte, int) {
 		return []byte{byte(ks)}, 1
 	case ks >= 0xA0 && ks <= 0xFF:
 		return []byte{byte(ks)}, 1 // Latin-1 supplement (ISO-8859-1)
+	case ks == XKEscape: // 0xFF1B: ESC -> \033 (XLookupString behavior)
+		return []byte{0x1b}, 1
+	case ks == XKTab: // 0xFF09: Tab -> \t
+		return []byte{0x09}, 1
+	case ks == XKReturn: // 0xFF0D: Return -> \r (fallback, keymap usually matches)
+		return []byte{0x0d}, 1
 	case ks >= 0x100 && ks <= 0x10FFFF && !(ks >= 0xFE00 && ks <= 0xFFFF):
 		var buf [4]byte
 		n := encodeUTF8(buf[:], rune(ks))
 		return buf[:n], n
 	default:
-		// Function keys (0xFE00-0xFFFF), modifiers, and controls
-		// produce no text.
+		// Function keys (0xFE00-0xFFFF) other than the ASCII-mapped ones
+		// above, modifiers, and controls produce no text.
 		return nil, 0
 	}
 }

@@ -20,8 +20,6 @@ const Version = "0.9.2"
 func main() {
 	var cfgPath string
 	flag.StringVar(&cfgPath, "config", "config.json", "path to JSON config")
-	var shell string
-	flag.StringVar(&shell, "e", "", "command to execute")
 	var glyphOut string
 	flag.StringVar(&glyphOut, "glyphtest", "", "render a glyph to PPM and exit")
 	var dumpText string
@@ -32,6 +30,36 @@ func main() {
 	flag.BoolVar(&version, "v", false, "print version and exit")
 	var fontFile string
 	flag.StringVar(&fontFile, "f", "", "use the given .ttf/.otf font file instead of the embedded one")
+	var title string
+	flag.StringVar(&title, "t", "", "window title")
+	flag.StringVar(&title, "T", "", "window title")
+	var name string
+	flag.StringVar(&name, "n", "", "window name")
+	var class string
+	flag.StringVar(&class, "c", "", "window class")
+	var geometry string
+	flag.StringVar(&geometry, "g", "", "geometry WxH+X+Y (columns x rows + x + y)")
+	var noAlt bool
+	flag.BoolVar(&noAlt, "a", false, "disable the alternate screen buffer")
+	var fixed bool
+	flag.BoolVar(&fixed, "i", false, "keep the window at a fixed size")
+
+	// -e consumes ALL remaining arguments as the command + its args
+	// (st: `goto run; opt_cmd = argv`). Split the args at -e.
+	var cmdArgs []string
+	var preArgs []string
+	args := os.Args[1:]
+	for i, a := range args {
+		if a == "-e" || a == "--e" {
+			cmdArgs = args[i+1:]
+			preArgs = args[:i]
+			break
+		}
+	}
+	if cmdArgs == nil {
+		preArgs = args
+	}
+	os.Args = append([]string{os.Args[0]}, preArgs...)
 	flag.Parse()
 
 	if version {
@@ -45,8 +73,51 @@ func main() {
 		cfg = config.Default()
 	}
 
+	if noAlt {
+		cfg.AllowAltScreen = false
+	}
+	// -n name sets the instance (res_name); -c sets the class (res_class)
+	className := cfg.Termname
+	if class != "" {
+		className = class
+	}
+	instanceName := cfg.Termname
+	if name != "" {
+		instanceName = name
+	}
+
+	// -g geometry: cols x rows + x + y (follows st/XParseGeometry)
+	var gx, gy int
+	var geomMask XGeometryMask
+	if geometry != "" {
+		cfgCols := int(cfg.Cols)
+		cfgRows := int(cfg.Rows)
+		geomMask = parseGeometry(geometry, &cfgCols, &cfgRows, &gx, &gy)
+		if geomMask&WidthValue != 0 {
+			cfg.Cols = uint(cfgCols)
+		}
+		if geomMask&HeightValue != 0 {
+			cfg.Rows = uint(cfgRows)
+		}
+		if geomMask&XValue == 0 {
+			gx = 0
+		}
+		if geomMask&YValue == 0 {
+			gy = 0
+		}
+	}
+
+	// default title: the -e command name if given, else "tile_terminal" (st)
+	if title == "" {
+		if len(cmdArgs) > 0 {
+			title = cmdArgs[0]
+		} else {
+			title = "tile_terminal"
+		}
+	}
+
 	if dumpText != "" {
-		dumpShellText(cfg, shell, dumpText)
+		dumpShellText(cfg, cmdArgs, dumpText)
 		return
 	}
 
@@ -78,7 +149,7 @@ func main() {
 		return
 	}
 
-	t, err := NewTerminalRatio(cfg, ratio)
+	t, err := NewTerminalOpts(cfg, ratio, gx, gy, geomMask, title, instanceName, className, fixed)
 	if err != nil {
 		log.Fatalf("x11: %v", err)
 	}
@@ -95,11 +166,22 @@ func main() {
 	}
 	defer master.Close()
 
-	prog, env, err := ResolveShell(cfg, shell)
-	if err != nil {
-		log.Fatalf("shell: %v", err)
+	// spawn: -e cmd args... runs that command; else resolve the shell
+	var cmdline []string
+	var env []string
+	if len(cmdArgs) > 0 {
+		// st's execsh: prog = args[0], execvp(prog, args)
+		cmdline = cmdArgs
+		env = append(os.Environ(), "TERM="+cfg.Termname)
+	} else {
+		var prog string
+		prog, env, err = ResolveShell(cfg, "")
+		if err != nil {
+			log.Fatalf("shell: %v", err)
+		}
+		cmdline = []string{prog}
 	}
-	child, err := ptyutil.Start(slave, []string{prog}, env)
+	child, err := ptyutil.Start(slave, cmdline, env)
 	if err != nil {
 		log.Fatalf("spawn: %v", err)
 	}
@@ -147,7 +229,7 @@ func main() {
 // dumpShellText runs the configured shell through a pty and the term core
 // (no X window), printing the first screen rows as text. Used for debugging
 // what the shell actually sends (e.g. PS1 expansion).
-func dumpShellText(cfg *config.Config, shell string, outFile string) {
+func dumpShellText(cfg *config.Config, cmdArgs []string, outFile string) {
 	trm := &Terminal{}
 	core := term.NewTerm(cfg, trm)
 	trm.termCore = core
@@ -158,12 +240,20 @@ func dumpShellText(cfg *config.Config, shell string, outFile string) {
 	}
 	defer master.Close()
 
-	cmdline := shell
-	prog, env, err := ResolveShell(cfg, cmdline)
-	if err != nil {
-		log.Fatalf("shell: %v", err)
+	var cmdline []string
+	var env []string
+	if len(cmdArgs) > 0 {
+		cmdline = cmdArgs
+		env = append(os.Environ(), "TERM="+cfg.Termname)
+	} else {
+		var prog string
+		prog, env, err = ResolveShell(cfg, "")
+		if err != nil {
+			log.Fatalf("shell: %v", err)
+		}
+		cmdline = []string{prog}
 	}
-	child, err := ptyutil.Start(slave, []string{prog}, env)
+	child, err := ptyutil.Start(slave, cmdline, env)
 	if err != nil {
 		log.Fatalf("spawn: %v", err)
 	}

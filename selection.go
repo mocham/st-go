@@ -22,9 +22,15 @@ func (t *Terminal) SetIconTitle(s string) {
 		return
 	}
 	t.iconTitle = s
+	// st sets WM_ICON_NAME and _NET_WM_ICON_NAME (xseticontitle)
 	_ = xproto.ChangePropertyChecked(t.conn, xproto.PropModeReplace, t.win,
 		t.atoms["WM_ICON_NAME"], t.atoms["UTF8_STRING"], 8,
 		uint32(len(s)), []byte(s)).Check()
+	if t.atoms["_NET_WM_ICON_NAME"] != 0 {
+		_ = xproto.ChangePropertyChecked(t.conn, xproto.PropModeReplace, t.win,
+			t.atoms["_NET_WM_ICON_NAME"], t.atoms["UTF8_STRING"], 8,
+			uint32(len(s)), []byte(s)).Check()
+	}
 }
 
 func (t *Terminal) SetTitle(s string) { t.setTitle(s) }
