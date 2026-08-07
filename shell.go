@@ -33,14 +33,53 @@ func ResolveShell(cfg *config.Config, cmdline string) (prog string, env []string
 		prog = cmdline
 	}
 
-	env = append(os.Environ(),
-		"LOGNAME="+pw.Username,
-		"USER="+pw.Username,
-		"SHELL="+prog,
-		"HOME="+pw.HomeDir,
-		"TERM="+cfg.Termname,
-	)
+	env = stChildEnv(cfg.Termname)
 	return prog, env, nil
+}
+
+// stChildEnv builds the child environment like st's execsh: it unsets
+// COLUMNS, LINES and TERMCAP so the child queries the pty size via TIOCGWINSZ
+// instead of inheriting a stale size (this is what makes vim lay out its
+// screen for the actual terminal rows/cols), then sets the identity vars.
+func stChildEnv(termname string) []string {
+	env := os.Environ()
+	env = envWithout(env, "COLUMNS", "LINES", "TERMCAP")
+	pw, err := user.Current()
+	uname, home := "", ""
+	if err == nil {
+		uname, home = pw.Username, pw.HomeDir
+	}
+	env = append(env,
+		"LOGNAME="+uname,
+		"USER="+uname,
+		"HOME="+home,
+		"TERM="+termname,
+	)
+	return env
+}
+
+// envWithout returns env with the named variables removed (their final value,
+// so a later set wins).
+func envWithout(env []string, names ...string) []string {
+	drop := make(map[string]bool, len(names))
+	for _, n := range names {
+		drop[n] = true
+	}
+	out := env[:0:0]
+	for _, kv := range env {
+		eq := -1
+		for i := 0; i < len(kv); i++ {
+			if kv[i] == '=' {
+				eq = i
+				break
+			}
+		}
+		if eq > 0 && drop[kv[:eq]] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // passwdShell returns the login shell for username from /etc/passwd.

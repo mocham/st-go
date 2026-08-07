@@ -407,6 +407,26 @@ func gravityForMask(mask XGeometryMask) int {
 	}
 }
 
+// actualRowsCols queries the live window geometry and computes the effective
+// rows/cols like st's cresize. This lets main() size the pty to the window's
+// real dimensions (after any WM tiling) so the child (vim, shells) sees the
+// correct TIOCGWINSZ instead of a stale config default.
+func (t *Terminal) actualRowsCols() (rows, cols int) {
+	rep, err := xproto.GetGeometry(t.conn, xproto.Drawable(t.win)).Reply()
+	if err != nil {
+		return t.rows, t.cols
+	}
+	cols = (int(rep.Width) - 2*t.borderpx) / t.cw
+	rows = (int(rep.Height) - 2*t.borderpx) / t.ch
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	return rows, cols
+}
+
 func (t *Terminal) setTitle(s string) {
 	if s == "" {
 		return

@@ -166,13 +166,21 @@ func main() {
 	}
 	defer master.Close()
 
+	// st sizes the pty to the actual mapped window (run() waits for MapNotify
+	// then cresize(w,h) -> ttyresize) so the child's TIOCGWINSZ matches the
+	// real window (post-WM-tiling) rather than a stale config default.
+	rows, cols := t.actualRowsCols()
+	if err := ptyutil.SetWinSize(master, rows, cols); err != nil {
+		log.Printf("pty: set size: %v", err)
+	}
+
 	// spawn: -e cmd args... runs that command; else resolve the shell
 	var cmdline []string
 	var env []string
 	if len(cmdArgs) > 0 {
 		// st's execsh: prog = args[0], execvp(prog, args)
 		cmdline = cmdArgs
-		env = append(os.Environ(), "TERM="+cfg.Termname)
+		env = stChildEnv(cfg.Termname)
 	} else {
 		var prog string
 		prog, env, err = ResolveShell(cfg, "")
@@ -201,7 +209,6 @@ func main() {
 	t.ttyResize = func(rows, cols int) {
 		ptyutil.SetWinSize(master, rows, cols)
 	}
-	ptyutil.SetWinSize(master, int(cfg.Rows), int(cfg.Cols))
 
 	// pty reader goroutine; terminal access is serialized with t.mu
 	go func() {
@@ -244,7 +251,7 @@ func dumpShellText(cfg *config.Config, cmdArgs []string, outFile string) {
 	var env []string
 	if len(cmdArgs) > 0 {
 		cmdline = cmdArgs
-		env = append(os.Environ(), "TERM="+cfg.Termname)
+		env = stChildEnv(cfg.Termname)
 	} else {
 		var prog string
 		prog, env, err = ResolveShell(cfg, "")

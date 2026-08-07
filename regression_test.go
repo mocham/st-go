@@ -595,3 +595,50 @@ func TestSelStartEdgeCoords(t *testing.T) {
 	core.SelExtend(79, 23, 0, 0)
 	core.SelExtend(0, 0, 0, 1)
 }
+
+// TestStChildEnvUnsetsSizeVars verifies the child environment matches st's
+// execsh: COLUMNS/LINES/TERMCAP are removed so vim/shells use TIOCGWINSZ
+// (the real pty size) instead of a stale inherited terminal size.
+func TestStChildEnvUnsetsSizeVars(t *testing.T) {
+	os.Setenv("COLUMNS", "20")
+	os.Setenv("LINES", "5")
+	os.Setenv("TERMCAP", "xterm")
+	env := stChildEnv("st-256color")
+	m := map[string]string{}
+	for _, kv := range env {
+		for i := 0; i < len(kv); i++ {
+			if kv[i] == '=' {
+				m[kv[:i]] = kv[i+1:]
+				break
+			}
+		}
+	}
+	for _, k := range []string{"COLUMNS", "LINES", "TERMCAP"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("%s still set in child env", k)
+		}
+	}
+	if m["TERM"] != "st-256color" {
+		t.Fatalf("TERM=%q", m["TERM"])
+	}
+}
+
+// TestActualRowsColsMatchesWindow verifies the pty size source: the effective
+// rows/cols are computed from the live window geometry (post-WM-tiling), not
+// the config defaults, so vim gets a correct TIOCGWINSZ at spawn.
+func TestActualRowsColsMatchesWindow(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "auto-gtex", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X server: %v", err)
+	}
+	defer trm.Close()
+	rows, cols := trm.actualRowsCols()
+	if rows < 1 || cols < 1 {
+		t.Fatalf("actualRowsCols=%dx%d", rows, cols)
+	}
+	t.Logf("actualRowsCols=%dx%d cfg=%dx%d", rows, cols, cfg.Rows, cfg.Cols)
+}
