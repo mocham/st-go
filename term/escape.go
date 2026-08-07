@@ -3,7 +3,9 @@ package term
 import (
 	"fmt"
 	"log"
+	"os"
 	"strconv"
+	"strings"
 )
 
 func (t *Term) tdefcolor(attr []int, npar int, l int) (int32, int) {
@@ -223,8 +225,13 @@ func (t *Term) csihandle() {
 	arg := t.csiescseq.arg
 	narg := t.csiescseq.narg
 	get := func(i, d int) int {
+		// st's DEFAULT(arg, 1) semantics: an absent or zero argument
+		// falls back to the default (used for cursor movements etc.).
 		if i < narg {
-			return arg[i]
+			if arg[i] != 0 || d == 0 {
+				return arg[i]
+			}
+			return d
 		}
 		return d
 	}
@@ -505,7 +512,12 @@ func (t *Term) strhandle() {
 			t.xsettitle(t.strescseq.args[0])
 		}
 		return
-	case 'P', '_', '^':
+	case '_', '^':
+		// APC / PM: ignored
+		return
+	case 'P':
+		// DCS: image/display DSL (device control string)
+		t.dcs()
 		return
 	}
 	log.Printf("erresc: unknown str ")
@@ -526,6 +538,190 @@ func (t *Term) strparse() {
 		t.strescseq.args = append(t.strescseq.args, p)
 		t.strescseq.narg++
 	}
+}
+
+// dcs handles a DCS (device control string) payload as a small display DSL.
+//
+//   ESC P <statement>; <statement>; ... ESC \
+//
+// Each statement is `command args...`; a statement ends with ';'. Quoted
+// strings ('...' or "...") keep spaces inside a single argument. Unknown
+// commands are ignored, so the DSL is forward-extensible.
+//
+// Supported commands:
+//   open '<path>' [col row]   load and display an image file at the cursor
+//                             (or at an explicit cell position)
+//   clear                     remove all images and placements
+//   delete <id>               remove one transmitted image
+func (t *Term) dcs() {
+	stmt := string(t.strescseq.buf)
+	// split into statements on ';'
+	for len(stmt) > 0 {
+		i := indexByteStr(stmt, ';')
+		var one string
+		if i < 0 {
+			one = stmt
+			stmt = ""
+		} else {
+			one = stmt[:i]
+			stmt = stmt[i+1:]
+		}
+		one = strings.TrimSpace(one)
+		if one == "" {
+			continue
+		}
+		args := dslTokenize(one)
+		if len(args) == 0 {
+			continue
+		}
+		switch args[0] {
+		case "open":
+			t.dslOpen(args[1:])
+		case "clear":
+			t.dslClear()
+		case "delete":
+			t.dslDelete(args[1:])
+		default:
+			log.Printf("dsl: unknown command %q\n", args[0])
+		}
+	}
+}
+
+// dslOpen loads an image file and displays it. Options (in any order after
+// the path):
+//   fit-width     scale the image to the terminal width
+//   fit-height    clear the screen, then scale to the terminal height
+// Without a fit option the image is shown at its native cell size.
+// The image is written row by row at the cursor, advancing the cursor (and
+// scrolling at the bottom) exactly like text.
+func (t *Term) dslOpen(args []string) {
+	if len(args) == 0 {
+		log.Printf("dsl: open requires a path\n")
+		return
+	}
+	path := args[0]
+	fitW, fitH := false, false
+	for _, a := range args[1:] {
+		switch a {
+		case "fit-width":
+			fitW = true
+		case "fit-height":
+			fitH = true
+		}
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("dsl: open %q: %v\n", path, err)
+		return
+	}
+	cols, rows, glyphs, ok := t.hooks.ImageDecode(data, fitW, fitH)
+	if !ok {
+		log.Printf("dsl: failed to decode %q\n", path)
+		return
+	}
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+
+	// fit-height clears the screen and starts at the top
+	if fitH {
+		t.tclearregion(0, 0, t.col-1, t.row-1)
+		t.tmoveto(0, 0)
+	}
+
+	// write each row of the image at the cursor, advancing like text
+	startX := t.c.x
+	for gy := 0; gy < rows; gy++ {
+		for gx := 0; gx < cols; gx++ {
+			if t.c.x+gx >= t.col {
+				break
+			}
+			// image-cell glyph: plain value with U=ImageRune and the cell's
+			// pixel-block address packed in Fg
+			idx := gy*cols + gx
+			if idx >= len(glyphs) {
+				break
+			}
+			t.tsetchar(glyphs[idx].U, &glyphs[idx], t.c.x+gx, t.c.y)
+		}
+		// advance to the next row, scrolling at the bottom like a newline;
+		// skip the advance after the final row so the last row stays put
+		if gy == rows-1 {
+			break
+		}
+		if t.c.y == t.bot {
+			t.tscrollup(t.top, 1)
+		} else {
+			t.tmoveto(startX, t.c.y+1)
+		}
+	}
+	// leave the cursor at the start of the image's last row
+	t.tmoveto(startX, t.c.y)
+	t.tfulldirt()
+}
+
+func (t *Term) dslClear() {
+	// clear the visible screen and drop all cached images
+	t.tclearregion(0, 0, t.col-1, t.row-1)
+	if t.hooks != nil {
+		t.hooks.ImageClearAll()
+	}
+	t.tfulldirt()
+}
+
+func (t *Term) dslDelete(args []string) {
+	// images are broken into glyphs and not retained by id; deleting clears
+	// the screen and atlas
+	t.dslClear()
+}
+
+// imageCellGlyph returns a plain image-cell glyph whose Fg packs the address
+// of the cell's pixel block in the frontend atlas.
+
+// dslTokenize splits a statement into arguments, honoring single- and
+// double-quoted strings and skipping runs of whitespace.
+func dslTokenize(s string) []string {
+	var out []string
+	var cur strings.Builder
+	quote := byte(0)
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			} else {
+				cur.WriteByte(c)
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == ' ' || c == '\t':
+			flush()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	return out
+}
+
+func indexByteStr(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
 }
 
 func splitStr(b []byte, sep byte) []string {

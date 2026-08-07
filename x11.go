@@ -68,6 +68,9 @@ type Terminal struct {
 
 	termCore *term.Term
 
+	// ttyResize is set by main to send TIOCSWINSZ to the pty master.
+	ttyResize func(rows, cols int)
+
 	keys      []keyDef
 	shortcuts []shortcut
 	mshortcuts []mShortcut

@@ -123,6 +123,15 @@ const (
 	strArgSiz  = escArgSiz
 )
 
+// MagicColorTag marks a Glyph fg/bg value as a final, already-resolved ARGB
+// color that must NOT be recolored (bold/faint/reverse/blink). Used by image
+// glyphs, whose cell color is a raw pixel and should be drawn verbatim.
+// ImageRune is the magic rune placed in Glyph.U to mark an image cell. The
+// image is broken into one glyph per cell right after decoding; the Fg/Bg
+// fields of the glyph pack the address of that cell's pixel block in the
+// frontend's image atlas. Glyphs stay plain hashable values.
+const ImageRune rune = 0xF0000
+
 // TrueColor tag: 1<<24 | r<<16 | g<<8 | b
 func TrueColor(r, g, b uint) uint32 { return 1<<24 | uint32(r)<<16 | uint32(g)<<8 | uint32(b) }
 func IsTrueColor(x uint32) bool     { return 1<<24&x != 0 }
@@ -134,7 +143,6 @@ type Glyph struct {
 	Fg   uint32
 	Bg   uint32
 }
-
 type Line []Glyph
 
 // TCursor
@@ -197,6 +205,8 @@ type Term struct {
 	csiescseq CSIEscape
 	strescseq STREscape
 
+	// image display (DCS DSL)
+
 	// writer receives bytes destined for the pty (set by the frontend).
 	writer func([]byte)
 
@@ -221,6 +231,15 @@ type Hooks interface {
 	SetPointerMotion(on bool)
 	SetSel(s string)
 	StartDraw() bool
+
+	// Image support (DCS display DSL).
+	// ImageDecode decodes encoded image bytes and breaks it into one glyph
+	// per terminal cell (U=ImageRune, Fg/Bg packing the cell's pixel-block
+	// address in the frontend atlas). The original image data is freed.
+	// Returns the grid size and the glyphs in row-major order.
+	ImageDecode(encoded []byte, fitW, fitH bool) (cols, rows int, glyphs []Glyph, ok bool)
+	// ImageClearAll clears the image glyph atlas (terminal reset / clear).
+	ImageClearAll()
 }
 
 // utfbyte/mask/min/max tables (port of st.c globals)

@@ -111,5 +111,9 @@ func (t *Terminal) resize(w, h int) {
 	t.cols, t.rows = newCols, newRows
 	ensureFramebuffer(w, h)
 	t.termCore.Tresize(newCols, newRows)
+	// propagate the new size to the pty so the app (vim, etc.) sees it
+	if t.ttyResize != nil {
+		t.ttyResize(newRows, newCols)
+	}
 	t.termCore.Redraw()
 }

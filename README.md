@@ -31,13 +31,57 @@ parser and screen model, and the X11 frontend is built on the pure-Go
 - Mouse reporting (X10, X11, SGR), word/line/rectangular selection
 - Clipboard & PRIMARY selection with INCR transfer, bracketed paste
 - XIM-free keyboard handling with a full Linux-console keymap
+- Inline image display via a DCS display DSL (stb_image decoder)
 - JSON configuration (`config.json`)
+
+## Inline images via the DCS display DSL
+
+st-go can display images inside the terminal. A small, extensible DSL is
+carried in an otherwise-unused escape code, the **DCS** (device control
+string): `ESC P <statements> ESC \`. Each statement is `command args...`
+terminated by `;`, and string arguments may be quoted. Image decoding uses
+[stb_image](https://github.com/nothings/stb), precompiled into
+`third_party/stb/stb_image.o` by the Makefile.
+
+Display an image file at the current cursor position:
+
+```sh
+printf '\033Popen /path/to/image.png;\033\\'
+```
+
+The image is split into a grid of glyphs — one per terminal cell — and placed
+into the screen buffer exactly like text. It is **not resized**; each cell
+shows the average color of the image pixels it covers. The image is written
+row by row, advancing the cursor (and scrolling the screen when the bottom is
+reached), just like text — so it scrolls with the buffer and is overwritten by
+new text.
+
+With a fit option the image is scaled to the terminal (preserving aspect
+ratio):
+
+```sh
+printf '\033Popen /path/to/image.png fit-width;\033\\'   # fit terminal width
+printf '\033Popen /path/to/image.png fit-height;\033\\'  # clear screen, then fit height
+```
+
+`fit-height` clears the screen before drawing so the whole image is visible.
+Without a fit option the image keeps its native cell size.
+
+Supported DSL commands:
+
+| command | meaning |
+|---------|---------|
+| `open '<path>' [fit-width] [fit-height]` | load and display an image file |
+| `clear`                    | clear the screen and remove all images |
+| `delete <id>`              | remove a previously opened image |
+
+Unknown commands are ignored, so the DSL is forward-compatible.
 
 ## Requirements
 
 - Go toolchain (with cgo)
 - A C compiler (`gcc`)
-- `curl` and `tar` (first build only, to fetch FreeType)
+- `curl` and `tar` (first build only, to fetch FreeType + stb_image)
 - A static glibc (`/usr/lib/libc.a`)
 
 ## Build

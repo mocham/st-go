@@ -307,6 +307,9 @@ func (t *Term) tcursor(mode int) {
 }
 
 func (t *Term) treset() {
+	if t.hooks != nil {
+		t.hooks.ImageClearAll()
+	}
 	t.c = TCursor{
 		attr:  Glyph{Mode: ATTRNull, Fg: uint32(t.cfg.DefaultFg), Bg: uint32(t.cfg.DefaultBg)},
 		state: cursorDefault,
@@ -676,3 +679,4 @@ func (t *Term) WinMode() uint { return t.winMode }
 
 // Rows returns the number of screen rows (test/debug helper).
 func (t *Term) Rows() int { return t.row }
+

@@ -126,6 +126,11 @@ func (t *Terminal) DrawLine(line []term.Glyph, x1, y1, x2 int) {
 	t.fillRect(t.defaultBgARGB(), px0, py, w, t.ch)
 	for x := x1; x < x2; x++ {
 		g := line[x]
+		// image cell: blit the raw image pixels (many colors per cell)
+		if g.U == term.ImageRune {
+			t.drawImageCell(g, x, y1)
+			continue
+		}
 		if g.U == 0 || g.Mode&term.ATTRWdummy != 0 {
 			continue
 		}
@@ -145,7 +150,11 @@ func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, ox, oy int, og term.Glyp
 	if t.termCore.Selected(ox, oy) {
 		og.Mode ^= term.ATTRReverse
 	}
-	t.drawGlyphAt(og.U, t.resolveFG(og), t.resolveBG(og), ox, oy, og.Mode&term.ATTRWide != 0)
+	if og.U == term.ImageRune {
+		t.drawImageCell(og, ox, oy)
+	} else {
+		t.drawGlyphAt(og.U, t.resolveFG(og), t.resolveBG(og), ox, oy, og.Mode&term.ATTRWide != 0)
+	}
 
 	if t.winModeIs(term.ModeHide) {
 		return
@@ -184,7 +193,11 @@ func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, ox, oy int, og term.Glyp
 			g.U = 0x2603
 			fallthrough
 		case 0, 1, 2: // block
-			t.drawGlyphAt(g.U, t.resolveFG(g), t.resolveBG(g), cx, cy, g.Mode&term.ATTRWide != 0)
+			if g.U == term.ImageRune {
+				t.drawImageCell(g, cx, cy)
+			} else {
+				t.drawGlyphAt(g.U, t.resolveFG(g), t.resolveBG(g), cx, cy, g.Mode&term.ATTRWide != 0)
+			}
 		case 3, 4: // underline
 			t.fillRect(drawcol, t.borderpx+cx*t.cw,
 				t.borderpx+(cy+1)*t.ch-int(t.cursorThick),

@@ -16,6 +16,16 @@ FT_SRC      = third_party/freetype-$(FT_VERSION)
 FT_TARBALL  = third_party/freetype-$(FT_VERSION).tar.xz
 FT_A        = $(FT_DIR)/libfreetype.a
 
+# stb_image: single-header, downloaded into third_party/ (pure third-party
+# code). The wrapper .c in third_party_wrapper/ (our glue) defines the
+# implementation and is precompiled into a .o so the ~280 KB single-header is
+# not recompiled on every build.
+STB_DIR     = third_party/stb
+STB_H       = $(STB_DIR)/stb_image.h
+STB_O       = $(STB_DIR)/stb_image.o
+STB_C       = third_party_wrapper/stb_image.c
+STB_URL     = https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
+
 BIN         = st
 CFG         = config.json
 PREFIX     ?= /usr/local
@@ -44,9 +54,23 @@ $(FT_A):
 	cp "$(FT_SRC)/objs/.libs/libfreetype.a" "$(FT_A)"
 	cp -r "$(FT_SRC)/include" "$(FT_DIR)/include"
 
+# --- stb_image ----------------------------------------------------------
+# stb_image.h is header-only third-party code; fetch it into third_party/
+# if missing, then compile our wrapper (which defines STB_IMAGE_IMPLEMENTATION)
+# into a .o so the ~280 KB single-header is not recompiled on every build.
+$(STB_O): $(STB_C) $(STB_H)
+	$(CC) -O2 -I$(STB_DIR) -c "$(STB_C)" -o "$@"
+
+$(STB_H):
+	@mkdir -p "$(STB_DIR)"
+	@if [ ! -f "$(STB_H)" ]; then \
+		echo "downloading stb_image.h..."; \
+		curl -fL -o "$(STB_H)" "$(STB_URL)"; \
+	fi
+
 # --- st -----------------------------------------------------------------
-$(BIN): $(FT_A) $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
-        $(wildcard ptyutil/*.go)
+$(BIN): $(FT_A) $(STB_O) $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
+        $(wildcard ptyutil/*.go) $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h)
 	go build -o "$(BIN)" -ldflags "$(LDFLAGS)" .
 
 install: $(BIN)

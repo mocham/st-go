@@ -39,6 +39,8 @@ func (m *mockHooks) SetMode(set bool, mode uint) {}
 func (m *mockHooks) SetPointerMotion(on bool) {}
 func (m *mockHooks) SetSel(s string)        {}
 func (m *mockHooks) StartDraw() bool        { return true }
+func (m *mockHooks) ImageDecode(encoded []byte, fitW, fitH bool) (int, int, []Glyph, bool) { return 0, 0, nil, false }
+func (m *mockHooks) ImageClearAll()          {}
 
 func newTestTerm(t *testing.T, cols, rows int) (*Term, *mockHooks) {
 	cfg := config.Default()

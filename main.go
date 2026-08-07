@@ -116,6 +116,9 @@ func main() {
 	core.SetWriter(func(b []byte) {
 		master.Write(b)
 	})
+	t.ttyResize = func(rows, cols int) {
+		ptyutil.SetWinSize(master, rows, cols)
+	}
 	ptyutil.SetWinSize(master, int(cfg.Rows), int(cfg.Cols))
 
 	// pty reader goroutine; terminal access is serialized with t.mu

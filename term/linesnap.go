@@ -16,3 +16,11 @@ func (t *Term) LineText(y int) string {
 
 // Cols returns the number of columns (test helper).
 func (t *Term) Cols() int { return t.col }
+
+// LineAt returns the glyph at cell (x, y) (test helper).
+func (t *Term) LineAt(x, y int) Glyph {
+	if y < 0 || y >= t.row || x < 0 || x >= t.col {
+		return Glyph{}
+	}
+	return t.line[y][x]
+}

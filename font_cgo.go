@@ -4,8 +4,8 @@ package main
 #cgo CFLAGS: -Ithird_party/freetype/include
 #cgo LDFLAGS: third_party/freetype/libfreetype.a -lm -lpthread
 #include <stdlib.h>
-#include "CPlugins/ff2.h"
-#include "CPlugins/plugin-ff2.c"
+#include "third_party_wrapper/ff2.h"
+#include "third_party_wrapper/plugin-ff2.c"
 */
 import "C"
 
