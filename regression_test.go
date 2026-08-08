@@ -895,3 +895,31 @@ func TestFocusToggleRedraw(t *testing.T) {
 		t.Fatalf("ModeFocused not restored after FocusIn")
 	}
 }
+
+// TestImageDecodePDF verifies the DSL "open" path renders a PDF (first page)
+// through the minimal static poppler build. Regression for the PDF display
+// feature (the C++ page_renderer API needs no cairo/glib).
+func TestImageDecodePDF(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	// a minimal valid PDF (1 blank page)
+	pdf := []byte("%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n" +
+		"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n" +
+		"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 100 100]>>endobj\n" +
+		"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \n" +
+		"trailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF\n")
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_pdf", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	cols, rows, glyphs, ok := trm.ImageDecode(pdf, false, true, 0)
+	if !ok || len(glyphs) == 0 {
+		t.Fatalf("pdf decode failed (cols=%d rows=%d glyphs=%d ok=%v)", cols, rows, len(glyphs), ok)
+	}
+	if len(imageAtlas) == 0 {
+		t.Fatalf("pdf atlas empty")
+	}
+}

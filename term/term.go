@@ -238,7 +238,7 @@ type Hooks interface {
 	// per terminal cell (U=ImageRune, Fg/Bg packing the cell's pixel-block
 	// address in the frontend atlas). The original image data is freed.
 	// Returns the grid size and the glyphs in row-major order.
-	ImageDecode(encoded []byte, fitW, fitH bool) (cols, rows int, glyphs []Glyph, ok bool)
+	ImageDecode(encoded []byte, fitW, fitH bool, page int) (cols, rows int, glyphs []Glyph, ok bool)
 	// ImageClearAll clears the image glyph atlas (terminal reset / clear).
 	ImageClearAll()
 }

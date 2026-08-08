@@ -9,6 +9,7 @@
 #   -h, --fit-height   scale images to the terminal height (default)
 #   -n, --native       show images at native size (no fit)
 #   -d, --dir PATH     view images in PATH (default: current directory)
+#   -p, --page N       show page N (1-based) of a PDF (default: 1)
 #
 # Keys:
 #   Right / Down       next image
@@ -23,6 +24,7 @@ set -u
 # --- defaults ------------------------------------------------------------
 FIT="fit-height"
 DIR="."
+PAGE=""
 IMAGES=()
 
 # --- option parsing -------------------------------------------------------
@@ -32,6 +34,7 @@ while [ $# -gt 0 ]; do
 		-h|--fit-height) FIT="fit-height" ;;
 		-n|--native)     FIT="" ;;
 		-d|--dir)        shift; DIR="${1:-}" ;;
+		-p|--page)       shift; PAGE="$1" ;;
 		--)              shift; break ;;
 		-*)              echo "unknown option: $1" >&2; exit 1 ;;
 		*)               DIR="$1" ;;
@@ -47,7 +50,7 @@ fi
 for f in "$DIR"/*; do
 	[ -e "$f" ] || continue
 	case "$f" in
-		*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tga|*.webp) IMAGES+=("$f") ;;
+		*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tga|*.webp|*.pdf) IMAGES+=("$f") ;;
 	esac
 done
 
@@ -59,8 +62,14 @@ fi
 # --- helpers ---------------------------------------------------------------
 # esc P <stmt> ESC \  (DCS image DSL)
 # Tell st the shell's PWD so relative image paths resolve; then send the path
-# as-is (the shell expands globs, st just reads the file).
-show() { printf '\033P%s\033\\' "open '$1' $FIT"; }
+# as-is (the shell expands globs, st just reads the file). For PDFs, append
+# "page N" when -p was given.
+page_arg() {
+	case "$1" in
+		*.pdf) [ -n "$PAGE" ] && printf ' page %s' "$PAGE" ;;
+	esac
+}
+show() { printf '\033P%s\033\\' "open '$1' $FIT$(page_arg "$1")"; }
 clear_screen() { printf '\033Pclear\033\\'; }
 
 # status bar on the last screen row (standard ANSI, works in any st):

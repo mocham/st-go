@@ -22,7 +22,11 @@ var imageAtlas []uint32
 // the terminal width/height; otherwise it stays at native resolution, with
 // the draw loop truncating the width and scrolling vertically like text.
 // The glyphs are returned in row-major order (rows*cols entries).
-func (t *Terminal) ImageDecode(encoded []byte, fitW, fitH bool) (cols, rows int, glyphs []term.Glyph, ok bool) {
+func (t *Terminal) ImageDecode(encoded []byte, fitW, fitH bool, page int) (cols, rows int, glyphs []term.Glyph, ok bool) {
+	// PDF: render the requested page (default first) to a bitmap via poppler.
+	if isPDF(encoded) {
+		return t.imageDecodePDF(encoded, fitW, fitH, page)
+	}
 	w, h, rgba, err := decodeImage(encoded)
 	if err || w <= 0 || h <= 0 {
 		return 0, 0, nil, false
@@ -70,6 +74,139 @@ func (t *Terminal) ImageDecode(encoded []byte, fitW, fitH bool) (cols, rows int,
 		}
 	}
 	return cols, rows, glyphs, true
+}
+
+// isPDF reports whether the bytes look like a PDF file ("%PDF-" header).
+func isPDF(b []byte) bool {
+	return len(b) >= 5 && b[0] == '%' && b[1] == 'P' && b[2] == 'D' && b[3] == 'F' && b[4] == '-'
+}
+
+// imageDecodePDF renders the first page of a PDF to a bitmap (BGRA) via
+// poppler, then breaks it into image-cell glyphs like any other image.
+func (t *Terminal) imageDecodePDF(encoded []byte, fitW, fitH bool, page int) (cols, rows int, glyphs []term.Glyph, ok bool) {
+	// target bitmap size in pixels
+	var pw, ph int
+	if fitH {
+		ph = t.rows * t.ch
+		pw = t.cols * t.cw
+	} else if fitW {
+		pw = t.cols * t.cw
+		ph = t.rows * t.ch
+	} else {
+		// native: render at a reasonable resolution (600dpi-ish is too big;
+		// use the terminal size) and let the draw loop scroll like text.
+		pw = t.cols * t.cw
+		ph = t.rows * t.ch
+	}
+	if pw < 1 {
+		pw = 1
+	}
+	if ph < 1 {
+		ph = 1
+	}
+	bgra, _, ok := renderPDFPage(encoded, page, pw, ph)
+	if !ok {
+		return 0, 0, nil, false
+	}
+
+	// Build the glyph grid the same way as the raster path. For a PDF we
+	// always render a bitmap at pw x ph, then treat it as w=pw, h=ph in
+	// appendImageBlock (fit mode scales per-cell, native shows raw pixels).
+	w, h := pw, ph
+
+	// grid size (same math as the raster branch)
+	if !fitW && !fitH {
+		cols = (w + t.cw - 1) / t.cw
+		rows = (h + t.ch - 1) / t.ch
+		if cols > t.cols {
+			cols = t.cols
+		}
+	} else if fitH {
+		rows = t.rows
+		if rows < 1 {
+			rows = 1
+		}
+		cols = w * rows * t.ch / (h * t.cw)
+		if cols < 1 {
+			cols = 1
+		}
+	} else { // fitW
+		cols = t.cols
+		if cols < 1 {
+			cols = 1
+		}
+		rows = h * cols * t.cw / (w * t.ch)
+		if rows < 1 {
+			rows = 1
+		}
+	}
+
+	// The atlas stores uint32 ARGB cells; convert the BGRA bitmap.
+	rgba := make([]uint32, len(bgra)/4)
+	for i := 0; i < len(rgba); i++ {
+		b := bgra[i*4]
+		g := bgra[i*4+1]
+		r := bgra[i*4+2]
+		rgba[i] = 0xFF000000 | uint32(r)<<16 | uint32(g)<<8 | uint32(b)
+	}
+
+	glyphs = make([]term.Glyph, 0, cols*rows)
+	for gy := 0; gy < rows; gy++ {
+		for gx := 0; gx < cols; gx++ {
+			offset := len(imageAtlas)
+			t.appendImageBlockFromUint(w, h, rgba, gx, gy, cols, rows, fitW, fitH)
+			glyphs = append(glyphs, term.Glyph{U: term.ImageRune, Fg: uint32(offset)})
+		}
+	}
+	return cols, rows, glyphs, true
+}
+
+// appendImageBlockFromUint is like appendImageBlock but consumes a []uint32
+// ARGB buffer instead of raw RGBA bytes.
+func (t *Terminal) appendImageBlockFromUint(w, h int, rgba []uint32, gx, gy, cols, rows int, fitW, fitH bool) {
+	if !fitW && !fitH {
+		for yy := 0; yy < t.ch; yy++ {
+			sy := gy*t.ch + yy
+			for xx := 0; xx < t.cw; xx++ {
+				sx := gx*t.cw + xx
+				if sy < h && sx < w {
+					imageAtlas = append(imageAtlas, rgba[sy*w+sx])
+				} else {
+					imageAtlas = append(imageAtlas, 0xFF000000)
+				}
+			}
+		}
+		return
+	}
+	x0 := gx * w / cols
+	x1 := (gx + 1) * w / cols
+	y0 := gy * h / rows
+	y1 := (gy + 1) * h / rows
+	if x1 > w {
+		x1 = w
+	}
+	if y1 > h {
+		y1 = h
+	}
+	for yy := 0; yy < t.ch; yy++ {
+		sy := y0 + (yy * (y1 - y0) / t.ch)
+		if sy >= y1 {
+			sy = y1 - 1
+		}
+		if sy < y0 {
+			sy = y0
+		}
+		for xx := 0; xx < t.cw; xx++ {
+			sx := x0 + (xx * (x1 - x0) / t.cw)
+			if sx >= x1 {
+				sx = x1 - 1
+			}
+			if sx < x0 {
+				sx = x0
+			}
+			imageAtlas = append(imageAtlas, rgba[sy*w+sx])
+		}
+	}
 }
 
 // appendImageBlock appends the cw*ch pixel block for cell (gx,gy) to the

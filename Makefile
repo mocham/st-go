@@ -1,8 +1,17 @@
 # st-go: a Golang clone of suckless st.
 #
-# FreeType2 is the only third-party library. It is downloaded, extracted,
-# and built as a static archive into third_party/ the first time the binary
-# is built (the whole folder is gitignored and reproduced on demand).
+# Third-party static libraries (all downloaded & built into third_party/ on
+# demand; the whole folder is gitignored and reproduced on demand):
+#   - FreeType2   : glyph rasterization
+#   - stb_image   : PNG/JPEG/GIF/BMP image decode
+#   - poppler     : PDF rendering (first page / page N via "open")
+#   - zlib        : poppler's stream decompression
+#   - libpng      : poppler's embedded-image support
+#
+# poppler is built MINIMAL: only the C++ API (page_renderer -> raw BGRA) is
+# linked, so cairo/glib/gobject/ffi/pixman/lcms/openjpeg/turbojpeg are NOT
+# needed (the bloat that poppler's glib API would pull in). Only freetype +
+# zlib + libpng are required.
 #
 # X is driven by the pure-Go xgb library over sockets, so no X11 C library
 # is needed. The result is a fully static binary with no dynamic deps.
@@ -30,7 +39,31 @@ BIN         = st
 CFG         = config/config.json
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
-LDFLAGS     = -linkmode external -extldflags "-static"
+LDFLAGS     = -linkmode external -extldflags '-static -lstdc++'
+
+# --- poppler (PDF rendering) ---------------------------------------------
+# A MINIMAL static poppler using only the C++ API (page_renderer -> raw BGRA),
+# so we do NOT need cairo/glib/gobject/ffi/pixman/lcms/openjpeg/turbojpeg
+# (the bloat that poppler's glib API pulls in). Only freetype (already in
+# third_party/) + zlib + libpng are required.
+POPPLER_VERSION = 25.07.0
+POPPLER_URL     = https://poppler.freedesktop.org/poppler-$(POPPLER_VERSION).tar.xz
+POPPLER_TAR     = third_party/poppler-$(POPPLER_VERSION).tar.xz
+POPPLER_SRC     = third_party/poppler-src
+POPPLER_BUILD   = third_party/poppler-src/build
+POPPLER_LIB     = third_party/poppler/lib/libpoppler.a
+
+ZLIB_VERSION = 1.3.1
+ZLIB_URL     = https://zlib.net/fossils/zlib-$(ZLIB_VERSION).tar.gz
+ZLIB_TAR     = third_party/zlib-$(ZLIB_VERSION).tar.gz
+ZLIB_SRC     = third_party/zlib-src
+ZLIB_LIB     = third_party/poppler/lib/libz.a
+
+PNG_VERSION = 1.6.44
+PNG_URL     = https://download.sourceforge.net/libpng/libpng-$(PNG_VERSION).tar.gz
+PNG_TAR     = third_party/libpng-$(PNG_VERSION).tar.gz
+PNG_SRC     = third_party/libpng-src
+PNG_LIB     = third_party/poppler/lib/libpng16.a
 
 all: $(BIN)
 
@@ -68,8 +101,73 @@ $(STB_H):
 		curl -fL -o "$(STB_H)" "$(STB_URL)"; \
 	fi
 
+# --- zlib static (poppler dep) ------------------------------------------
+$(ZLIB_LIB):
+	@mkdir -p third_party
+	@if [ ! -f "$(ZLIB_TAR)" ]; then \
+		echo "downloading zlib $(ZLIB_VERSION)..."; \
+		curl -fL -o "$(ZLIB_TAR)" "$(ZLIB_URL)"; \
+	fi
+	rm -rf "$(ZLIB_SRC)" "$(dir $(ZLIB_LIB))"
+	mkdir -p "$(dir $(ZLIB_LIB))" third_party/poppler/include
+	mkdir -p "$(ZLIB_SRC)"
+	tar -xzf "$(ZLIB_TAR)" -C "$(ZLIB_SRC)" --strip-components=1
+	cd "$(ZLIB_SRC)" && ./configure --static --prefix=$$PWD/out
+	$(MAKE) -C "$(ZLIB_SRC)"
+	cp "$(ZLIB_SRC)/libz.a" "$(ZLIB_LIB)"
+	cp "$(ZLIB_SRC)/zlib.h" "$(ZLIB_SRC)/zconf.h" third_party/poppler/include/
+
+# --- libpng static (poppler dep for embedded images) ---------------------
+$(PNG_LIB): $(ZLIB_LIB)
+	@mkdir -p third_party
+	@if [ ! -f "$(PNG_TAR)" ]; then \
+		echo "downloading libpng $(PNG_VERSION)..."; \
+		curl -fL -o "$(PNG_TAR)" "$(PNG_URL)"; \
+	fi
+	rm -rf "$(PNG_SRC)"
+	mkdir -p "$(dir $(PNG_LIB))" third_party/poppler/include
+	mkdir -p "$(PNG_SRC)"
+	tar -xzf "$(PNG_TAR)" -C "$(PNG_SRC)" --strip-components=1
+	cd "$(PNG_SRC)" && ./configure --disable-shared --enable-static CFLAGS="-fPIC -O2" LDFLAGS="-L$$PWD/../poppler/lib"
+	$(MAKE) -C "$(PNG_SRC)"
+	cp "$(PNG_SRC)/.libs/libpng16.a" "$(PNG_LIB)"
+	cp "$(PNG_SRC)/png.h" "$(PNG_SRC)/pngconf.h" "$(PNG_SRC)/pnglibconf.h" third_party/poppler/include/
+
+# --- poppler static (minimal, C++ API only) ------------------------------
+$(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB)
+	@mkdir -p third_party
+	@if [ ! -f "$(POPPLER_TAR)" ]; then \
+		echo "downloading poppler $(POPPLER_VERSION)..."; \
+		curl -fL -o "$(POPPLER_TAR)" "$(POPPLER_URL)"; \
+	fi
+	rm -rf "$(POPPLER_SRC)" "$(POPPLER_BUILD)"
+	mkdir -p "$(POPPLER_SRC)" third_party/poppler/include
+	tar -xJf "$(POPPLER_TAR)" -C "$(POPPLER_SRC)" --strip-components=1
+	mkdir -p "$(POPPLER_BUILD)"
+	cd "$(POPPLER_BUILD)" && cmake .. \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_CXX_FLAGS="-fPIC" -DCMAKE_C_FLAGS="-fPIC" \
+		-DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+		-DFREETYPE_INCLUDE_DIRS="$(abspath third_party/freetype/include)" \
+		-DFREETYPE_LIBRARY="$(abspath third_party/freetype/libfreetype.a)" \
+		-DZLIB_INCLUDE_DIR="$(abspath third_party/poppler/include)" \
+		-DZLIB_LIBRARY="$(abspath third_party/poppler/lib/libz.a)" \
+		-DPNG_INCLUDE_DIR="$(abspath third_party/poppler/include)" \
+		-DPNG_LIBRARY="$(abspath third_party/poppler/lib/libpng16.a)" \
+		-DFONT_CONFIGURATION=generic \
+		-DENABLE_GLIB=OFF -DENABLE_QT5=OFF -DENABLE_QT6=OFF \
+		-DENABLE_BOOST=OFF -DENABLE_CAIRO=OFF -DENABLE_LCMS=OFF \
+		-DENABLE_LIBCURL=OFF -DENABLE_LIBTIFF=OFF -DENABLE_NSS3=OFF \
+		-DENABLE_GPGME=OFF -DENABLE_LIBOPENJPEG=none -DENABLE_DCTDECODER=none \
+		-DENABLE_CPP=ON -DENABLE_UTILS=OFF -DENABLE_GTK_DOC=OFF \
+		-DBUILD_QT5_TESTS=OFF -DBUILD_QT6_TESTS=OFF -DBUILD_CPP_TESTS=OFF
+	$(MAKE) -C "$(POPPLER_BUILD)"
+	cp "$(POPPLER_BUILD)/libpoppler.a" "$(POPPLER_BUILD)/cpp/libpoppler-cpp.a" third_party/poppler/lib/
+	cp "$(POPPLER_SRC)/cpp/"*.h third_party/poppler/include/
+	cp "$(POPPLER_BUILD)/cpp/poppler_cpp_export.h" third_party/poppler/include/
+
 # --- st -----------------------------------------------------------------
-$(BIN): $(FT_A) $(STB_O) $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
+$(BIN): $(FT_A) $(STB_O) $(POPPLER_LIB) $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
         $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h)
 	go build -o "$(BIN)" -ldflags "$(LDFLAGS)" .
 

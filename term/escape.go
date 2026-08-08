@@ -659,12 +659,22 @@ func (t *Term) dslOpen(args []string) {
 	}
 	path := t.resolveImagePath(args[0])
 	fitW, fitH := false, false
-	for _, a := range args[1:] {
+	page := 0
+	for i := 0; i < len(args[1:]); i++ {
+		a := args[1+i]
 		switch a {
 		case "fit-width":
 			fitW = true
 		case "fit-height":
 			fitH = true
+		case "page":
+			// page N (1-based)
+			if i+1 < len(args[1:]) {
+				if n, err := strconv.Atoi(args[1+i+1]); err == nil && n > 0 {
+					page = n - 1
+					i++
+				}
+			}
 		}
 	}
 
@@ -673,7 +683,7 @@ func (t *Term) dslOpen(args []string) {
 		log.Printf("dsl: open %q: %v\n", path, err)
 		return
 	}
-	cols, rows, glyphs, ok := t.hooks.ImageDecode(data, fitW, fitH)
+	cols, rows, glyphs, ok := t.hooks.ImageDecode(data, fitW, fitH, page)
 	if !ok {
 		log.Printf("dsl: failed to decode %q\n", path)
 		return
