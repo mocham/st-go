@@ -86,12 +86,17 @@ preview() {
 draw_list() {
 	local y=1
 	local i
+	local maxlen=$(( LISTW - 2 ))   # room for the surrounding spaces
 	for i in "${!FILES[@]}"; do
 		[ "$y" -gt "$ROWS" ] && break
 		local f="${FILES[$i]}"
 		local name=$(base "$f")
 		if is_dir "$f"; then
 			name="$name/"
+		fi
+		# truncate long names so they never spill into the preview panel
+		if [ "${#name}" -gt "$maxlen" ]; then
+			name="${name:0:$maxlen}"
 		fi
 		printf '\033[%d;%dH\033[K' "$y" "$LISTX"
 		if [ "$i" = "$IDX" ]; then

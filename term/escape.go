@@ -685,8 +685,25 @@ func (t *Term) dslOpen(args []string) {
 	}
 	// Plain text files are rendered as text rows (from the cursor down),
 	// stopping when the last screen row is reached. A file browser can show a
-	// file tree on one side and a text preview on the other.
+	// file tree on one side and a text preview on the other. Only the bytes
+	// that can fit on the visible rows are read/rendered (each row up to the
+	// column width; x4 headroom for UTF-8 + newlines + the truncation scan).
 	if t.looksLikeText(data) {
+		availRows := t.row - t.c.y
+		availCols := t.col - t.c.x
+		if availRows < 1 {
+			availRows = 1
+		}
+		if availCols < 1 {
+			availCols = 1
+		}
+		need := availRows * availCols * 4
+		if need < 4096 {
+			need = 4096
+		}
+		if len(data) > need {
+			data = data[:need]
+		}
 		t.dslOpenText(data)
 		return
 	}
@@ -781,50 +798,70 @@ func (t *Term) looksLikeText(data []byte) bool {
 
 // dslOpenText renders a text file into the screen starting at the cursor,
 // row by row, stopping when the last screen row is reached (it does NOT
-// scroll). A binary/no-newline tail is still shown. This is used by the
-// mini file browser for a text preview pane.
+// scroll). Lines longer than the visible width are truncated (the rest of the
+// line is dropped, not wrapped). Used by the mini file browser preview.
 func (t *Term) dslOpenText(data []byte) {
 	startX := t.c.x
 	y := t.c.y
 	// default text attribute: current cursor fg/bg, no decorations
 	attr := t.c.attr
 	col := startX
-	for i := 0; i < len(data) && y <= t.row-1; i++ {
+	rowEnd := t.col // truncate at the screen's right edge
+	truncLine := false
+	render := func(u rune) bool {
+		if truncLine {
+			return false
+		}
+		if col >= rowEnd {
+			truncLine = true // drop the rest of this file line (no wrap)
+			return false
+		}
+		t.tsetchar(u, &attr, col, y)
+		col++
+		return true
+	}
+	for i := 0; i < len(data); i++ {
 		c := data[i]
+		if truncLine {
+			// skip to the next newline (line was truncated at the edge)
+			if c == '\n' {
+				truncLine = false
+				if y == t.row-1 {
+					break
+				}
+				y++
+				col = startX
+			}
+			continue
+		}
 		switch c {
 		case '\n':
 			if y == t.row-1 {
-				return // stop at the last row
+				truncLine = false
+				goto done // stop at the last row
 			}
 			col = startX
 			y++
 		case '\r':
 			col = startX
 		case '\t':
-			// advance to the next tab stop
 			next := col + t.tabspaces() - (col % t.tabspaces())
-			if next > t.col-1 {
-				next = t.col - 1
+			if next > rowEnd {
+				next = rowEnd
 			}
-			for col < next && col < t.col {
-				t.tsetchar(' ', &attr, col, y)
-				col++
+			for col < next {
+				if !render(' ') {
+					break
+				}
 			}
 		default:
 			if c >= 0x20 && c < 0x7f {
-				t.tsetchar(rune(c), &attr, col, y)
-				col++
-				if col >= t.col {
-					col = startX
-					if y == t.row-1 {
-						return
-					}
-					y++
-				}
+				render(rune(c))
 			}
 			// other control bytes are ignored
 		}
 	}
+done:
 	// leave the cursor at the last written cell
 	t.tmoveto(col, y)
 	t.tfulldirt()

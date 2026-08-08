@@ -1091,3 +1091,50 @@ func TestDslOpenTextPreview(t *testing.T) {
 	// file has 30 lines but only cfg.Rows fit: nothing scrolls, row0 stays put
 	t.Logf("OK: text preview rendered at offset, rows=%d", core.Rows())
 }
+
+// TestDslOpenTextStopsAtBottom verifies the text preview only reads/renders
+// the bytes that fit the visible rows: a long line is truncated (not wrapped)
+// and rendering stops at the last screen row.
+func TestDslOpenTextStopsAtBottom(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	dir := t.TempDir()
+	f := dir + "/big.txt"
+	// a 200-char line, then many more lines than rows
+	var content strings.Builder
+	content.WriteString(strings.Repeat("X", 200))
+	content.WriteString("\n")
+	for i := 0; i < 100; i++ {
+		content.WriteString("line ")
+		content.WriteString(itoa(i))
+		content.WriteString("\n")
+	}
+	if err := os.WriteFile(f, []byte(content.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_tbs", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+	core.Twrite([]byte("\x1bPopen '"+f+"'\x1b\\"), false)
+	core.Redraw()
+	// row0: full-width X's truncated to the column count
+	row0 := core.LineText(0)
+	if len(row0) != int(cfg.Cols) || row0[0] != 'X' {
+		t.Fatalf("row0=%q want %d X's", row0, cfg.Cols)
+	}
+	// rendering stopped at the last row: the bottom row still has content from
+	// within the file but the file's later lines were not wrapped in
+	// (i.e. no X's reappear after the first row)
+	for y := 1; y < int(cfg.Rows); y++ {
+		if strings.Contains(core.LineText(y), "X") {
+			t.Fatalf("row %d has wrapped X's from the truncated line: %q", y, core.LineText(y))
+		}
+	}
+	t.Logf("OK: long line truncated, no wrap into later rows")
+}

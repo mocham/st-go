@@ -182,3 +182,31 @@ func TestLooksLikeText(t *testing.T) {
 		t.Fatalf("NUL-heavy binary sniffed as text")
 	}
 }
+
+// TestDslOpenTextTruncate verifies long lines are truncated at the screen's
+// right edge (not wrapped) and rendering stops at the last row.
+func TestDslOpenTextTruncate(t *testing.T) {
+	core, _ := newTestTerm(t, 10, 3)
+	dir := t.TempDir()
+	f := dir + "/long.txt"
+	// a very long line (100 chars) then another short line
+	content := strings.Repeat("x", 100) + "\n" + "short\n"
+	if err := os.WriteFile(f, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	core.Twrite([]byte("\x1bPopen '"+f+"'\x1b\\"), false)
+	core.Redraw()
+	// row0: 10 x's (full width), NOT wrapped
+	if got := core.LineText(0); got != strings.Repeat("x", 10) {
+		t.Fatalf("row0=%q want 10 x's", got)
+	}
+	// row1: the truncated line was skipped, so "short" lands on row1
+	if got := core.LineText(1); !strings.HasPrefix(got, "short") {
+		t.Fatalf("row1=%q want short", got)
+	}
+	// row2 (last row): nothing from beyond
+	if got := core.LineText(2); got != strings.Repeat(" ", 10) {
+		t.Fatalf("row2=%q want blank (stopped at last row)", got)
+	}
+	t.Logf("OK: long line truncated, stopped at last row")
+}
