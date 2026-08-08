@@ -683,6 +683,13 @@ func (t *Term) dslOpen(args []string) {
 		log.Printf("dsl: open %q: %v\n", path, err)
 		return
 	}
+	// Plain text files are rendered as text rows (from the cursor down),
+	// stopping when the last screen row is reached. A file browser can show a
+	// file tree on one side and a text preview on the other.
+	if t.looksLikeText(data) {
+		t.dslOpenText(data)
+		return
+	}
 	cols, rows, glyphs, ok := t.hooks.ImageDecode(data, fitW, fitH, page)
 	if !ok {
 		log.Printf("dsl: failed to decode %q\n", path)
@@ -730,6 +737,105 @@ func (t *Term) dslOpen(args []string) {
 	// leave the cursor at the start of the image's last row
 	t.tmoveto(startX, t.c.y)
 	t.tfulldirt()
+}
+
+// looksLikeText reports whether the bytes are plain text (rather than an
+// image or PDF): the first non-whitespace byte is printable ASCII/UTF-8, and
+// the buffer is not a binary-heavy stream. Images/PDFs are sniffed by magic.
+func (t *Term) looksLikeText(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	// image/PDF magic bytes (stb_image/webp/poppler would handle them)
+	if data[0] == 0x89 && len(data) > 3 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' {
+		return false
+	}
+	if len(data) >= 4 && data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F' {
+		return false
+	}
+	if len(data) >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+		data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P' {
+		return false
+	}
+	if data[0] == 0xFF && len(data) > 1 && data[1] == 0xD8 { // JPEG
+		return false
+	}
+	if data[0] == 'G' && len(data) > 3 && data[1] == 'I' && data[2] == 'F' && data[3] == '8' { // GIF
+		return false
+	}
+	if data[0] == 'B' && len(data) > 1 && data[1] == 'M' { // BMP
+		return false
+	}
+	// reject NUL-heavy or high-bit-random buffers
+	nul := 0
+	nonprint := 0
+	for i := 0; i < len(data) && i < 4096; i++ {
+		if data[i] == 0 {
+			nul++
+		} else if data[i] < 0x07 || (data[i] > 0x0d && data[i] < 0x20) {
+			nonprint++
+		}
+	}
+	return nul < 4 && nonprint < 64
+}
+
+// dslOpenText renders a text file into the screen starting at the cursor,
+// row by row, stopping when the last screen row is reached (it does NOT
+// scroll). A binary/no-newline tail is still shown. This is used by the
+// mini file browser for a text preview pane.
+func (t *Term) dslOpenText(data []byte) {
+	startX := t.c.x
+	y := t.c.y
+	// default text attribute: current cursor fg/bg, no decorations
+	attr := t.c.attr
+	col := startX
+	for i := 0; i < len(data) && y <= t.row-1; i++ {
+		c := data[i]
+		switch c {
+		case '\n':
+			if y == t.row-1 {
+				return // stop at the last row
+			}
+			col = startX
+			y++
+		case '\r':
+			col = startX
+		case '\t':
+			// advance to the next tab stop
+			next := col + t.tabspaces() - (col % t.tabspaces())
+			if next > t.col-1 {
+				next = t.col - 1
+			}
+			for col < next && col < t.col {
+				t.tsetchar(' ', &attr, col, y)
+				col++
+			}
+		default:
+			if c >= 0x20 && c < 0x7f {
+				t.tsetchar(rune(c), &attr, col, y)
+				col++
+				if col >= t.col {
+					col = startX
+					if y == t.row-1 {
+						return
+					}
+					y++
+				}
+			}
+			// other control bytes are ignored
+		}
+	}
+	// leave the cursor at the last written cell
+	t.tmoveto(col, y)
+	t.tfulldirt()
+}
+
+// tabspaces returns the configured tab width (>=1).
+func (t *Term) tabspaces() int {
+	if t.cfg == nil || t.cfg.Tabspaces < 1 {
+		return 8
+	}
+	return int(t.cfg.Tabspaces)
 }
 
 func (t *Term) dslClear() {

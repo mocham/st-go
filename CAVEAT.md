@@ -156,6 +156,10 @@ modes are only gated in the term core; the frontend hooks must mirror them.
 - PDF page navigation uses **modular arithmetic**: the script only sends `±1`
   counters (`page N`), and the terminal wraps `N mod pages` (negatives wrap to
   the end). This avoids any terminal→script response protocol.
+- Plain text files: `open '<file.txt>'` renders text rows from the cursor down,
+  **stopping at the last screen row** (no scrolling) — used for a file-browser
+  text preview pane. Text vs image/PDF is sniffed by content (`looksLikeText`:
+  PNG/PDF/WebP/JPEG/GIF/BMP magic, NUL/control-byte heuristics).
 - **Never have the terminal emit responses** (e.g. writing a page count back to
   the pty). It is fragile (echo/raw-mode interactions) and races the script's
   read. Keep the protocol one-way: script → terminal.

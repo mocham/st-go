@@ -76,11 +76,16 @@ Supported DSL commands:
 | command | meaning |
 |---------|---------|
 | `open '<path>' [fit-width] [fit-height] [page N]` | load and display an image/PDF |
+| `open '<path>'` (text file) | render a plain text file row-by-row from the cursor, stopping at the last row (no scroll) |
 | `setpwd '<dir>'`           | set the working directory for relative paths |
 | `clear`                    | clear the screen and remove all images |
 | `delete <id>`              | remove a previously opened image |
 
-Unknown commands are ignored, so the DSL is forward-compatible.
+Unknown commands are ignored, so the DSL is forward-compatible. Plain text
+files (non-image, non-PDF) are detected by content and rendered as text rows
+starting at the current cursor position, stopping when the last screen row is
+reached — so a mini file browser can show a file tree in one pane and a text
+preview in another.
 
 ## Requirements
 
@@ -188,6 +193,18 @@ Esc quits):
 ./st -e ./demo/image-viewer.sh -d /path/to/images
 ./st -e ./demo/image-viewer.sh -p 3 /path/to/docs   # start PDFs at page 3
 ```
+
+`demo/file-browser.sh` is a mini file browser: the right panel lists the
+current directory (`..` at the top, current entry highlighted), the left panel
+previews the selected file (text rows, or image/PDF via fit-height):
+
+```sh
+./st -e ./demo/file-browser.sh           # browse the current directory
+./st -e ./demo/file-browser.sh /some/path
+```
+
+Up/Down move the active entry, Right enters a directory (or previews a file),
+Left goes up to the parent directory, `q`/Esc quits.
 
 > **tmux note:** the image DSL rides the DCS escape code, which tmux reserves
 > for its own protocol and does not forward from a pane to the outer terminal.

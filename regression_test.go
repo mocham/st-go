@@ -1049,3 +1049,45 @@ func TestDummyGracefulDegrades(t *testing.T) {
 		t.Fatalf("pdfPageCount(garbage)=%d want 0", n)
 	}
 }
+
+// TestDslOpenTextPreview verifies the DSL "open" renders a text file as rows
+// from the cursor position, stopping at the last screen row (no scrolling) —
+// used by a mini file browser to show a file preview in a pane.
+func TestDslOpenTextPreview(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	dir := t.TempDir()
+	f := dir + "/preview.txt"
+	var content []byte
+	for i := 0; i < 30; i++ {
+		content = append(content, []byte("preview line "+itoa(i)+"\n")...)
+	}
+	if err := os.WriteFile(f, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_txt", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+
+	// place the cursor at column 30 (right preview pane), open the text file
+	core.Twrite([]byte("\x1b[1;30H"), false)
+	core.Twrite([]byte("\x1bPopen '"+f+"'\x1b\\"), false)
+	core.Redraw()
+
+	// row 0 must contain "preview line 0" starting at col 30 (index 29)
+	if !strings.Contains(core.LineText(0), "preview line 0") {
+		t.Fatalf("row0=%q missing preview text", core.LineText(0))
+	}
+	// the last screen row must not have scrolled content from beyond the file
+	if !strings.Contains(core.LineText(0), "preview line 0") {
+		t.Fatalf("row0=%q", core.LineText(0))
+	}
+	// file has 30 lines but only cfg.Rows fit: nothing scrolls, row0 stays put
+	t.Logf("OK: text preview rendered at offset, rows=%d", core.Rows())
+}

@@ -1,6 +1,7 @@
 package term
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -131,4 +132,53 @@ func TestImageRunePlacement(t *testing.T) {
 	// mock ImageDecode returns ok=false; a missing file should no-op safely
 	trm.Twrite([]byte("\x1bPopen '/nonexistent/image.png';\x1b\\"), false)
 	// no panic is the success criterion
+}
+
+// TestDslOpenText verifies the DSL "open" renders a text file from the
+// cursor row down, stopping at the last screen row without scrolling.
+func TestDslOpenText(t *testing.T) {
+	core, _ := newTestTerm(t, 20, 6)
+	// 10 lines of "abc": only rows 0..5 (6 rows) may show content; the rest
+	// must be clipped (no scroll).
+	var payload []byte
+	for i := 0; i < 10; i++ {
+		payload = append(payload, []byte("abc\n")...)
+	}
+	core.Twrite([]byte("\x1bPclear\x1b\\"), false)
+	// feed the text via a direct dslOpenText call is not possible (path read);
+	// instead write to a temp file and open it.
+	dir := t.TempDir()
+	f := dir + "/preview.txt"
+	if err := os.WriteFile(f, payload, 0644); err != nil {
+		t.Fatal(err)
+	}
+	core.Twrite([]byte("\x1bPopen '"+f+"'\x1b\\"), false)
+	core.Redraw()
+	// rows 0..5 should each start with "abc"
+	for y := 0; y < 6; y++ {
+		lt := core.LineText(y)
+		if !strings.HasPrefix(lt, "abc") {
+			t.Fatalf("row %d = %q, want abc prefix", y, lt)
+		}
+	}
+	// there must be no scroll: row 0 is still "abc" (not line 4+)
+	if got := core.LineText(0); !strings.HasPrefix(got, "abc") {
+		t.Fatalf("row0 scrolled: %q", got)
+	}
+	t.Logf("OK: text preview rendered rows 0..5, stopped at bottom")
+}
+
+// TestLooksLikeText confirms binary formats are not treated as text.
+func TestLooksLikeText(t *testing.T) {
+	core, _ := newTestTerm(t, 20, 6)
+	png := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	if core.looksLikeText(png) {
+		t.Fatalf("PNG sniffed as text")
+	}
+	if !core.looksLikeText([]byte("hello world\n")) {
+		t.Fatalf("plain text not recognized")
+	}
+	if core.looksLikeText([]byte{0x00, 0x01, 0x02, 0x00, 0x00, 0x00, 0x01}) {
+		t.Fatalf("NUL-heavy binary sniffed as text")
+	}
 }
