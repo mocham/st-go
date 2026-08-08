@@ -41,3 +41,13 @@ func renderPDFPage(data []byte, page, outW, outH int) ([]byte, int, bool) {
 	}
 	return out, outW * 4, true
 }
+
+// pdfPageCount returns the number of pages in a PDF, or 0 on failure.
+func pdfPageCount(data []byte) int {
+	if len(data) == 0 {
+		return 0
+	}
+	cdata := C.CBytes(data)
+	defer C.free(cdata)
+	return int(C.pdf_page_count((*C.uchar)(cdata), C.int(len(data))))
+}

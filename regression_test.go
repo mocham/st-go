@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -921,5 +922,73 @@ func TestImageDecodePDF(t *testing.T) {
 	}
 	if len(imageAtlas) == 0 {
 		t.Fatalf("pdf atlas empty")
+	}
+}
+
+// TestPDFModuloWrap verifies PDF page navigation uses modular arithmetic: the
+// image-viewer script only sends +/-1 counters, so a page number that is
+// negative or past the end must wrap modulo the page count (never fail).
+func TestPDFModuloWrap(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	// build a 2-page PDF: one red page + one green page
+	if _, err := exec.Command("gs", "-q", "-o", "/tmp/rp.pdf", "-sDEVICE=pdfwrite", "-g200x200",
+		"-c", "1 0 0 setrgbcolor 0 0 200 200 rectfill showpage").Output(); err != nil {
+		t.Skipf("gs: %v", err)
+	}
+	if _, err := exec.Command("gs", "-q", "-o", "/tmp/gp.pdf", "-sDEVICE=pdfwrite", "-g200x200",
+		"-c", "0 1 0 setrgbcolor 0 0 200 200 rectfill showpage").Output(); err != nil {
+		t.Skipf("gs: %v", err)
+	}
+	if _, err := exec.Command("gs", "-q", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
+		"-sOutputFile=/tmp/rg.pdf", "/tmp/rp.pdf", "/tmp/gp.pdf").Output(); err != nil {
+		t.Skipf("gs merge: %v", err)
+	}
+	defer os.Remove("/tmp/rg.pdf")
+	defer os.Remove("/tmp/rp.pdf")
+	defer os.Remove("/tmp/gp.pdf")
+
+	data, err := os.ReadFile("/tmp/rg.pdf")
+	if err != nil {
+		t.Skipf("read: %v", err)
+	}
+	if n := pdfPageCount(data); n != 2 {
+		t.Skipf("expected 2 pages, got %d", n)
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_mw", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+
+	hash := func(page int) uint64 {
+		_, _, g, ok := trm.ImageDecode(data, false, true, page)
+		if !ok || len(g) == 0 {
+			return 0
+		}
+		var h uint64 = 1469598103934665603
+		for _, gl := range g {
+			o := int(gl.Fg)
+			for i := 0; i < trm.cw*trm.ch; i++ {
+				h ^= uint64(imageAtlas[o+i])
+				h *= 1099511628211
+			}
+		}
+		return h
+	}
+	h1, h2, h3, h0 := hash(0), hash(1), hash(2), hash(-1)
+	if h1 == 0 || h2 == 0 {
+		t.Fatalf("render failed")
+	}
+	if h1 == h2 {
+		t.Fatalf("page1 and page2 must differ")
+	}
+	if h3 != h1 {
+		t.Fatalf("page 3 (out of range) should wrap to page 1")
+	}
+	if h0 != h2 {
+		t.Fatalf("page -1 (negative) should wrap to last page")
 	}
 }

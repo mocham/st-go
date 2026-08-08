@@ -81,6 +81,14 @@ func isPDF(b []byte) bool {
 	return len(b) >= 5 && b[0] == '%' && b[1] == 'P' && b[2] == 'D' && b[3] == 'F' && b[4] == '-'
 }
 
+// PDFPageCount returns the page count of a PDF (0 for non-PDF / failure).
+func (t *Terminal) PDFPageCount(encoded []byte) int {
+	if !isPDF(encoded) {
+		return 0
+	}
+	return pdfPageCount(encoded)
+}
+
 // imageDecodePDF renders the first page of a PDF to a bitmap (BGRA) via
 // poppler, then breaks it into image-cell glyphs like any other image.
 func (t *Terminal) imageDecodePDF(encoded []byte, fitW, fitH bool, page int) (cols, rows int, glyphs []term.Glyph, ok bool) {
@@ -104,6 +112,15 @@ func (t *Terminal) imageDecodePDF(encoded []byte, fitW, fitH bool, page int) (co
 	if ph < 1 {
 		ph = 1
 	}
+	// The script just does +/-1 on its page counter, so the requested page can
+	// be negative or past the end. Wrap it modulo the page count (like the
+	// shell's $((N % pages)) arithmetic) so navigation always lands on a valid
+	// page.
+	n := pdfPageCount(encoded)
+	if n < 1 {
+		return 0, 0, nil, false
+	}
+	page = ((page % n) + n) % n
 	bgra, _, ok := renderPDFPage(encoded, page, pw, ph)
 	if !ok {
 		return 0, 0, nil, false

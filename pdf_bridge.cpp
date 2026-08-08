@@ -92,3 +92,17 @@ int pdf_render_page(const unsigned char *pdf_data, int pdf_len,
     delete doc;
     return 1;
 }
+
+/* Returns the number of pages in the PDF, or 0 on failure. */
+int pdf_page_count(const unsigned char *pdf_data, int pdf_len)
+{
+    if (!pdf_data || pdf_len <= 0)
+        return 0;
+    poppler::byte_array data(pdf_data, pdf_data + pdf_len);
+    poppler::document *doc = poppler::document::load_from_data(&data);
+    if (!doc)
+        return 0;
+    int n = doc->pages();
+    delete doc;
+    return n;
+}

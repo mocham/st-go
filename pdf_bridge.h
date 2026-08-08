@@ -11,6 +11,9 @@ int pdf_render_page(const unsigned char *pdf_data, int pdf_len,
                     int page, int outW, int outH,
                     unsigned char *out_bgra);
 
+/* Returns the number of pages in the PDF, or 0 on failure. */
+int pdf_page_count(const unsigned char *pdf_data, int pdf_len);
+
 #ifdef __cplusplus
 }
 #endif
