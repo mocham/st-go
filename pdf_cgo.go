@@ -1,14 +1,12 @@
-// Package main bridges st-go to a minimal static poppler build (C++ API).
+// Package main bridges st-go to poppler for PDF rendering (C++ API).
 //
-// The C++ page_renderer::render_page() returns a raw BGRA image with no
-// cairo/glib dependency, so the static link only needs poppler + freetype
-// (already in third_party/) + zlib. That drops the glib/gobject/ffi/cairo/
-// pixman/lcms/openjpeg/turbojpeg chain that poppler's glib API requires.
+// The pdf_render_page / pdf_page_count symbols are defined by the C++ bridge
+// third_party_wrapper/pdf_bridge.cpp (linked when poppler is enabled) or by
+// the no-op dummy-pdf.o (see Makefile targets); a dummy makes the PDF path
+// fail gracefully (no image) instead of crashing.
 package main
 
 /*
-#cgo CXXFLAGS: -std=c++11 -Ithird_party/poppler/include -Ithird_party/poppler/include/poppler -I.
-#cgo LDFLAGS: -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler -Lthird_party/freetype -lfreetype -Lthird_party/poppler/lib -lpng16 -lz -lstdc++ -lm
 #include <stdlib.h>
 #include "pdf_bridge.h"
 */

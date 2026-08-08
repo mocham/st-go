@@ -1,5 +1,8 @@
 # Binaries
 /st
+/st-min
+/st-stb
+/st-pdf
 /st-go
 
 # Editor swap files

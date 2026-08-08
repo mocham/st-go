@@ -992,3 +992,60 @@ func TestPDFModuloWrap(t *testing.T) {
 		t.Fatalf("page -1 (negative) should wrap to last page")
 	}
 }
+
+// TestWebPDecode verifies WebP images decode via libwebp (stb_image does not
+// support WebP). A minimal valid WebP is built in-memory from a known-good
+// 2x2 lossless WebP and must decode to the expected RGBA.
+func TestWebPDecode(t *testing.T) {
+	// 2x2 solid-red lossless WebP (VP8L), bytes verified against libwebp.
+	webp := []byte{
+		0x52, 0x49, 0x46, 0x46, 0x1c, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+		0x56, 0x50, 0x38, 0x4c, 0x0f, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x40, 0x00,
+		0x00, 0x07, 0x10, 0xfd, 0x8f, 0xfe, 0x07, 0x22, 0xa2, 0xff, 0x01, 0x00,
+	}
+	if !isWebP(webp) {
+		t.Fatalf("isWebP rejected RIFF/WEBP header")
+	}
+	w, h, rgba, ok := decodeWebP(webp)
+	if !ok {
+		t.Fatalf("webp decode failed")
+	}
+	if w != 2 || h != 2 || len(rgba) != 2*2*4 {
+		t.Fatalf("webp decoded %dx%d len=%d, want 2x2", w, h, len(rgba))
+	}
+	// solid red (lossless): R=255 G=0 B=0
+	if rgba[0] != 255 || rgba[1] != 0 || rgba[2] != 0 {
+		t.Fatalf("webp pixel (R,G,B)=(%d,%d,%d), want (255,0,0)", rgba[0], rgba[1], rgba[2])
+	}
+}
+
+// TestDummyGracefulDegrades verifies that when a library is replaced by a
+// dummy object (st-min/st-stb/st-pdf builds), the decode paths fail gracefully
+// (no panic, no image) instead of crashing. It passes with both real libs and
+// dummies since the failure-handling is the same.
+func TestDummyGracefulDegrades(t *testing.T) {
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_dg", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+
+	// malformed PNG magic: real stb returns NULL, dummy-stb returns NULL too
+	_, _, _, errOK := decodeImage([]byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xff})
+	if !errOK {
+		t.Fatalf("decodeImage of bad png should fail gracefully (err=true)")
+	}
+	// malformed webp: WebPGetInfo returns 0 in both real and dummy
+	_, _, _, ok := decodeWebP([]byte{0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00})
+	if ok {
+		t.Fatalf("decodeWebP of bad webp should fail gracefully (ok=false)")
+	}
+	// pdf: page count of garbage is 0 in both real and dummy
+	if n := pdfPageCount([]byte("not a pdf")); n != 0 {
+		t.Fatalf("pdfPageCount(garbage)=%d want 0", n)
+	}
+}

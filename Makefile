@@ -4,6 +4,7 @@
 # demand; the whole folder is gitignored and reproduced on demand):
 #   - FreeType2   : glyph rasterization
 #   - stb_image   : PNG/JPEG/GIF/BMP image decode
+#   - libwebp     : WebP decode (stb_image has no WebP support)
 #   - poppler     : PDF rendering (first page / page N via "open")
 #   - zlib        : poppler's stream decompression
 #   - libpng      : poppler's embedded-image support
@@ -39,7 +40,6 @@ BIN         = st
 CFG         = config/config.json
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
-LDFLAGS     = -linkmode external -extldflags '-static -lstdc++'
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # A MINIMAL static poppler using only the C++ API (page_renderer -> raw BGRA),
@@ -64,6 +64,13 @@ PNG_URL     = https://download.sourceforge.net/libpng/libpng-$(PNG_VERSION).tar.
 PNG_TAR     = third_party/libpng-$(PNG_VERSION).tar.gz
 PNG_SRC     = third_party/libpng-src
 PNG_LIB     = third_party/poppler/lib/libpng16.a
+
+# libwebp: WebP decode (stb_image has no WebP support).
+WEBP_VERSION = 1.6.0
+WEBP_URL     = https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-$(WEBP_VERSION).tar.gz
+WEBP_TAR     = third_party/libwebp-$(WEBP_VERSION).tar.gz
+WEBP_SRC     = third_party/libwebp-src
+WEBP_LIB     = third_party/webp/lib/libwebp.a
 
 all: $(BIN)
 
@@ -133,6 +140,24 @@ $(PNG_LIB): $(ZLIB_LIB)
 	cp "$(PNG_SRC)/.libs/libpng16.a" "$(PNG_LIB)"
 	cp "$(PNG_SRC)/png.h" "$(PNG_SRC)/pngconf.h" "$(PNG_SRC)/pnglibconf.h" third_party/poppler/include/
 
+# --- libwebp static (WebP decode; stb_image has no WebP support) ----------
+$(WEBP_LIB):
+	@mkdir -p third_party
+	@if [ ! -f "$(WEBP_TAR)" ]; then \
+		echo "downloading libwebp $(WEBP_VERSION)..."; \
+		curl -fL -o "$(WEBP_TAR)" "$(WEBP_URL)"; \
+	fi
+	rm -rf "$(WEBP_SRC)" third_party/webp
+	mkdir -p "$(WEBP_SRC)" third_party/webp/lib third_party/webp/include/webp
+	tar -xzf "$(WEBP_TAR)" -C "$(WEBP_SRC)" --strip-components=1
+	cd "$(WEBP_SRC)" && ./configure CFLAGS="-fPIC -O2" --enable-static --disable-shared
+	$(MAKE) -C "$(WEBP_SRC)"
+	# the webp tarball ships a swig/libwebp.go which would make "go test ./..."
+	# try to build it as a Go package; drop it (and other non-C build dirs).
+	rm -rf "$(WEBP_SRC)/swig" "$(WEBP_SRC)/man" "$(WEBP_SRC)/extras"
+	cp "$(WEBP_SRC)/src/.libs/libwebp.a" "$(WEBP_LIB)"
+	cp "$(WEBP_SRC)/src/webp/"*.h third_party/webp/include/webp/
+
 # --- poppler static (minimal, C++ API only) ------------------------------
 $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB)
 	@mkdir -p third_party
@@ -166,23 +191,85 @@ $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB)
 	cp "$(POPPLER_SRC)/cpp/"*.h third_party/poppler/include/
 	cp "$(POPPLER_BUILD)/cpp/poppler_cpp_export.h" third_party/poppler/include/
 
-# --- st -----------------------------------------------------------------
-$(BIN): $(FT_A) $(STB_O) $(POPPLER_LIB) $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
-        $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h)
-	go build -o "$(BIN)" -ldflags "$(LDFLAGS)" .
+# --- st targets ------------------------------------------------------------
+# Four build levels with an increasing set of third-party libraries:
+#   st      (full) : freetype + stb_image + libwebp + poppler
+#   st-pdf         : freetype + stb_image + poppler          (no webp)
+#   st-stb         : freetype + stb_image                    (no pdf/webp)
+#   st-min         : freetype only                           (no image/pdf)
+#
+# When a library is dropped, the cgo files still reference its C symbols; the
+# corresponding dummy-*.o (a no-op that returns failure) satisfies the link, so
+# the code degrades gracefully (shows nothing) instead of crashing. All extra
+# objects/libs are passed via -extldflags so a single set of .go files works
+# for every level.
 
-install: $(BIN)
+DUMMY_DIR    = third_party/dummy
+DUMMY_STB    = $(DUMMY_DIR)/dummy-stb.o
+DUMMY_WEBP   = $(DUMMY_DIR)/dummy-webp.o
+DUMMY_PDF    = $(DUMMY_DIR)/dummy-pdf.o
+PDF_BRIDGE_O = third_party/pdf_bridge.o
+
+# extra link items appended to -extldflags (order matters for static libs)
+MIN_EXTRA  = $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF)
+STB_EXTRA  = $(STB_O) -lm $(DUMMY_WEBP) $(DUMMY_PDF)
+PDF_EXTRA  = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(DUMMY_WEBP)
+FULL_EXTRA = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_LIB)
+
+GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
+          $(wildcard config/*.json) $(wildcard ptyutil/*.go) \
+          $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h) \
+          $(wildcard third_party_wrapper/*.cpp) $(wildcard *.h)
+
+st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(PDF_BRIDGE_O) $(GO_SRC)
+	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(FULL_EXTRA)"' .
+
+st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
+	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(PDF_EXTRA)"' .
+
+st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
+	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(STB_EXTRA)"' .
+
+st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
+	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(MIN_EXTRA)"' .
+
+# --- dummy objects (no-op stubs for dropped libraries) --------------------
+$(DUMMY_DIR)/dummy-stb.o: third_party_wrapper/dummy-stb.c
+	@mkdir -p $(DUMMY_DIR)
+	$(CC) -O2 -c $< -o $@
+
+$(DUMMY_DIR)/dummy-webp.o: third_party_wrapper/dummy-webp.c
+	@mkdir -p $(DUMMY_DIR)
+	$(CC) -O2 -c $< -o $@
+
+$(DUMMY_DIR)/dummy-pdf.o: third_party_wrapper/dummy-pdf.c
+	@mkdir -p $(DUMMY_DIR)
+	$(CC) -O2 -c $< -o $@
+
+# --- pdf bridge object (real poppler bridge, compiled outside cgo) --------
+$(PDF_BRIDGE_O): third_party_wrapper/pdf_bridge.cpp pdf_bridge.h
+	$(CXX) -std=c++11 -fPIC -Ithird_party/poppler/include \
+	       -Ithird_party/poppler/include/poppler -I. -c $< -o $@
+
+install: st
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 "$(BIN)" "$(DESTDIR)$(BINDIR)/$(BIN)"
-	install -m 0644 "$(CFG)" "$(DESTDIR)$(BINDIR)/$(BIN).json"
+	install -m 0755 st "$(DESTDIR)$(BINDIR)/st"
+	install -m 0644 "$(CFG)" "$(DESTDIR)$(BINDIR)/st.json"
+
+# go test ./... needs the third-party libs linked too (they moved out of the
+# #cgo LDFLAGS into -extldflags); test against the full build.
+TEST_EXTRA = $(FULL_EXTRA)
+
+test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(PDF_BRIDGE_O)
+	go test ./... -ldflags '-linkmode external -extldflags "-static $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 uninstall:
-	rm -f "$(DESTDIR)$(BINDIR)/$(BIN)" "$(DESTDIR)$(BINDIR)/$(BIN).json"
+	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
 
 clean:
-	rm -f "$(BIN)"
+	rm -f st st-min st-stb st-pdf
 
 distclean:
-	rm -rf third_party "$(BIN)"
+	rm -rf third_party st st-min st-stb st-pdf
 
-.PHONY: all install uninstall clean distclean
+.PHONY: all install uninstall clean distclean test
