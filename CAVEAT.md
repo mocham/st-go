@@ -210,6 +210,30 @@ so cgo does not auto-compile it; the Makefile compiles it to `pdf_bridge.o`
 - `go test ./...` also needs the libs linked: use `make test` (which passes the
   full EXTRA flags) instead of a bare `go test`.
 
+### 3.2b Stripping unused symbols (gc-sections)
+
+Every third-party lib is built with `-ffunction-sections -fdata-sections`, and
+all binaries are linked with `-Wl,--gc-sections`, which drops unreferenced
+functions. This shrinks the binaries substantially:
+
+| target | without gc-sections | with gc-sections |
+|--------|---------------------|------------------|
+| st-min | 8.5 MB              | 7.3 MB           |
+| st-stb | 8.6 MB              | 7.4 MB           |
+| st-pdf | 14.6 MB             | 11.2 MB          |
+| st     | 14.9 MB             | 11.5 MB          |
+
+**poppler does not use dlopen/dlsym** at runtime — the `dlopen`/`dlsym`
+symbols in a static binary are glibc's own internals (pulled in by Go's net
+resolver), not poppler plugins. gc-sections is therefore safe.
+
+gc-sections traps:
+- `pdf_bridge.o` must precede `-lpoppler-cpp` in `-extldflags`, or gc-sections
+  drops the needed poppler objects (undefined `poppler::document::...`).
+- `-ffunction-sections` slightly *increases* the .a size (section alignment)
+  but is more than offset by the final `--gc-sections` savings.
+
+
 ### 3.2 Minimal poppler (bloat removal)
 
 poppler's **glib API** drags in glib/gobject/ffi/cairo/pixman/lcms/openjpeg/
