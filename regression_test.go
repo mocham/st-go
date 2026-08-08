@@ -12,6 +12,7 @@ import (
 	"github.com/BurntSushi/xgb/xproto"
 
 	"st-go/config"
+	"st-go/ptyutil"
 	"st-go/term"
 )
 
@@ -1137,4 +1138,166 @@ func TestDslOpenTextStopsAtBottom(t *testing.T) {
 		}
 	}
 	t.Logf("OK: long line truncated, no wrap into later rows")
+}
+
+// TestFBAltPathAndIncremental verifies demo/file-browser.sh:
+//  1. it starts from the <path> argument instead of the cwd, and
+//  2. Up/Down selection moves only redraw the affected rows (no full clear).
+func TestFBAltPathAndIncremental(t *testing.T) {
+	dir := t.TempDir()
+	sub := dir + "/sub"
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sub+"/s.txt", []byte("sub file\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/r.txt", []byte("root file\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	master, slave, err := ptyutil.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	ptyutil.SetWinSize(master, 24, 80)
+	cmd := exec.Command("bash", "demo/file-browser.sh", sub)
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { master.Write([]byte("q")); cmd.Process.Kill() }()
+	slave.Close()
+
+	var all []byte
+	go func() {
+		buf := make([]byte, 8192)
+		for {
+			n, err := master.Read(buf)
+			if n > 0 {
+				all = append(all, buf[:n]...)
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	time.Sleep(600 * time.Millisecond)
+	if clears := strings.Count(string(all), "\x1bPclear\x1b\\"); clears != 1 {
+		t.Fatalf("initial render issued %d full clears, want exactly 1", clears)
+	}
+	// one Down move; must NOT trigger another full clear
+	master.Write([]byte("\x1b[B"))
+	time.Sleep(300 * time.Millisecond)
+	master.Write([]byte("\x1b[B"))
+	time.Sleep(300 * time.Millisecond)
+	allStr := string(all)
+	if clears := strings.Count(allStr, "\x1bPclear\x1b\\"); clears > 1 {
+		t.Fatalf("selection moves triggered %d full clears, want incremental redraw", clears)
+	}
+	// the alt-path list should contain s.txt (from <path>/sub), not r.txt
+	if !strings.Contains(allStr, "s.txt") {
+		t.Fatalf("alt-path list missing s.txt (started at %s): %q", sub, allStr)
+	}
+	if strings.Contains(allStr, "r.txt") {
+		t.Fatalf("alt-path list unexpectedly contains r.txt from parent dir")
+	}
+	t.Logf("OK: alt path start + incremental redraw (single initial clear)")
+}
+
+// TestFBSelectionKeepsList verifies selection moves in demo/file-browser.sh do
+// not blank the unaffected list rows (the preview clear must not erase the
+// whole line), and that a fit-height image preview redraws the full list.
+func TestFBSelectionKeepsList(t *testing.T) {
+	dir := t.TempDir()
+	// glob order: .., aaaa, bbbb, dddd, pic
+	os.WriteFile(dir+"/aaaa.txt", []byte(strings.Repeat("a", 40)+"\n"), 0644)
+	os.WriteFile(dir+"/bbbb.txt", []byte(strings.Repeat("b", 40)+"\n"), 0644)
+	os.WriteFile(dir+"/dddd.txt", []byte(strings.Repeat("d", 40)+"\n"), 0644)
+	os.WriteFile(dir+"/pic.png", []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 'I', 'H', 'D', 'R',
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00,
+		0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 'I', 'D', 'A', 'T',
+		0x08, 0x1d, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x48, 0x51, 0x89, 0x41, 0x8c, 0x00, 0x00, 0x00, 0x00, 'I', 'E', 'N', 'D',
+		0xae, 0x42, 0x60, 0x82}, 0644)
+
+	cfg := config.Default()
+	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
+		t.Skip("font not available")
+	}
+	trm, err := NewTerminalOpts(cfg, 1.0, 0, 0, 0, "tile_fbk", "st", "ST", false)
+	if err != nil {
+		t.Skipf("no X: %v", err)
+	}
+	defer trm.Close()
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+
+	master, slave, err := ptyutil.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	ptyutil.SetWinSize(master, 24, 80)
+	cmd := exec.Command("bash", "demo/file-browser.sh", dir)
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { master.Write([]byte("q")); cmd.Process.Kill() }()
+	slave.Close()
+	go func() {
+		buf := make([]byte, 8192)
+		for {
+			n, err := master.Read(buf)
+			if n > 0 {
+				core.Twrite(buf[:n], false)
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	core.SetWriter(func(b []byte) { master.Write(b) })
+
+	time.Sleep(700 * time.Millisecond)
+	core.Redraw()
+	// 3 Down moves on text files: IDX 0->3 (dddd), list must stay intact
+	for i := 0; i < 3; i++ {
+		master.Write([]byte("\x1b[B"))
+		time.Sleep(250 * time.Millisecond)
+	}
+	core.Redraw()
+	for _, n := range []string{"aaaa.txt", "bbbb.txt", "dddd.txt"} {
+		found := false
+		for y := 1; y < 6; y++ {
+			if strings.Contains(core.LineText(y), n) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("text-file move blanked list row containing %q", n)
+		}
+	}
+	// one more Down to reach pic.png (image, fit-height clears screen)
+	master.Write([]byte("\x1b[B"))
+	time.Sleep(400 * time.Millisecond)
+	core.Redraw()
+	for _, n := range []string{"aaaa.txt", "bbbb.txt", "dddd.txt", "pic.png"} {
+		found := false
+		for y := 1; y < 6; y++ {
+			if strings.Contains(core.LineText(y), n) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("image preview blanked list row containing %q", n)
+		}
+	}
+	t.Logf("OK: list rows preserved on selection moves and after image preview")
 }
