@@ -71,6 +71,33 @@ func TestKmapExact(t *testing.T) {
 	}
 }
 
+// TestFunctionKeyMap verifies function keys and their modifier variants use
+// the st/xterm escape sequences expected by terminal applications.
+func TestFunctionKeyMap(t *testing.T) {
+	cfg := config.Default()
+	trm := &Terminal{termCore: &term.Term{}}
+	trm.loadInputConfig(cfg)
+
+	cases := []struct {
+		ksym  uint
+		state uint
+		want  string
+	}{
+		{XKF1, 0, "\x1bOP"},
+		{XKF5, 0, "\x1b[15~"},
+		{XKF5, ShiftMask, "\x1b[15;2~"},
+		{XKF5, ControlMask, "\x1b[15;5~"},
+		{XKF12, ControlMask, "\x1b[24;5~"},
+		{XKF29, 0, "\x1b[15;5~"},
+	}
+	for _, c := range cases {
+		s, matched := trm.kmap(c.ksym, c.state)
+		if !matched || s != c.want {
+			t.Errorf("kmap(%#x,%#x)=%q,%v want %q", c.ksym, c.state, s, matched, c.want)
+		}
+	}
+}
+
 // TestXtermColors verifies the 256-color cube/grayscale table matches st's
 // xtermcolormap (standard levels {0,95,135,175,215,255}, gray = 8+10n capped
 // at 255).

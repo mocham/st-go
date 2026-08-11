@@ -59,7 +59,7 @@ type keyDef struct {
 
 // defaultKeymap mirrors config.h's key[] array.
 func defaultKeymap() []keyDef {
-	return []keyDef{
+	keys := []keyDef{
 		{XKKPHome, ShiftMask, "\x1b[2J", 0, -1},
 		{XKKPHome, ShiftMask, "\x1b[1;2H", 0, +1},
 		{XKKPHome, XKAnyMod, "\x1b[H", 0, -1},
@@ -189,11 +189,63 @@ func defaultKeymap() []keyDef {
 		{XKNext, ShiftMask, "\x1b[6;2~", 0, 0},
 		{XKNext, XKAnyMod, "\x1b[6~", 0, 0},
 	}
+	return append(keys, addFunctionKeys()...)
 }
 
 // function key table F1-F35
 func addFunctionKeys() []keyDef {
-	return nil
+	base := []struct {
+		keysym uint
+		code   string
+	}{
+		{XKF1, "P"}, {XKF2, "Q"}, {XKF3, "R"}, {XKF4, "S"},
+		{XKF5, "15"}, {XKF6, "17"}, {XKF7, "18"}, {XKF8, "19"},
+		{XKF9, "20"}, {XKF10, "21"}, {XKF11, "23"}, {XKF12, "24"},
+	}
+	sequence := func(key int, modifier int) string {
+		code := base[key].code
+		if modifier == 0 {
+			if key < 4 {
+				return "\x1bO" + code
+			}
+			return "\x1b[" + code + "~"
+		}
+		if key < 4 {
+			return "\x1b[1;" + itoa(modifier) + code
+		}
+		return "\x1b[" + code + ";" + itoa(modifier) + "~"
+	}
+
+	modifiers := []struct {
+		mask  int
+		param int
+	}{
+		{XKNoMod, 0},
+		{ShiftMask, 2},
+		{ControlMask, 5},
+		{Mod4Mask, 6},
+		{Mod1Mask, 3},
+	}
+	keys := make([]keyDef, 0, 86)
+	for i := range base {
+		for _, modifier := range modifiers {
+			keys = append(keys, keyDef{base[i].keysym, modifier.mask, sequence(i, modifier.param), 0, 0})
+		}
+		// These legacy mappings are part of st's Linux-console compatibility table.
+		if i < 3 {
+			keys = append(keys, keyDef{base[i].keysym, Mod3Mask, sequence(i, 4), 0, 0})
+		}
+	}
+
+	// X11 exposes the shifted and controlled variants as F13-F24 and F25-F35
+	// on keyboards that provide those keysyms directly.
+	for i := 0; i < 12; i++ {
+		keys = append(keys, keyDef{XKF13 + uint(i), XKNoMod, sequence(i, 2), 0, 0})
+	}
+	for i := 0; i < 11; i++ {
+		keys = append(keys, keyDef{XKF25 + uint(i), XKNoMod, sequence(i, 5), 0, 0})
+	}
+	return keys
 }
 
 // fallback: composed string (XLookupString equivalent).

@@ -22,3 +22,5 @@
 
 # Third-party (downloaded by the Makefile)
 /third_party/
+/SNAPSHOT/
+AGENTS.md
