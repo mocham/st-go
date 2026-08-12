@@ -270,9 +270,7 @@ func (t *Term) Tattrset(attr uint16) bool {
 func (t *Term) tsetdirt(top, bot int) {
 	top = clamp(top, 0, t.row-1)
 	bot = clamp(bot, 0, t.row-1)
-	for i := top; i <= bot; i++ {
-		t.dirty[i] = true
-	}
+	t.markDirty(0, top, t.col-1, bot)
 }
 
 func (t *Term) tsetdirtattr(attr uint16) {
@@ -414,6 +412,8 @@ func init() {
 }
 
 func (t *Term) tsetchar(u rune, attr *Glyph, x, y int) {
+	t.cancelAnimCell(x, y)
+
 	if t.trantbl[t.charset] == csGraphic0 && between(int(u), 0x41, 0x7e) {
 		r := vt100_0[u-0x41]
 		if r != 0 {
@@ -431,7 +431,7 @@ func (t *Term) tsetchar(u rune, attr *Glyph, x, y int) {
 		t.line[y][x-1].Mode &^= ATTRWide
 	}
 
-	t.dirty[y] = true
+	t.markDirty(x, x, y, y)
 	t.line[y][x] = *attr
 	t.line[y][x].U = u
 }
@@ -448,8 +448,9 @@ func (t *Term) tclearregion(x1, y1, x2, y2 int) {
 	y1 = clamp(y1, 0, t.row-1)
 	y2 = clamp(y2, 0, t.row-1)
 
+	t.cancelAnimRegion(x1, y1, x2, y2)
+
 	for y := y1; y <= y2; y++ {
-		t.dirty[y] = true
 		for x := x1; x <= x2; x++ {
 			if t.selected(x, y) {
 				t.selclear()
@@ -461,6 +462,7 @@ func (t *Term) tclearregion(x1, y1, x2, y2 int) {
 			gp.U = ' '
 		}
 	}
+	t.markDirty(x1, y1, x2, y2)
 }
 
 func (t *Term) tdeletechar(n int) {
@@ -628,21 +630,22 @@ func (t *Term) csiparse() {
 	}
 }
 
-// drawregion redraws dirty lines in [y1,y2).
-func (t *Term) drawregion(x1, y1, x2, y2 int) {
-	for y := y1; y < y2; y++ {
-		if !t.dirty[y] {
-			continue
+// Draw drains the queued repaint regions and draws them through the hooks
+// (the single actual-paint worker calls this under the lock). It always
+// redraws the cursor and returns the bounding region (union of the dirty
+// regions and the cursor cells) so the frontend can blit just that area.
+func (t *Term) Draw() Region {
+	regions := t.TakeRegions()
+	r := Region{}
+	for _, q := range regions {
+		if r.Empty() {
+			r = q
+		} else {
+			r = regionUnion(r, q)
 		}
-		t.dirty[y] = false
-		t.xdrawline(t.line[y], x1, y, x2)
 	}
-}
-
-// Draw draws the screen through the hooks.
-func (t *Term) Draw() {
 	if !t.xstartdraw() {
-		return
+		return Region{}
 	}
 	cx := t.c.x
 	t.ocx = clamp(t.ocx, 0, t.col-1)
@@ -653,19 +656,28 @@ func (t *Term) Draw() {
 	if t.line[t.c.y][cx].Mode&ATTRWdummy != 0 {
 		cx--
 	}
-
-	t.drawregion(0, 0, t.col, t.row)
+	if !r.Empty() {
+		for y := r.Y1; y <= r.Y2; y++ {
+			t.xdrawline(t.line[y], r.X1, y, r.X2)
+		}
+	}
+	cxr := Region{min(cx, t.ocx), min(t.c.y, t.ocy), max(cx, t.ocx), max(t.c.y, t.ocy)}
 	t.xdrawcursor(cx, t.c.y, t.line[t.c.y][cx],
 		t.ocx, t.ocy, t.line[t.ocy][t.ocx])
 	t.ocx = cx
 	t.ocy = t.c.y
-	t.xfinishdraw()
+	if r.Empty() {
+		r = cxr
+	} else {
+		r = regionUnion(r, cxr)
+	}
+	return r
 }
 
-// Redraw forces a full redraw.
+// Redraw forces a full repaint of the whole screen.
 func (t *Term) Redraw() {
 	t.tfulldirt()
-	t.Draw()
+	t.requestPaint(true)
 }
 
 // ClearSel public wrapper.

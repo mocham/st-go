@@ -1,7 +1,9 @@
 package term
 
 import (
+	"fmt"
 	"strings"
+	"time"
 
 	"st-go/config"
 )
@@ -180,7 +182,12 @@ type Term struct {
 	row, col int
 	line     []Line
 	alt      []Line
-	dirty    []bool
+	// queue-based painting: changed cell regions awaiting repaint, plus the
+	// stop/resume (synchronized update, DECSET 2026) pause counter and the
+	// frontend's paint dispatcher.
+	regions      []Region
+	paintPaused  int
+	paintFn      func(flushNow bool)
 	c        TCursor
 	ocx, ocy int
 	top, bot int
@@ -208,6 +215,10 @@ type Term struct {
 	// image display (DCS DSL)
 	pwd string // base directory for relative image paths (setpwd)
 
+	// animated image playback (open DSL `anim` option)
+	anim        *animation
+	animDrawing bool // set while the animation places its own cells
+
 	// writer receives bytes destined for the pty (set by the frontend).
 	writer func([]byte)
 
@@ -224,6 +235,7 @@ type ImageDecodeOptions struct {
 	Page       int
 	ViewCols   int
 	ViewRows   int
+	Animate    bool // play an animated WebP (open DSL `anim` option)
 }
 
 type GeometryUnit uint8
@@ -282,6 +294,12 @@ type Hooks interface {
 	// address in the frontend atlas). The original image data is freed.
 	// Returns the grid size and the glyphs in row-major order.
 	ImageDecode(encoded []byte, opts ImageDecodeOptions) (cols, rows int, glyphs []Glyph, ok bool)
+	// ImageDecodeAnim decodes an animated image's metadata for the open DSL
+	// `anim` option: per-frame durations (ms), frame count and canvas grid.
+	ImageDecodeAnim(encoded []byte, opts ImageDecodeOptions) (durations []int, frameCount, cols, rows int, ok bool)
+	// ImageDecodeAnimFrame decodes one frame (0-based index) of an animated
+	// image into glyphs, on demand as the animation plays.
+	ImageDecodeAnimFrame(encoded []byte, frameIdx int, opts ImageDecodeOptions) (cols, rows int, glyphs []Glyph, ok bool)
 	// ImageClearAll clears the image glyph atlas (terminal reset / clear).
 	ImageClearAll()
 	WindowGeometry(req WindowGeometryRequest)
@@ -458,3 +476,260 @@ func (t *Term) setWinMode(set bool, mode uint) {
 }
 
 func (t *Term) winModeIs(flag uint) bool { return t.winMode&flag != 0 }
+
+// --- animated image playback (open DSL `anim` option) ----------------------
+// A decoded animated WebP is played in a fixed rect: the frontend calls
+// TickAnim on a timer, and each tick swaps the frame glyphs and redraws. The
+// animation plays once and then holds the last frame; a progress line is drawn
+// in the bottom row of the rect. Any write/erase into the rect cancels it.
+
+// animation holds the playback state of an animated image (open DSL `anim`
+// option). It keeps the encoded bytes and timing metadata, and decodes each
+// frame on demand (via ImageDecodeAnimFrame) as it plays, so a playing
+// animation's memory stays bounded. Plays once, then holds the last frame; a
+// progress line is drawn in the bottom row of the rect. Any write/erase into
+// the rect cancels it.
+type animation struct {
+	data      []byte // encoded animated image
+	opts      ImageDecodeOptions
+	durations []int // ms per frame
+	frameCount int
+	cols, rows int
+	rectX, rectY, rectW, rectH int
+	startAt time.Time
+	idx     int
+	done    bool
+}
+
+// SetAnim starts playing an animated image in the rect (rx,ry,rw,rh),
+// replacing any existing animation. The first frame is drawn immediately.
+func (t *Term) SetAnim(data []byte, opts ImageDecodeOptions, durations []int, cols, rows, rx, ry, rw, rh int) {
+	t.anim = &animation{
+		data: data, opts: opts, durations: durations,
+		frameCount: len(durations),
+		cols: cols, rows: rows,
+		rectX: rx, rectY: ry, rectW: rw, rectH: rh,
+		startAt: time.Now(), idx: -1,
+	}
+	t.TickAnim(time.Now())
+}
+
+// HasAnim reports whether an animation is currently running (not yet done).
+func (t *Term) HasAnim() bool { return t.anim != nil && !t.anim.done }
+
+// CancelAnims removes all running animations (e.g. terminal clear/reset).
+func (t *Term) CancelAnims() { t.anim = nil }
+
+// cancelAnimCell cancels the animation if the cell lies inside its rect.
+func (t *Term) cancelAnimCell(x, y int) {
+	if t.anim == nil || t.animDrawing {
+		return
+	}
+	a := t.anim
+	if x >= a.rectX && x < a.rectX+a.rectW && y >= a.rectY && y < a.rectY+a.rectH {
+		t.anim = nil
+	}
+}
+
+// cancelAnimRegion cancels the animation if the region overlaps its rect.
+func (t *Term) cancelAnimRegion(x1, y1, x2, y2 int) {
+	if t.anim == nil || t.animDrawing {
+		return
+	}
+	a := t.anim
+	if x1 < a.rectX+a.rectW && x2 >= a.rectX && y1 < a.rectY+a.rectH && y2 >= a.rectY {
+		t.anim = nil
+	}
+}
+
+// TickAnim advances the running animation to the frame due at now, decoding
+// that frame on demand (recycling the previous frame's bitmap). It returns
+// true when the screen changed and the frontend should redraw.
+func (t *Term) TickAnim(now time.Time) bool {
+	a := t.anim
+	if a == nil || a.done || a.frameCount == 0 {
+		return false
+	}
+	elapsed := now.Sub(a.startAt)
+	target, cum := 0, 0
+	for _, d := range a.durations {
+		if elapsed < time.Duration(cum+d)*time.Millisecond {
+			break
+		}
+		cum += d
+		target++
+	}
+	if target >= a.frameCount {
+		// play once: done, hold the last frame
+		a.done = true
+		if a.idx == a.frameCount-1 {
+			return false
+		}
+		target = a.frameCount - 1
+	}
+	if target == a.idx {
+		return false
+	}
+	cols, rows, glyphs, ok := t.hooks.ImageDecodeAnimFrame(a.data, target, a.opts)
+	if !ok {
+		a.done = true
+		return false
+	}
+	a.cols, a.rows = cols, rows
+	t.drawAnimFrame(a, target, glyphs)
+	a.idx = target
+	return true
+}
+
+// drawAnimFrame places a frame's glyphs in the animation rect, reserving the
+// bottom row for a progress line, and marks the rows dirty.
+func (t *Term) drawAnimFrame(a *animation, idx int, glyphs []Glyph) {
+	t.animDrawing = true
+	defer func() { t.animDrawing = false }()
+
+	// one animation frame = one atomic paint batch = one flush (stop/resume).
+	t.PaintStop()
+	defer t.PaintResume()
+
+	imgH := a.rectH - 1 // bottom row holds the progress line
+	if imgH < 1 {
+		imgH = 1
+	}
+	t.tclearregion(a.rectX, a.rectY, a.rectX+a.rectW-1, a.rectY+a.rectH-1)
+	startX := a.rectX + max(0, (a.rectW-min(a.cols, a.rectW))/2)
+	startY := a.rectY + max(0, (imgH-min(a.rows, imgH))/2)
+	for gy := 0; gy < a.rows; gy++ {
+		y := startY + gy
+		if y >= a.rectY+imgH {
+			break
+		}
+		for gx := 0; gx < a.cols; gx++ {
+			x := startX + gx
+			if x >= a.rectX+a.rectW {
+				break
+			}
+			gi := gy*a.cols + gx
+			if gi >= len(glyphs) {
+				break
+			}
+			t.tsetchar(glyphs[gi].U, &glyphs[gi], x, y)
+		}
+	}
+	// progress line in the bottom row of the rect
+	pct := (idx + 1) * 100 / a.frameCount
+	label := fmt.Sprintf("WEBP %3d%%", pct)
+	attr := Glyph{Mode: ATTRBold, Fg: uint32(t.cfg.DefaultFg), Bg: uint32(t.cfg.DefaultBg)}
+	for i := 0; i < len(label) && a.rectX+i < a.rectX+a.rectW; i++ {
+		attr.U = rune(label[i])
+		t.tsetchar(attr.U, &attr, a.rectX+i, a.rectY+a.rectH-1)
+	}
+}
+
+// --- queue-based painting -------------------------------------------------
+// Virtual painting (Twrite, image placement, animation frames, selection)
+// marks changed cell regions; a single actual-paint worker drains them, draws
+// the union into the framebuffer and sends one X11 blit per batch. DECSET 2026
+// (PaintStop/PaintResume) lets applications batch output and flush once.
+
+// Region is an inclusive cell rectangle pending repaint.
+type Region struct {
+	X1, Y1, X2, Y2 int
+}
+
+// Empty reports whether the region is invalid (nothing to paint).
+func (r Region) Empty() bool { return r.X1 > r.X2 || r.Y1 > r.Y2 }
+
+func regionUnion(a, b Region) Region {
+	if b.X1 < a.X1 {
+		a.X1 = b.X1
+	}
+	if b.Y1 < a.Y1 {
+		a.Y1 = b.Y1
+	}
+	if b.X2 > a.X2 {
+		a.X2 = b.X2
+	}
+	if b.Y2 > a.Y2 {
+		a.Y2 = b.Y2
+	}
+	return a
+}
+
+// markDirty queues a changed cell region for repaint, clamped to the screen.
+// The queue is bounded: once it grows large, entries coalesce into their
+// bounding region.
+func (t *Term) markDirty(x1, y1, x2, y2 int) {
+	if x1 > x2 {
+		x1, x2 = x2, x1
+	}
+	if y1 > y2 {
+		y1, y2 = y2, y1
+	}
+	x1 = clamp(x1, 0, t.col-1)
+	x2 = clamp(x2, 0, t.col-1)
+	y1 = clamp(y1, 0, t.row-1)
+	y2 = clamp(y2, 0, t.row-1)
+	if x1 > x2 || y1 > y2 {
+		return
+	}
+	if len(t.regions) >= 64 {
+		r := t.regions[0]
+		for _, q := range t.regions[1:] {
+			r = regionUnion(r, q)
+		}
+		t.regions = []Region{regionUnion(r, Region{x1, y1, x2, y2})}
+		return
+	}
+	t.regions = append(t.regions, Region{x1, y1, x2, y2})
+}
+
+// TakeRegions drains the pending repaint regions.
+func (t *Term) TakeRegions() []Region {
+	regs := t.regions
+	t.regions = nil
+	return regs
+}
+
+// HasPendingPaint reports whether regions await repaint.
+func (t *Term) HasPendingPaint() bool { return len(t.regions) > 0 }
+
+// IsPaintPaused reports whether repainting is currently stopped (2026h).
+func (t *Term) IsPaintPaused() bool { return t.paintPaused > 0 }
+
+// SetPaintFn registers the frontend's paint dispatcher. When nil, Draw runs
+// synchronously on a paint request (tests without a paint worker).
+func (t *Term) SetPaintFn(fn func(flushNow bool)) { t.paintFn = fn }
+
+// PaintStop defers repainting until the matching PaintResume (DECSET 2026h).
+// Regions keep queueing while paused; the resume flushes them as one batch.
+func (t *Term) PaintStop() {
+	t.paintPaused++
+	if t.paintPaused > 64 {
+		t.paintPaused = 64
+	}
+}
+
+// PaintResume restarts painting and requests one repaint of the queued batch.
+func (t *Term) PaintResume() {
+	if t.paintPaused > 0 {
+		t.paintPaused--
+	}
+	if t.paintPaused == 0 {
+		t.requestPaint(true)
+	}
+}
+
+func (t *Term) requestPaint(flushNow bool) {
+	if t.paintPaused > 0 {
+		return
+	}
+	if t.paintFn != nil {
+		t.paintFn(flushNow)
+	} else {
+		t.Draw()
+	}
+}
+
+// PaintDirty requests a repaint of the currently queued regions without
+// enqueuing a full-screen region. This is the per-output paint trigger.
+func (t *Term) PaintDirty() { t.requestPaint(false) }

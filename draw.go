@@ -3,8 +3,6 @@ package main
 import (
 	"sync"
 
-	"github.com/BurntSushi/xgb/xproto"
-
 	"st-go/term"
 )
 
@@ -230,42 +228,6 @@ func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, ox, oy int, og term.Glyp
 	}
 }
 
-func (t *Terminal) FinishDraw() {
-	if !fbDirty {
-		return
-	}
-	t.blitFramebuffer()
-	fbDirty = false
-}
-
-// blitFramebuffer copies the framebuffer to the window.
-// The X server accepts 32-bit packed pixels even for depth-24 drawables
-// (bytes-per-pixel = 4). PutImage width must be ≤ window width and each
-// chunk split to fit the max request size.
-func (t *Terminal) blitFramebuffer() {
-	w, h := fbW, fbH
-	if w < 1 || h < 1 {
-		return
-	}
-	data := uint32ToBytes(framebuf)
-	rowsPer := (262144 - 28) / (w * 4)
-	if rowsPer < 1 {
-		rowsPer = 1
-	}
-	if rowsPer > h {
-		rowsPer = h
-	}
-	ypos := 0
-	for start := 0; start < len(data); start += rowsPer * w * 4 {
-		end := start + rowsPer*w*4
-		if end > len(data) {
-			end = len(data)
-		}
-		xproto.PutImage(t.conn, xproto.ImageFormatZPixmap,
-			xproto.Drawable(t.win), t.gc,
-			uint16(w), uint16((end-start)/(w*4)), int16(0), int16(ypos), 0, 24,
-			data[start:end])
-		ypos += (end - start) / (w * 4)
-	}
-	t.conn.Sync()
-}
+// FinishDraw is a no-op: the single paint worker owns the framebuffer->X11
+// blit (see paint.go), so the term core's rasterize step needs no flush here.
+func (t *Terminal) FinishDraw() {}

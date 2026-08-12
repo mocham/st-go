@@ -75,6 +75,14 @@ type Terminal struct {
 
 	termCore *term.Term
 
+	// single actual-painting worker: virtual painting enqueues regions into
+	// the term core; this worker drains them, draws into the framebuffer under
+	// t.mu, then sends the X11 blit outside the lock.
+	paintCh      chan *paintReq
+	paintMu      sync.Mutex
+	paintPending *paintReq
+	paintStop    chan struct{}
+
 	// ttyResize is set by main to send TIOCSWINSZ to the pty master.
 	ttyResize func(rows, cols int)
 
@@ -507,6 +515,7 @@ func uint32Bytes(v uint32) []byte {
 
 func (t *Terminal) Close() {
 	atomic.StoreInt32(&t.isClosed, 1)
+	t.stopPaintWorker()
 	if t.pixmap != 0 {
 		xproto.FreePixmap(t.conn, t.pixmap)
 	}

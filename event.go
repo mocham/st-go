@@ -10,14 +10,20 @@ import (
 	"st-go/term"
 )
 
-// run is the main event loop, mirroring st's run().
+// run is the main event loop, mirroring st's run(). Virtual painting (model
+// mutations under t.mu) is concurrent; actual painting is handled by the
+// single paint worker (paint.go).
 func (t *Terminal) run(termCore *term.Term) {
 	// keyboard mapping setup
 	t.setupKeys()
 
 	t.termCore = termCore
 
-	// cursor blink timer
+	// one worker performs all actual X11 painting (framebuffer -> PutImage).
+	t.initPaintWorker()
+	termCore.SetPaintFn(func(flushNow bool) { t.paintRequest(flushNow) })
+
+	// cursor blink timer (virtual mutation; the paint worker renders it)
 	if t.blinkMs > 0 {
 		go func() {
 			for {
@@ -25,12 +31,27 @@ func (t *Terminal) run(termCore *term.Term) {
 				t.mu.Lock()
 				if t.termCore != nil && t.termCore.Tattrset(term.ATTRBlink) {
 					t.toggleBlink()
-					t.termCore.Redraw()
+					t.termCore.PaintDirty()
+					t.paintRequest(true)
 				}
 				t.mu.Unlock()
 			}
 		}()
 	}
+
+	// animated image playback timer: advances the running animation (open DSL
+	// `anim`). Each frame is wrapped in PaintStop/PaintResume, so one frame =
+	// one atomic paint batch = one flush.
+	go func() {
+		for {
+			time.Sleep(25 * time.Millisecond)
+			t.mu.Lock()
+			if t.termCore != nil {
+				t.termCore.TickAnim(time.Now())
+			}
+			t.mu.Unlock()
+		}
+	}()
 
 	for {
 		ev, err := t.conn.WaitForEvent()

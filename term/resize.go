@@ -34,11 +34,9 @@ func (t *Term) tresize(col, row int) {
 			t.line = append(t.line, nil)
 			t.alt = append(t.alt, nil)
 		}
-		t.dirty = append(t.dirty, make([]bool, row-len(t.dirty))...)
 	} else {
 		t.line = t.line[:row]
 		t.alt = t.alt[:row]
-		t.dirty = t.dirty[:row]
 	}
 	if len(t.tabs) < col {
 		t.tabs = append(t.tabs, make([]bool, col-len(t.tabs))...)

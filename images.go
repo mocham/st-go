@@ -10,12 +10,113 @@ package main
 // colors per cell — with no per-glyph color transformation.
 
 import (
+	"sort"
+
 	"st-go/term"
 )
 
 // imageAtlas holds the raw RGBA pixel blocks of all image-cell glyphs.
 // Fg in an image glyph indexes into this slice (cw*ch entries per cell).
-var imageAtlas []uint32
+//
+// The atlas is a bounded cache of bitmaps: imageSlots divides it into
+// contiguous regions, each holding one decoded image (≤ one terminal screen of
+// cells). When the bound is reached the most dated bitmap that fits a new
+// image is recycled (dated bitmaps too small for the image are discarded
+// first). This keeps memory bounded instead of growing on every `open`.
+var (
+	imageAtlas    []uint32
+	imageSlots    []*imageSlot
+	imageStampSeq uint64
+)
+
+// imageCacheScreens bounds the atlas to this many full terminal screens of
+// image cells.
+const imageCacheScreens = 4
+
+// imageSlot is one cached bitmap region in imageAtlas: a contiguous run of
+// capacity cells (cw*ch uint32s each). used is the live cell count; stamp is
+// the LRU order.
+type imageSlot struct {
+	offset   int
+	capacity int // cells
+	used     int // cells
+	stamp    uint64
+}
+
+// allocImageCells reserves a bitmap region for an image of `need` terminal
+// cells and returns its atlas offset. The atlas is bounded to
+// imageCacheScreens full screens; when full, the most dated bitmap that fits
+// is recycled (dated bitmaps too small for the image are discarded), and if
+// nothing fits the cache is reset and starts fresh.
+func (t *Terminal) allocImageCells(need int) int {
+	maxCells := t.rows * t.cols * imageCacheScreens
+	if maxCells < 1 {
+		maxCells = 1
+	}
+	if need < 1 {
+		need = 1
+	}
+	full := t.rows * t.cols
+	if full < 1 {
+		full = 1
+	}
+	if need > full {
+		need = full // each bitmap must not exceed one terminal screen
+	}
+	imageStampSeq++
+	now := imageStampSeq
+
+	// 1. reuse a free slot that fits
+	for _, s := range imageSlots {
+		if s.used == 0 && s.capacity >= need {
+			s.used = need
+			s.stamp = now
+			return s.offset
+		}
+	}
+
+	// 2. recycle the most dated bitmap that fits; discard dated bitmaps that
+	//    are too small for this image and keep looking.
+	for _, s := range imageSlotsByStamp() {
+		if s.capacity >= need {
+			s.used = need
+			s.stamp = now
+			return s.offset
+		}
+		s.used = 0 // too small: free it
+	}
+
+	// 3. grow a new bitmap within the bound
+	if imageSlotTotalCells()+need <= maxCells {
+		off := len(imageAtlas)
+		imageAtlas = append(imageAtlas, make([]uint32, need*t.cw*t.ch)...)
+		imageSlots = append(imageSlots, &imageSlot{offset: off, capacity: need, used: need, stamp: now})
+		return off
+	}
+
+	// 4. bound reached and nothing fits (fragmentation): reset and start
+	//    fresh. Dangling image glyphs render blank via the draw bounds check.
+	imageAtlas = nil
+	imageSlots = nil
+	imageAtlas = append(imageAtlas, make([]uint32, need*t.cw*t.ch)...)
+	imageSlots = append(imageSlots, &imageSlot{offset: 0, capacity: need, used: need, stamp: now})
+	return 0
+}
+
+func imageSlotsByStamp() []*imageSlot {
+	out := make([]*imageSlot, len(imageSlots))
+	copy(out, imageSlots)
+	sort.Slice(out, func(i, j int) bool { return out[i].stamp < out[j].stamp })
+	return out
+}
+
+func imageSlotTotalCells() int {
+	n := 0
+	for _, s := range imageSlots {
+		n += s.capacity
+	}
+	return n
+}
 
 // ImageDecode decodes encoded image bytes and breaks it into one glyph per
 // terminal cell. fitW/fitH resize (scale, aspect-preserving) the image to
@@ -31,19 +132,52 @@ func (t *Terminal) ImageDecode(encoded []byte, opts term.ImageDecodeOptions) (co
 	if err || w <= 0 || h <= 0 {
 		return 0, 0, nil, false
 	}
+	cols, rows, glyphs = t.imageToGlyphs(w, h, rgba, opts)
+	return cols, rows, glyphs, true
+}
 
+// ImageDecodeAnim decodes an animated WebP's metadata for the open DSL `anim`
+// option: per-frame durations (ms), frame count and the canvas grid size. No
+// bitmaps are allocated here; frames are decoded on demand by
+// ImageDecodeAnimFrame as the animation plays.
+func (t *Terminal) ImageDecodeAnim(encoded []byte, opts term.ImageDecodeOptions) (durations []int, frameCount, cols, rows int, ok bool) {
+	durations, w, h, dOk := decodeWebPAnimInfo(encoded)
+	if !dOk || w <= 0 || h <= 0 || len(durations) == 0 {
+		return nil, 0, 0, 0, false
+	}
+	_, _, cols, rows = t.imageGrid(w, h, opts)
+	return durations, len(durations), cols, rows, true
+}
+
+// ImageDecodeAnimFrame decodes one frame (frameIdx, 0-based) of an animated
+// WebP into atlas glyphs. Each call allocates a bounded bitmap (recycling the
+// most dated one), so a playing animation's memory stays bounded.
+func (t *Terminal) ImageDecodeAnimFrame(encoded []byte, frameIdx int, opts term.ImageDecodeOptions) (cols, rows int, glyphs []term.Glyph, ok bool) {
+	w, h, rgba, dOk := decodeWebPAnimFrame(encoded, frameIdx)
+	if !dOk || w <= 0 || h <= 0 {
+		return 0, 0, nil, false
+	}
+	cols, rows, glyphs = t.imageToGlyphs(w, h, rgba, opts)
+	return cols, rows, glyphs, true
+}
+
+// imageToGlyphs breaks a decoded RGBA image into one glyph per terminal cell,
+// allocating a bounded atlas bitmap and writing each cell's pixel block into
+// it. Returns the grid size and the glyphs in row-major order.
+func (t *Terminal) imageToGlyphs(w, h int, rgba []byte, opts term.ImageDecodeOptions) (cols, rows int, glyphs []term.Glyph) {
 	logicalCols, logicalRows, cols, rows := t.imageGrid(w, h, opts)
 	scaled := opts.FitWidth || opts.FitHeight || opts.FitContain
 
+	base := t.allocImageCells(cols * rows)
 	glyphs = make([]term.Glyph, 0, cols*rows)
 	for gy := 0; gy < rows; gy++ {
 		for gx := 0; gx < cols; gx++ {
-			offset := len(imageAtlas)
-			t.appendImageBlock(w, h, rgba, gx, gy, logicalCols, logicalRows, scaled)
+			offset := base + (gy*cols+gx)*t.cw*t.ch
+			t.writeImageBlock(offset, w, h, rgba, gx, gy, logicalCols, logicalRows, scaled)
 			glyphs = append(glyphs, term.Glyph{U: term.ImageRune, Fg: uint32(offset)})
 		}
 	}
-	return cols, rows, glyphs, true
+	return cols, rows, glyphs
 }
 
 func (t *Terminal) imageGrid(w, h int, opts term.ImageDecodeOptions) (logicalCols, logicalRows, cols, rows int) {
@@ -160,28 +294,30 @@ func (t *Terminal) imageDecodePDF(encoded []byte, opts term.ImageDecodeOptions) 
 	}
 
 	glyphs = make([]term.Glyph, 0, cols*rows)
+	base := t.allocImageCells(cols * rows)
 	for gy := 0; gy < rows; gy++ {
 		for gx := 0; gx < cols; gx++ {
-			offset := len(imageAtlas)
-			t.appendImageBlockFromUint(w, h, rgba, gx, gy, logicalCols, logicalRows, scaled)
+			offset := base + (gy*cols+gx)*t.cw*t.ch
+			t.writeImageBlockFromUint(offset, w, h, rgba, gx, gy, logicalCols, logicalRows, scaled)
 			glyphs = append(glyphs, term.Glyph{U: term.ImageRune, Fg: uint32(offset)})
 		}
 	}
 	return cols, rows, glyphs, true
 }
 
-// appendImageBlockFromUint is like appendImageBlock but consumes a []uint32
-// ARGB buffer instead of raw RGBA bytes.
-func (t *Terminal) appendImageBlockFromUint(w, h int, rgba []uint32, gx, gy, cols, rows int, scaled bool) {
+// writeImageBlockFromUint is like writeImageBlock but consumes a []uint32 ARGB
+// buffer instead of raw RGBA bytes.
+func (t *Terminal) writeImageBlockFromUint(offset, w, h int, rgba []uint32, gx, gy, cols, rows int, scaled bool) {
 	if !scaled {
 		for yy := 0; yy < t.ch; yy++ {
 			sy := gy*t.ch + yy
 			for xx := 0; xx < t.cw; xx++ {
 				sx := gx*t.cw + xx
+				o := offset + yy*t.cw + xx
 				if sy < h && sx < w {
-					imageAtlas = append(imageAtlas, rgba[sy*w+sx])
+					imageAtlas[o] = rgba[sy*w+sx]
 				} else {
-					imageAtlas = append(imageAtlas, 0xFF000000)
+					imageAtlas[o] = 0xFF000000
 				}
 			}
 		}
@@ -213,16 +349,17 @@ func (t *Terminal) appendImageBlockFromUint(w, h int, rgba []uint32, gx, gy, col
 			if sx < x0 {
 				sx = x0
 			}
-			imageAtlas = append(imageAtlas, rgba[sy*w+sx])
+			o := offset + yy*t.cw + xx
+			imageAtlas[o] = rgba[sy*w+sx]
 		}
 	}
 }
 
-// appendImageBlock appends the cw*ch pixel block for cell (gx,gy) to the
-// atlas. In native mode it copies the image's raw pixels for that cell
-// (1 image pixel = 1 cell pixel), clamping at the image edge. In fit mode
+// writeImageBlock writes the cw*ch pixel block for cell (gx,gy) into the
+// atlas at `offset`. In native mode it copies the image's raw pixels for that
+// cell (1 image pixel = 1 cell pixel), clamping at the image edge. In fit mode
 // the image block for the cell is scaled to fill the cell.
-func (t *Terminal) appendImageBlock(w, h int, rgba []byte, gx, gy, cols, rows int, scaled bool) {
+func (t *Terminal) writeImageBlock(offset, w, h int, rgba []byte, gx, gy, cols, rows int, scaled bool) {
 	if !scaled {
 		// native: each cell shows a raw cw x ch block of the image at its
 		// natural resolution (many colors per cell). At the image edge the
@@ -231,14 +368,15 @@ func (t *Terminal) appendImageBlock(w, h int, rgba []byte, gx, gy, cols, rows in
 			sy := gy*t.ch + yy
 			for xx := 0; xx < t.cw; xx++ {
 				sx := gx*t.cw + xx
+				o := offset + yy*t.cw + xx
 				if sy < h && sx < w {
-					o := (sy*w + sx) * 4
-					imageAtlas = append(imageAtlas, 0xFF000000|
-						uint32(rgba[o])<<16|
-						uint32(rgba[o+1])<<8|
-						uint32(rgba[o+2]))
+					po := (sy*w + sx) * 4
+					imageAtlas[o] = 0xFF000000|
+						uint32(rgba[po])<<16|
+						uint32(rgba[po+1])<<8|
+						uint32(rgba[po+2])
 				} else {
-					imageAtlas = append(imageAtlas, 0xFF000000)
+					imageAtlas[o] = 0xFF000000
 				}
 			}
 		}
@@ -271,11 +409,12 @@ func (t *Terminal) appendImageBlock(w, h int, rgba []byte, gx, gy, cols, rows in
 			if sx < x0 {
 				sx = x0
 			}
-			o := (sy*w + sx) * 4
-			imageAtlas = append(imageAtlas, 0xFF000000|
-				uint32(rgba[o])<<16|
-				uint32(rgba[o+1])<<8|
-				uint32(rgba[o+2]))
+			o := offset + yy*t.cw + xx
+			po := (sy*w + sx) * 4
+			imageAtlas[o] = 0xFF000000|
+				uint32(rgba[po])<<16|
+				uint32(rgba[po+1])<<8|
+				uint32(rgba[po+2])
 		}
 	}
 }
@@ -309,4 +448,6 @@ func (t *Terminal) drawImageCell(g term.Glyph, x, y int) {
 // ImageClearAll clears the image glyph atlas (terminal reset / clear).
 func (t *Terminal) ImageClearAll() {
 	imageAtlas = nil
+	imageSlots = nil
+	imageStampSeq = 0
 }

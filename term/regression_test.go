@@ -2,8 +2,10 @@ package term
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"st-go/config"
 )
@@ -301,5 +303,164 @@ func TestDslWindowGeometryRequiresToken(t *testing.T) {
 	core.Twrite([]byte("\x1bPwindow auth secret remember browser\x1b\\"), false)
 	if len(hooks.geometry) != 1 || hooks.geometry[0].Action != GeometryRemember {
 		t.Fatalf("authenticated geometry requests = %#v", hooks.geometry)
+	}
+}
+
+// TestDslOpenAnim verifies the open DSL `anim` option: an animated image is
+// decoded into frames and played by TickAnim (play once, holding the last
+// frame), with a terminal-drawn progress line in the rect's bottom row.
+func TestDslOpenAnim(t *testing.T) {
+	cfg := config.Default()
+	cfg.Cols = 40
+	cfg.Rows = 20
+	trm, m := newTermHooks(cfg)
+	// three 3x3 frames (distinct runes) at 100ms each
+	makeFrame := func(u rune) []Glyph {
+		g := make([]Glyph, 9)
+		for i := range g {
+			g[i] = Glyph{U: u}
+		}
+		return g
+	}
+	m.imageCols = 3
+	m.imageRows = 3
+	m.animFrameGlyphs = [][]Glyph{makeFrame('A'), makeFrame('B'), makeFrame('C')}
+	m.animDurations = []int{100, 100, 100}
+	m.animFrameCount = 3
+	m.animOK = true
+
+	now := time.Now()
+	// dslOpen reads the file bytes first; the mock decodes them as animated.
+	animPath := filepath.Join(t.TempDir(), "anim.webp")
+	if err := os.WriteFile(animPath, []byte("RIFF....WEBPVP8Xanim"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	trm.Twrite([]byte("\x1bPopen '"+animPath+"' rect 2 2 10 5 fit-contain anim\x1b\\"), false)
+	if !trm.HasAnim() {
+		t.Fatal("anim option did not start an animation")
+	}
+	// frame 0 drawn immediately
+	trm.TickAnim(now)
+	if !strings.Contains(trm.LineText(1), "A") {
+		t.Fatalf("frame 0 not drawn: %q", trm.LineText(1))
+	}
+	if !strings.Contains(trm.LineText(5), "WEBP") {
+		t.Fatalf("progress line missing: %q", trm.LineText(5))
+	}
+	// advance past 100ms -> frame 1
+	if !trm.TickAnim(now.Add(120 * time.Millisecond)) {
+		t.Fatal("expected a change at 120ms")
+	}
+	if !strings.Contains(trm.LineText(1), "B") {
+		t.Fatalf("frame 1 not drawn: %q", trm.LineText(1))
+	}
+	if !strings.Contains(trm.LineText(5), "66%") {
+		t.Fatalf("progress %q", trm.LineText(5))
+	}
+	// past 200ms -> frame 2 (last)
+	if !trm.TickAnim(now.Add(240 * time.Millisecond)) {
+		t.Fatal("expected a change at 240ms")
+	}
+	if !strings.Contains(trm.LineText(1), "C") {
+		t.Fatalf("frame 2 not drawn: %q", trm.LineText(1))
+	}
+	if !strings.Contains(trm.LineText(5), "100%") {
+		t.Fatalf("progress %q", trm.LineText(5))
+	}
+	// past 300ms -> done, holds the last frame
+	if trm.TickAnim(now.Add(400 * time.Millisecond)) {
+		t.Fatal("animation should be done")
+	}
+	if trm.HasAnim() {
+		t.Fatal("animation still active after play-once finished")
+	}
+	if !strings.Contains(trm.LineText(1), "C") {
+		t.Fatalf("last frame not held: %q", trm.LineText(1))
+	}
+}
+
+// TestDslOpenAnimCancel verifies writing into an animation rect cancels it.
+func TestDslOpenAnimCancel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Cols = 40
+	cfg.Rows = 20
+	trm, m := newTermHooks(cfg)
+	m.imageCols = 2
+	m.imageRows = 2
+	m.animFrameGlyphs = [][]Glyph{
+		{Glyph{U: 'A'}, Glyph{U: 'A'}, Glyph{U: 'A'}, Glyph{U: 'A'}},
+		{Glyph{U: 'B'}, Glyph{U: 'B'}, Glyph{U: 'B'}, Glyph{U: 'B'}},
+	}
+	m.animDurations = []int{100, 100}
+	m.animFrameCount = 2
+	m.animOK = true
+
+	animPath := filepath.Join(t.TempDir(), "anim.webp")
+	if err := os.WriteFile(animPath, []byte("RIFF....WEBPVP8Xanim"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	trm.Twrite([]byte("\x1bPopen '"+animPath+"' rect 2 2 10 5 fit-contain anim\x1b\\"), false)
+	if !trm.HasAnim() {
+		t.Fatal("animation did not start")
+	}
+	// write a character inside the rect (cell 5,5)
+	trm.Twrite([]byte("\x1b[5;5HZ"), false)
+	if trm.HasAnim() {
+		t.Fatal("writing into the animation rect did not cancel it")
+	}
+}
+
+// TestDscSync2026 verifies the synchronized-output protocol: \033[?2026h stops
+// painting (regions queue), \033[?2026l resumes and flushes them as one batch.
+func TestDscSync2026(t *testing.T) {
+	cfg := config.Default()
+	cfg.Cols = 40
+	cfg.Rows = 20
+	trm, m := newTermHooks(cfg)
+	trm.Twrite([]byte("\x1b[?2026h"), false)
+	if !trm.IsPaintPaused() {
+		t.Fatal("2026h did not stop painting")
+	}
+	trm.Twrite([]byte("hello"), false)
+	if !trm.HasPendingPaint() {
+		t.Fatal("regions did not queue while paused")
+	}
+	trm.Twrite([]byte("\x1b[?2026l"), false)
+	if trm.IsPaintPaused() {
+		t.Fatal("2026l did not resume painting")
+	}
+	// the resume flushed the queued batch (drawn synchronously with no worker)
+	if trm.HasPendingPaint() {
+		t.Fatal("resume did not flush the queued regions")
+	}
+	trm.Redraw()
+	if !strings.Contains(m.screen[0], "hello") {
+		t.Fatalf("content not painted after resume: %q", m.screen[0])
+	}
+}
+
+// TestPaintStopResumeBatches verifies PaintStop/PaintResume batch regions and
+// that Draw drains them into one bounding region.
+func TestPaintStopResumeBatches(t *testing.T) {
+	cfg := config.Default()
+	cfg.Cols = 40
+	cfg.Rows = 20
+	trm, _ := newTermHooks(cfg)
+	trm.PaintStop()
+	trm.Twrite([]byte("abc"), false)  // marks row 0
+	trm.Twrite([]byte("\x1b[2;5Hx"), false) // marks row 1
+	if !trm.HasPendingPaint() {
+		t.Fatal("no regions queued while paused")
+	}
+	trm.PaintResume()
+	r := trm.Draw() // drain
+	if r.Empty() {
+		t.Fatal("Draw returned no region")
+	}
+	if r.Y1 != 0 || r.Y2 < 1 {
+		t.Fatalf("bounding region rows = %d..%d, want 0..1", r.Y1, r.Y2)
+	}
+	if trm.HasPendingPaint() {
+		t.Fatal("regions not drained by Draw")
 	}
 }

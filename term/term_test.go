@@ -14,6 +14,10 @@ type mockHooks struct {
 	imageRows    int
 	imageGlyphs  []Glyph
 	imageOK      bool
+	animDurations   []int
+	animFrameCount  int
+	animFrameGlyphs [][]Glyph // glyphs returned for frame i
+	animOK          bool
 	geometry     []WindowGeometryRequest
 }
 
@@ -48,6 +52,17 @@ func (m *mockHooks) StartDraw() bool                         { return true }
 func (m *mockHooks) ImageDecode(encoded []byte, opts ImageDecodeOptions) (int, int, []Glyph, bool) {
 	m.imageOptions = opts
 	return m.imageCols, m.imageRows, m.imageGlyphs, m.imageOK
+}
+func (m *mockHooks) ImageDecodeAnim(encoded []byte, opts ImageDecodeOptions) ([]int, int, int, int, bool) {
+	m.imageOptions = opts
+	return m.animDurations, m.animFrameCount, m.imageCols, m.imageRows, m.animOK
+}
+func (m *mockHooks) ImageDecodeAnimFrame(encoded []byte, frameIdx int, opts ImageDecodeOptions) (int, int, []Glyph, bool) {
+	m.imageOptions = opts
+	if frameIdx < 0 || frameIdx >= len(m.animFrameGlyphs) {
+		return 0, 0, nil, false
+	}
+	return m.imageCols, m.imageRows, m.animFrameGlyphs[frameIdx], true
 }
 func (m *mockHooks) ImageClearAll()                           {}
 func (m *mockHooks) WindowGeometry(req WindowGeometryRequest) { m.geometry = append(m.geometry, req) }

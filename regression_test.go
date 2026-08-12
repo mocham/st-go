@@ -1847,3 +1847,136 @@ func TestGeometryRestoreConsumesClick(t *testing.T) {
 		t.Fatal("click after restore was not reported")
 	}
 }
+
+// makeAnimWebp generates a 64x64 1s 10fps animated WebP with ffmpeg; returns
+// nil (callers skip) when ffmpeg is unavailable.
+func makeAnimWebp(t *testing.T) []byte {
+	t.Helper()
+	ff, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return nil
+	}
+	f, err := os.CreateTemp("", "anim.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+	cmd := exec.Command(ff, "-loglevel", "error", "-y", "-f", "lavfi",
+		"-i", "testsrc=duration=1:size=64x64:rate=10", "-loop", "0", "-f", "webp", name)
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// TestWebPAnimDecode verifies animated WebP decoding via libwebpdemux:
+// correct canvas size, a frame per source frame, and sane per-frame durations.
+func TestWebPAnimDecode(t *testing.T) {
+	data := makeAnimWebp(t)
+	if data == nil {
+		t.Skip("ffmpeg not available")
+	}
+	w, h, frames, ok := decodeWebPAnim(data)
+	if !ok {
+		t.Fatal("animated webp decode failed")
+	}
+	if w != 64 || h != 64 {
+		t.Fatalf("canvas = %dx%d, want 64x64", w, h)
+	}
+	if len(frames) < 5 {
+		t.Fatalf("frame count = %d, want >= 5", len(frames))
+	}
+	for i, fr := range frames {
+		if len(fr.rgba) != w*h*4 {
+			t.Fatalf("frame %d size = %d, want %d", i, len(fr.rgba), w*h*4)
+		}
+		if fr.duration <= 0 {
+			t.Fatalf("frame %d duration = %v", i, fr.duration)
+		}
+	}
+}
+
+// testImageTerminal returns a minimal Terminal sized for atlas tests.
+func testImageTerminal(cols, rows, cw, ch int) *Terminal {
+	cfg := config.Default()
+	cfg.Cols = uint(cols)
+	cfg.Rows = uint(rows)
+	trm := &Terminal{cw: cw, ch: ch, cols: cols, rows: rows}
+	trm.termCore = term.NewTerm(cfg, trm)
+	trm.ImageClearAll()
+	return trm
+}
+
+// TestImageAtlasBounded verifies the image atlas is bounded: repeatedly
+// decoding the same image recycles bitmaps instead of growing forever.
+func TestImageAtlasBounded(t *testing.T) {
+	trm := testImageTerminal(20, 8, 16, 28)
+	png := makeTestPNG(t)
+	opts := term.ImageDecodeOptions{FitContain: true, ViewCols: 10, ViewRows: 6}
+	maxEntries := 20 * 8 * imageCacheScreens * trm.cw * trm.ch
+	for i := 0; i < 300; i++ {
+		if _, _, _, ok := trm.ImageDecode(png, opts); !ok {
+			t.Fatalf("decode %d failed", i)
+		}
+	}
+	if got := len(imageAtlas); got > maxEntries {
+		t.Fatalf("atlas grew to %d entries, bound %d", got, maxEntries)
+	}
+	if got := len(imageSlots); got > imageCacheScreens+1 {
+		t.Fatalf("slots = %d, bound %d", got, imageCacheScreens)
+	}
+}
+
+// TestImageAtlasRecycleReusesSlot verifies a repeated decode recycles the
+// most dated bitmap (same atlas offset) instead of appending.
+func TestImageAtlasRecycleReusesSlot(t *testing.T) {
+	trm := testImageTerminal(20, 8, 16, 28)
+	png := makeTestPNG(t)
+	opts := term.ImageDecodeOptions{FitContain: true, ViewCols: 10, ViewRows: 6}
+	_, _, g1, ok := trm.ImageDecode(png, opts)
+	if !ok {
+		t.Fatal("first decode failed")
+	}
+	_, _, g2, ok := trm.ImageDecode(png, opts)
+	if !ok {
+		t.Fatal("second decode failed")
+	}
+	// the second image recycled the first bitmap's region
+	if g2[0].Fg != g1[0].Fg {
+		t.Fatalf("second decode did not reuse the dated bitmap: %d vs %d", g2[0].Fg, g1[0].Fg)
+	}
+	if len(imageAtlas) > (10*6+1)*trm.cw*trm.ch {
+		t.Fatalf("atlas not bounded after reuse: %d entries", len(imageAtlas))
+	}
+}
+
+// TestImageAtlasRecycleFirstFit verifies the recycling policy: dated bitmaps
+// too small for the new image are discarded, and the first (most dated)
+// bitmap that fits is reused.
+func TestImageAtlasRecycleFirstFit(t *testing.T) {
+	trm := testImageTerminal(30, 10, 8, 8)
+	// craft a pool: old 4-cell, old 100-cell, newer 4-cell
+	cell := trm.cw * trm.ch
+	imageSlots = []*imageSlot{
+		{offset: 0, capacity: 4, used: 4, stamp: 1},
+		{offset: 4 * cell, capacity: 100, used: 100, stamp: 2},
+		{offset: (4 + 100) * cell, capacity: 4, used: 4, stamp: 3},
+	}
+	imageAtlas = make([]uint32, (4+100+4)*cell)
+	// need 60 cells: the 4-cell slots are too small (discarded), the 100-cell
+	// slot is the first that fits.
+	off := trm.allocImageCells(60)
+	if off != 4*cell {
+		t.Fatalf("recycled offset %d, want the 100-cell slot at %d", off, 4*cell)
+	}
+	// the dated too-small slot was freed
+	if imageSlots[0].used != 0 {
+		t.Fatalf("dated too-small slot was not discarded")
+	}
+}

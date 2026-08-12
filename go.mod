@@ -7,3 +7,5 @@ require (
 	github.com/BurntSushi/xgbutil v0.0.0-20190907113008-ad855c713046
 	golang.org/x/sys v0.34.0
 )
+
+require github.com/hajimehoshi/go-mp3 v0.3.4

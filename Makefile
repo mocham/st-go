@@ -41,6 +41,11 @@ CFG         = config/config.json
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
 
+# The Go file-browser demo (demo-go/file-browser) is pure Go: it needs no
+# third-party libraries and links a normal dynamic binary.
+FILE_BROWSER = file-browser
+FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) $(wildcard demo-go/file-browser/*.conf)
+
 # --- poppler (PDF rendering) ---------------------------------------------
 # A MINIMAL static poppler using only the C++ API (page_renderer -> raw BGRA),
 # so we do NOT need cairo/glib/gobject/ffi/pixman/lcms/openjpeg/turbojpeg
@@ -71,6 +76,22 @@ WEBP_URL     = https://storage.googleapis.com/downloads.webmproject.org/releases
 WEBP_TAR     = third_party/libwebp-$(WEBP_VERSION).tar.gz
 WEBP_SRC     = third_party/libwebp-src
 WEBP_LIB     = third_party/webp/lib/libwebp.a
+WEBP_DEMUX   = third_party/webp/lib/libwebpdemux.a
+WEBP_ANIM_C  = third_party_wrapper/webp_anim.c
+WEBP_ANIM_O  = third_party/webp/webp_anim.o
+
+# ALSA (libasound): audio playback for the Go file-browser's mp3 viewer.
+# Built statically following the gowidgets/CLibBuild recipe, including its
+# static-linking patches: dlopen() and NSS lookups (getgrnam_r/getpwuid_r)
+# are unavailable in a statically linked binary, so they are neutralized.
+ALSA_VERSION = 1.2.14
+ALSA_URL     = https://www.alsa-project.org/files/pub/lib/alsa-lib-$(ALSA_VERSION).tar.bz2
+ALSA_TAR     = third_party/alsa-lib-$(ALSA_VERSION).tar.bz2
+ALSA_SRC     = third_party/alsa-lib-src
+ALSA_DIR     = third_party/alsa
+ALSA_LIB     = third_party/alsa/lib/libasound.a
+SND_C        = third_party_wrapper/alsa_snd.c
+SND_O        = third_party/alsa/snd.o
 
 all: $(BIN)
 
@@ -157,7 +178,47 @@ $(WEBP_LIB):
 	# try to build it as a Go package; drop it (and other non-C build dirs).
 	rm -rf "$(WEBP_SRC)/swig" "$(WEBP_SRC)/man" "$(WEBP_SRC)/extras"
 	cp "$(WEBP_SRC)/src/.libs/libwebp.a" "$(WEBP_LIB)"
+
+# The animation decoder (WebPAnimDecoder) lives in libwebpdemux; the terminal
+# uses it to play animated webp files (open DSL `anim` option).
+$(WEBP_DEMUX): $(WEBP_LIB)
+	cp "$(WEBP_SRC)/src/demux/.libs/libwebpdemux.a" "$@"
 	cp "$(WEBP_SRC)/src/webp/"*.h third_party/webp/include/webp/
+
+# Animated-WebP bridge (WebPAnimDecoder) for the Go file-browser, precompiled
+# like alsa_snd.o so the cgo file only declares extern functions.
+$(WEBP_ANIM_O): $(WEBP_ANIM_C) $(WEBP_LIB) $(WEBP_DEMUX)
+	@mkdir -p "$(dir $@)"
+	$(CC) -O2 -fPIC -Ithird_party/webp/include -c "$<" -o "$@"
+
+# --- ALSA static (libasound; audio playback for the Go file-browser) ------
+# Static build mirroring gowidgets/CLibBuild. dlopen() and the NSS lookups
+# getgrnam_r/getpwuid_r do not work in a statically linked binary, so they are
+# patched out (plugin loading via dlopen is replaced by "not found"; NSS
+# lookups degrade to "no such user/group").
+$(ALSA_LIB):
+	@mkdir -p third_party
+	@if [ ! -f "$(ALSA_TAR)" ]; then \
+		echo "downloading alsa-lib $(ALSA_VERSION)..."; \
+		curl -fL -o "$(ALSA_TAR)" "$(ALSA_URL)"; \
+	fi
+	rm -rf "$(ALSA_SRC)" "$(ALSA_DIR)"
+	mkdir -p "$(ALSA_SRC)" "$(ALSA_DIR)/lib" "$(ALSA_DIR)/include"
+	tar -xjf "$(ALSA_TAR)" -C "$(ALSA_SRC)" --strip-components=1
+	sed -i 's|handle = dlopen(filename, mode);|printf("name=%s\\npath=%s\\n", name, filename);handle = NULL;|' "$(ALSA_SRC)/src/dlmisc.c"
+	sed -i 's|int st = getgrnam_r(.*);|int st=-1;|' "$(ALSA_SRC)/src/pcm/pcm_direct.c"
+	sed -i '/getpwuid_r/ c\goto out;while(0){' "$(ALSA_SRC)/src/userfile.c"
+	sed -i '/dlopen/ c\handle=NULL;' "$(ALSA_SRC)/src/pcm/pcm_ladspa.c"
+	cd "$(ALSA_SRC)" && ./configure --enable-shared=no --enable-static=yes CFLAGS="-fPIC -O2"
+	$(MAKE) -C "$(ALSA_SRC)"
+	cp "$(ALSA_SRC)/src/.libs/libasound.a" "$(ALSA_LIB)"
+	cp -r "$(ALSA_SRC)/include/." "$(ALSA_DIR)/include/"
+
+# ALSA playback wrapper, precompiled like pdf_bridge.o so the cgo file only
+# needs extern declarations (no ALSA headers at Go-compile time).
+$(SND_O): $(SND_C) $(ALSA_LIB)
+	@mkdir -p "$(dir $@)"
+	$(CC) -O2 -fPIC -Ithird_party/alsa/include -c "$<" -o "$@"
 
 # --- poppler static (minimal, C++ API only) ------------------------------
 $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB)
@@ -219,7 +280,16 @@ PDF_BRIDGE_O = third_party/pdf_bridge.o
 MIN_EXTRA  = $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF)
 STB_EXTRA  = $(STB_O) -lm $(DUMMY_WEBP) $(DUMMY_PDF)
 PDF_EXTRA  = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(DUMMY_WEBP)
-FULL_EXTRA = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_LIB)
+FULL_EXTRA = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
+
+# ALSA link items for the Go file-browser (libasound + the playback wrapper).
+# snd.o must precede -l:libasound.a. -ldl/-lpthread are no-ops on modern glibc
+# where they are merged into libc.
+ALSA_EXTRA = $(SND_O) -Lthird_party/alsa/lib -l:libasound.a -ldl -lpthread -lm
+
+# Animated-WebP items for the Go file-browser (WebPAnimDecoder playback).
+# webp_anim.o must precede -l:libwebpdemux.a; libwebp.a comes via WEBP_LIB.
+WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:libwebp.a
 
 # --gc-sections drops unreferenced functions from function-sections objects.
 GC_EXTRA   = -Wl,--gc-sections
@@ -229,7 +299,7 @@ GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
           $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h) \
           $(wildcard third_party_wrapper/*.cpp) $(wildcard *.h)
 
-st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(PDF_BRIDGE_O) $(GO_SRC)
+st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
 	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
@@ -240,6 +310,15 @@ st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
 
 st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
 	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
+
+# --- Go file-browser demo --------------------------------------------------
+# A Go clone of demo/file-browser.sh. It links the static ALSA library for the
+# mp3 viewer (embedded alsa.conf + go-mp3 decoded PCM playback). It performs no
+# graphics itself — image/animation decoding is entirely the terminal's job,
+# driven by the DCS display DSL. Run it inside the terminal:
+#   ./st -e ./file-browser /path/to/files
+file-browser: $(FB_GO_SRC) $(ALSA_LIB) $(SND_O)
+	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(ALSA_EXTRA)"' ./demo-go/file-browser
 
 # --- dummy objects (no-op stubs for dropped libraries) --------------------
 $(DUMMY_DIR)/dummy-stb.o: third_party_wrapper/dummy-stb.c
@@ -265,19 +344,20 @@ install: st
 	install -m 0644 "$(CFG)" "$(DESTDIR)$(BINDIR)/st.json"
 
 # go test ./... needs the third-party libs linked too (they moved out of the
-# #cgo LDFLAGS into -extldflags); test against the full build.
-TEST_EXTRA = $(FULL_EXTRA)
+# #cgo LDFLAGS into -extldflags); test against the full build. The ALSA items
+# are needed because the Go file-browser package uses cgo.
+TEST_EXTRA = $(FULL_EXTRA) $(ALSA_EXTRA)
 
-test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(PDF_BRIDGE_O)
+test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O)
 	go test ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
 
 clean:
-	rm -f st st-min st-stb st-pdf
+	rm -f st st-min st-stb st-pdf file-browser
 
 distclean:
-	rm -rf third_party st st-min st-stb st-pdf
+	rm -rf third_party st st-min st-stb st-pdf file-browser
 
 .PHONY: all install uninstall clean distclean test

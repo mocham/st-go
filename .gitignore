@@ -4,6 +4,7 @@
 /st-stb
 /st-pdf
 /st-go
+/file-browser
 
 # Editor swap files
 .*.swp

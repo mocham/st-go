@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
@@ -10,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"st-go/config"
 	"st-go/ptyutil"
@@ -249,22 +250,46 @@ func main() {
 		ptyutil.SetWinSize(master, rows, cols)
 	}
 
-	// pty reader goroutine; terminal access is serialized with t.mu
+	// pty reader goroutine: virtual painting (model mutations under t.mu).
+	// Lazy write: it absorbs an output burst and requests one paint when the
+	// stream goes idle (or after a short cap), so `cat bigfile` flushes once
+	// while interactive bursts stay responsive.
 	go func() {
-		r := bufio.NewReader(master)
 		buf := make([]byte, 8192)
 		var pending []byte
+		fd := int(master.Fd())
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		for {
-			n, err := r.Read(buf)
-			if err != nil {
+			n, err := unix.Read(fd, buf)
+			if err != nil || n == 0 {
 				os.Exit(0)
 			}
 			t.mu.Lock()
 			pending = append(pending, buf[:n]...)
 			written := core.Twrite(pending, false)
 			pending = pending[written:]
-			core.Redraw()
 			t.mu.Unlock()
+			// keep absorbing while more data arrives within a short window
+			for {
+				np, perr := unix.Poll(fds, 30)
+				if perr != nil || np == 0 {
+					break
+				}
+				if fds[0].Revents&unix.POLLHUP != 0 {
+					os.Exit(0)
+				}
+				m, rerr := unix.Read(fd, buf)
+				if rerr != nil || m == 0 {
+					os.Exit(0)
+				}
+				t.mu.Lock()
+				pending = append(pending, buf[:m]...)
+				written := core.Twrite(pending, false)
+				pending = pending[written:]
+				t.mu.Unlock()
+			}
+			// stream went idle: paint the accumulated output once
+			t.paintRequest(false)
 		}
 	}()
 

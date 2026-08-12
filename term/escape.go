@@ -192,6 +192,13 @@ func (t *Term) tsetmode(priv, set bool, args []int, narg int) {
 				}
 			case 2004:
 				t.setWinMode(set, ModeBrcktPaste)
+			case 2026:
+				// synchronized output: batch painting until the reset
+				if set {
+					t.PaintStop()
+				} else {
+					t.PaintResume()
+				}
 			case 1001, 1005, 1015:
 			default:
 				log.Printf("erresc: unknown private set/reset mode %d\n", a)
@@ -676,6 +683,8 @@ func (t *Term) dslOpen(args []string) {
 			opts.FitHeight = true
 		case "fit-contain":
 			opts.FitContain = true
+		case "anim":
+			opts.Animate = true
 		case "page":
 			// page N (1-based)
 			if i+1 < len(args[1:]) {
@@ -754,6 +763,19 @@ func (t *Term) dslOpen(args []string) {
 		}
 		return
 	}
+	// Animated WebP via the open DSL `anim` option: play all frames in the
+	// rect (bottom row reserved for the terminal-drawn progress line).
+	if opts.Animate && rectSet {
+		animOpts := opts
+		animOpts.ViewRows = rh - 1 // bottom row of the rect shows progress
+		if animOpts.ViewRows < 1 {
+			animOpts.ViewRows = 1
+		}
+		if durations, frameCount, acols, arows, aok := t.hooks.ImageDecodeAnim(data, animOpts); aok && frameCount > 0 {
+			t.SetAnim(data, animOpts, durations, acols, arows, rx, ry, rw, rh)
+			return
+		}
+	}
 	cols, rows, glyphs, ok := t.hooks.ImageDecode(data, opts)
 	if !ok {
 		log.Printf("dsl: failed to decode %q\n", path)
@@ -767,6 +789,9 @@ func (t *Term) dslOpen(args []string) {
 	}
 
 	if rectSet {
+		// one placement = one atomic paint batch = one flush for the whole
+		// rect (synchronized update around the placement).
+		t.PaintStop()
 		t.tclearregion(rx, ry, rx+rw-1, ry+rh-1)
 		startX := rx + max(0, (rw-min(cols, rw))/2)
 		startY := ry + max(0, (rh-min(rows, rh))/2)
@@ -780,8 +805,12 @@ func (t *Term) dslOpen(args []string) {
 				t.tsetchar(glyphs[idx].U, &glyphs[idx], x, y)
 			}
 		}
+		t.PaintResume()
 		return
 	}
+
+	// Legacy cursor-stream placement: batch the whole image as one paint.
+	t.PaintStop()
 
 	// Legacy fit-height clears the screen and starts at the top.
 	if opts.FitHeight {
@@ -817,7 +846,7 @@ func (t *Term) dslOpen(args []string) {
 	}
 	// leave the cursor at the start of the image's last row
 	t.tmoveto(startX, t.c.y)
-	t.tfulldirt()
+	t.PaintResume()
 }
 
 // looksLikeText reports whether the bytes are plain text (rather than an
