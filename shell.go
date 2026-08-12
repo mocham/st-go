@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
 
 	"st-go/config"
@@ -33,17 +34,42 @@ func ResolveShell(cfg *config.Config, cmdline string) (prog string, env []string
 		prog = cmdline
 	}
 
-	env = stChildEnv(cfg.Termname)
+	env = stChildEnv(cfg)
 	return prog, env, nil
 }
 
 // stChildEnv builds the child environment like st's execsh: it unsets
 // COLUMNS, LINES and TERMCAP so the child queries the pty size via TIOCGWINSZ
 // instead of inheriting a stale size (this is what makes vim lay out its
-// screen for the actual terminal rows/cols), then sets the identity vars.
-func stChildEnv(termname string) []string {
+// screen for the actual terminal rows/cols), then sets the identity and
+// configured file-browser icon vars.
+func stChildEnv(cfg *config.Config) []string {
+	icons := cfg.FileBrowser.Icons
+	iconEnv := []struct {
+		name  string
+		value string
+	}{
+		{"ST_GO_FILE_BROWSER_ICON_PARENT", icons.Parent},
+		{"ST_GO_FILE_BROWSER_ICON_DIRECTORY", icons.Directory},
+		{"ST_GO_FILE_BROWSER_ICON_SYMLINK", icons.Symlink},
+		{"ST_GO_FILE_BROWSER_ICON_IMAGE", icons.Image},
+		{"ST_GO_FILE_BROWSER_ICON_PDF", icons.PDF},
+		{"ST_GO_FILE_BROWSER_ICON_TEXT", icons.Text},
+		{"ST_GO_FILE_BROWSER_ICON_ARCHIVE", icons.Archive},
+		{"ST_GO_FILE_BROWSER_ICON_AUDIO", icons.Audio},
+		{"ST_GO_FILE_BROWSER_ICON_VIDEO", icons.Video},
+		{"ST_GO_FILE_BROWSER_ICON_CODE", icons.Code},
+		{"ST_GO_FILE_BROWSER_ICON_CONFIG", icons.Config},
+		{"ST_GO_FILE_BROWSER_ICON_EXECUTABLE", icons.Executable},
+		{"ST_GO_FILE_BROWSER_ICON_DEFAULT", icons.Default},
+	}
+
 	env := os.Environ()
-	env = envWithout(env, "COLUMNS", "LINES", "TERMCAP")
+	drop := []string{"COLUMNS", "LINES", "TERMCAP", "ST_GO_EXECUTABLE", "ST_GO_GEOMETRY_TOKEN"}
+	for _, icon := range iconEnv {
+		drop = append(drop, icon.name)
+	}
+	env = envWithout(env, drop...)
 	pw, err := user.Current()
 	uname, home := "", ""
 	if err == nil {
@@ -53,9 +79,25 @@ func stChildEnv(termname string) []string {
 		"LOGNAME="+uname,
 		"USER="+uname,
 		"HOME="+home,
-		"TERM="+termname,
+		"TERM="+cfg.Termname,
+		"ST_GO_EXECUTABLE="+runningExecutable(),
+		"ST_GO_GEOMETRY_TOKEN="+cfg.GeometryToken,
 	)
+	for _, icon := range iconEnv {
+		env = append(env, icon.name+"="+icon.value)
+	}
 	return env
+}
+
+func runningExecutable() string {
+	path, err := os.Executable()
+	if err != nil {
+		return "st"
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return path
 }
 
 // envWithout returns env with the named variables removed (their final value,

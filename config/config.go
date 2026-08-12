@@ -12,46 +12,71 @@ var defaultConfigJSON []byte
 
 // Config mirrors config.h of the C st, loaded from a .json file.
 type Config struct {
-	Font           string   `json:"font"`
-	Borderpx       int      `json:"borderpx"`
-	GlyphWidth     uint     `json:"glyphwidth"`
-	GlyphHeight    uint     `json:"glyphheight"`
-	GlyphBaseline  uint     `json:"glyphbaseline"`
-	Shell          string   `json:"shell"`
-	Utmp           string   `json:"utmp"`
-	Scroll         string   `json:"scroll"`
-	SttyArgs       string   `json:"stty_args"`
-	Vtiden         string   `json:"vtiden"`
-	WordDelimiters string   `json:"worddelimiters"`
-	AllowAltScreen bool     `json:"allowaltscreen"`
-	AllowWindowOps bool     `json:"allowwindowops"`
-	Termname       string   `json:"termname"`
-	Tabspaces      uint     `json:"tabspaces"`
-	Colorname      []string `json:"colorname"`
-	DefaultFg      uint     `json:"defaultfg"`
-	DefaultBg      uint     `json:"defaultbg"`
-	DefaultCs      uint     `json:"defaultcs"`
-	DefaultRcs     uint     `json:"defaultrcs"`
-	CursorShape    uint     `json:"cursorshape"`
-	Cols           uint     `json:"cols"`
-	Rows           uint     `json:"rows"`
-	MouseShape     uint     `json:"mouseshape"`
-	MouseFg        uint     `json:"mousefg"`
-	MouseBg        uint     `json:"mousebg"`
-	ForceMouseMod  uint     `json:"forcemousemod"`
-	IgnoreMod      uint     `json:"ignoremod"`
-	DoubleClickMs  uint     `json:"doubleclicktimeout"`
-	TripleClickMs  uint     `json:"tripleclicktimeout"`
-	MinLatency     float64  `json:"minlatency"`
-	MaxLatency     float64  `json:"maxlatency"`
-	BlinkTimeout   uint     `json:"blinktimeout"`
-	CursorThick    uint     `json:"cursorthickness"`
-	BellVolume     int      `json:"bellvolume"`
+	GeometryToken string `json:"-"`
+
+	Font             string   `json:"font"`
+	Borderpx         int      `json:"borderpx"`
+	GlyphWidth       uint     `json:"glyphwidth"`
+	GlyphHeight      uint     `json:"glyphheight"`
+	GlyphBaseline    uint     `json:"glyphbaseline"`
+	Shell            string   `json:"shell"`
+	Utmp             string   `json:"utmp"`
+	Scroll           string   `json:"scroll"`
+	SttyArgs         string   `json:"stty_args"`
+	Vtiden           string   `json:"vtiden"`
+	WordDelimiters   string   `json:"worddelimiters"`
+	AllowAltScreen   bool     `json:"allowaltscreen"`
+	AllowWindowOps   bool     `json:"allowwindowops"`
+	AllowGeometryOps bool     `json:"allowgeometryops"`
+	Termname         string   `json:"termname"`
+	Tabspaces        uint     `json:"tabspaces"`
+	Colorname        []string `json:"colorname"`
+	DefaultFg        uint     `json:"defaultfg"`
+	DefaultBg        uint     `json:"defaultbg"`
+	DefaultCs        uint     `json:"defaultcs"`
+	DefaultRcs       uint     `json:"defaultrcs"`
+	CursorShape      uint     `json:"cursorshape"`
+	Cols             uint     `json:"cols"`
+	Rows             uint     `json:"rows"`
+	MouseShape       uint     `json:"mouseshape"`
+	MouseFg          uint     `json:"mousefg"`
+	MouseBg          uint     `json:"mousebg"`
+	ForceMouseMod    uint     `json:"forcemousemod"`
+	IgnoreMod        uint     `json:"ignoremod"`
+	DoubleClickMs    uint     `json:"doubleclicktimeout"`
+	TripleClickMs    uint     `json:"tripleclicktimeout"`
+	MinLatency       float64  `json:"minlatency"`
+	MaxLatency       float64  `json:"maxlatency"`
+	BlinkTimeout     uint     `json:"blinktimeout"`
+	CursorThick      uint     `json:"cursorthickness"`
+	BellVolume       int      `json:"bellvolume"`
+
+	FileBrowser FileBrowserConfig `json:"file_browser"`
 
 	Mshortcuts []Mshortcut `json:"mshortcuts"`
 	Shortcuts  []Shortcut  `json:"shortcuts"`
 	Keymap     []Keydef    `json:"keymap"`
 	Selmasks   [3]uint     `json:"selmasks"`
+}
+
+type FileBrowserConfig struct {
+	Icons FileBrowserIcons `json:"icons"`
+}
+
+type FileBrowserIcons struct {
+	Parent     string `json:"parent"`
+	Directory  string `json:"directory"`
+	Symlink    string `json:"symlink"`
+	Image      string `json:"image"`
+	PDF        string `json:"pdf"`
+	Text       string `json:"text"`
+	Archive    string `json:"archive"`
+	Audio      string `json:"audio"`
+	Video      string `json:"video"`
+	Code       string `json:"code"`
+	Config     string `json:"config"`
+	Executable string `json:"executable"`
+	Default    string `json:"default"`
 }
 
 type Mshortcut struct {
@@ -72,11 +97,11 @@ type Shortcut struct {
 // Keydef: appkey >0 when keypad app mode enabled, <0 disabled, 0 no value.
 // Appcursor likewise for cursor application mode.
 type Keydef struct {
-	Keysym   string `json:"keysym"`
-	Mask     int    `json:"mask"`
-	Str      string `json:"str"`
-	Appkey   int    `json:"appkey"`
-	Appcur   int    `json:"appcursor"`
+	Keysym string `json:"keysym"`
+	Mask   int    `json:"mask"`
+	Str    string `json:"str"`
+	Appkey int    `json:"appkey"`
+	Appcur int    `json:"appcursor"`
 }
 
 // Default returns the st defaults (the embedded config.json, matching the C

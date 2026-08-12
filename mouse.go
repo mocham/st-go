@@ -45,6 +45,9 @@ func (t *Terminal) evrow(py int) int {
 }
 
 func (t *Terminal) bpress(e xproto.ButtonPressEvent) {
+	if t.restoreGeometryOnPress(e) {
+		return
+	}
 	btn := byte(e.Detail)
 	x := t.evcol(int(e.EventX))
 	y := t.evrow(int(e.EventY))
@@ -79,6 +82,9 @@ func (t *Terminal) bpress(e xproto.ButtonPressEvent) {
 }
 
 func (t *Terminal) bmotion(e xproto.MotionNotifyEvent) {
+	if t.suppressRestoreButton {
+		return
+	}
 	x := t.evcol(int(e.EventX))
 	y := t.evrow(int(e.EventY))
 
@@ -100,6 +106,10 @@ func (t *Terminal) bmotion(e xproto.MotionNotifyEvent) {
 
 func (t *Terminal) brelease(e xproto.ButtonReleaseEvent) {
 	btn := byte(e.Detail)
+	if btn == 1 && t.suppressRestoreButton {
+		t.suppressRestoreButton = false
+		return
+	}
 	x := t.evcol(int(e.EventX))
 	y := t.evrow(int(e.EventY))
 

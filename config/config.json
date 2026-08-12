@@ -12,6 +12,7 @@
   "worddelimiters": " ",
   "allowaltscreen": true,
   "allowwindowops": false,
+  "allowgeometryops": true,
   "termname": "st-256color",
   "tabspaces": 8,
   "colorname": [
@@ -40,6 +41,23 @@
   "blinktimeout": 800,
   "cursorthickness": 2,
   "bellvolume": 0,
+  "file_browser": {
+    "icons": {
+      "parent": "↑",
+      "directory": "▸",
+      "symlink": "↗",
+      "image": "▣",
+      "pdf": "▤",
+      "text": "≡",
+      "archive": "▦",
+      "audio": "♪",
+      "video": "▶",
+      "code": "λ",
+      "config": "⚙",
+      "executable": "◆",
+      "default": "·"
+    }
+  },
   "selmasks": [0, 0, 8],
   "mshortcuts": [
     { "mask": 0, "button": 2, "action": "selpaste", "arg": "", "release": true },

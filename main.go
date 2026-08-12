@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +20,10 @@ import (
 const Version = "0.9.2"
 
 func main() {
+	vimMode, vimOptions, vimFile, err := parseVimInvocation(os.Args[1:])
+	if err != nil {
+		log.Fatal(err)
+	}
 	var cfgPath string
 	flag.StringVar(&cfgPath, "config", "", "path to JSON config (default: <exe-dir>/config.json, else embedded)")
 	var glyphOut string
@@ -49,15 +55,17 @@ func main() {
 	var cmdArgs []string
 	var preArgs []string
 	args := os.Args[1:]
-	for i, a := range args {
-		if a == "-e" || a == "--e" {
-			cmdArgs = args[i+1:]
-			preArgs = args[:i]
-			break
+	if !vimMode {
+		for i, a := range args {
+			if a == "-e" || a == "--e" {
+				cmdArgs = args[i+1:]
+				preArgs = args[:i]
+				break
+			}
 		}
-	}
-	if cmdArgs == nil {
-		preArgs = args
+		if cmdArgs == nil {
+			preArgs = args
+		}
 	}
 	os.Args = append([]string{os.Args[0]}, preArgs...)
 	flag.Parse()
@@ -72,9 +80,27 @@ func main() {
 		log.Printf("config: %v (using embedded)", err)
 		cfg = config.Default()
 	}
+	if token := newGeometryToken(); token != "" {
+		cfg.GeometryToken = token
+	} else {
+		cfg.AllowGeometryOps = false
+		log.Printf("geometry operations disabled: capability token generation failed")
+	}
 
 	if noAlt {
 		cfg.AllowAltScreen = false
+	}
+	childDir := ""
+	if vimMode {
+		spec, err := buildVimLaunch(vimOptions, vimFile)
+		if err != nil {
+			log.Fatalf("vim: %v", err)
+		}
+		cmdArgs = spec.Command
+		childDir = spec.Dir
+		if title == "" {
+			title = spec.Title
+		}
 	}
 	// -n name sets the instance (res_name); -c sets the class (res_class)
 	className := cfg.Termname
@@ -155,6 +181,16 @@ func main() {
 	}
 	defer t.Close()
 	t.loadInputConfig(cfg)
+	if vimMode {
+		t.lockTitle = true
+		bottomReserve := int(t.scr.HeightInPixels) / 10
+		if bottomReserve < 64 {
+			bottomReserve = 64
+		}
+		t.requestWindowRect(emulatedVimRect(
+			int(t.scr.WidthInPixels), int(t.scr.HeightInPixels),
+			t.cw+2*t.borderpx, t.ch+2*t.borderpx, bottomReserve))
+	}
 
 	core := term.NewTerm(cfg, t)
 	t.termCore = core
@@ -180,7 +216,10 @@ func main() {
 	if len(cmdArgs) > 0 {
 		// st's execsh: prog = args[0], execvp(prog, args)
 		cmdline = cmdArgs
-		env = stChildEnv(cfg.Termname)
+		env = stChildEnv(cfg)
+		if childDir != "" {
+			env = append(envWithout(env, "PWD"), "PWD="+childDir)
+		}
 	} else {
 		var prog string
 		prog, env, err = ResolveShell(cfg, "")
@@ -189,7 +228,7 @@ func main() {
 		}
 		cmdline = []string{prog}
 	}
-	child, err := ptyutil.Start(slave, cmdline, env)
+	child, err := ptyutil.StartDir(slave, cmdline, env, childDir)
 	if err != nil {
 		log.Fatalf("spawn: %v", err)
 	}
@@ -233,6 +272,14 @@ func main() {
 	t.run(core)
 }
 
+func newGeometryToken() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
+}
+
 // dumpShellText runs the configured shell through a pty and the term core
 // (no X window), printing the first screen rows as text. Used for debugging
 // what the shell actually sends (e.g. PS1 expansion).
@@ -251,7 +298,7 @@ func dumpShellText(cfg *config.Config, cmdArgs []string, outFile string) {
 	var env []string
 	if len(cmdArgs) > 0 {
 		cmdline = cmdArgs
-		env = stChildEnv(cfg.Termname)
+		env = stChildEnv(cfg)
 	} else {
 		var prog string
 		prog, env, err = ResolveShell(cfg, "")

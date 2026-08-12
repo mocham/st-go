@@ -210,3 +210,96 @@ func TestDslOpenTextTruncate(t *testing.T) {
 	}
 	t.Logf("OK: long line truncated, stopped at last row")
 }
+
+func TestDslOpenTextRectangle(t *testing.T) {
+	core, _ := newTestTerm(t, 10, 5)
+	for y := 0; y < core.row; y++ {
+		for x := 0; x < core.col; x++ {
+			core.line[y][x].U = 'x'
+		}
+	}
+	core.c.x, core.c.y = 8, 4
+	dir := t.TempDir()
+	f := dir + "/rect.txt"
+	if err := os.WriteFile(f, []byte("abcdef\nz\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	core.Twrite([]byte("\x1bPopen '"+f+"' rect 3 2 4 2\x1b\\"), false)
+	if got := core.LineText(1); got != "xxabcdxxxx" {
+		t.Fatalf("row 2 = %q, want rectangle-clipped text", got)
+	}
+	if got := core.LineText(2); got != "xxz   xxxx" {
+		t.Fatalf("row 3 = %q, want cleared rectangle remainder", got)
+	}
+	if got := core.LineText(0); got != "xxxxxxxxxx" {
+		t.Fatalf("outside rectangle changed: %q", got)
+	}
+	if core.c.x != 8 || core.c.y != 4 {
+		t.Fatalf("rectangle open moved cursor to %d,%d", core.c.x, core.c.y)
+	}
+}
+
+func TestDslOpenImageRectangleOptions(t *testing.T) {
+	core, hooks := newTestTerm(t, 10, 5)
+	hooks.imageCols, hooks.imageRows, hooks.imageOK = 2, 1, true
+	hooks.imageGlyphs = []Glyph{{U: ImageRune}, {U: ImageRune}}
+	dir := t.TempDir()
+	f := dir + "/rect.png"
+	if err := os.WriteFile(f, []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	core.c.x, core.c.y = 9, 4
+	core.Twrite([]byte("\x1bPopen '"+f+"' rect 2 2 4 3 fit-contain page 2\x1b\\"), false)
+	if !hooks.imageOptions.FitContain || hooks.imageOptions.ViewCols != 4 ||
+		hooks.imageOptions.ViewRows != 3 || hooks.imageOptions.Page != 1 {
+		t.Fatalf("image options = %#v", hooks.imageOptions)
+	}
+	if core.line[2][2].U != ImageRune || core.line[2][3].U != ImageRune {
+		t.Fatalf("image was not centered in rectangle")
+	}
+	if core.line[2][1].U == ImageRune || core.line[2][4].U == ImageRune {
+		t.Fatalf("image escaped centered placement")
+	}
+	if core.c.x != 9 || core.c.y != 4 {
+		t.Fatalf("rectangle image moved cursor to %d,%d", core.c.x, core.c.y)
+	}
+}
+
+func TestDslWindowGeometry(t *testing.T) {
+	core, hooks := newTestTerm(t, 10, 5)
+	core.cfg.AllowGeometryOps = true
+	core.Twrite([]byte("\x1bPwindow remember browser;"+
+		"window place bottom-left 8px 2% 25% 56px restore browser;"+
+		"window restore browser\x1b\\"), false)
+	if len(hooks.geometry) != 3 {
+		t.Fatalf("got %d geometry requests, want 3", len(hooks.geometry))
+	}
+	place := hooks.geometry[1]
+	if place.Action != GeometryPlace || place.Anchor != "bottom-left" ||
+		place.X.Unit != GeometryPixels || place.X.Value != 8 ||
+		place.Y.Unit != GeometryRatio || place.Y.Value != 0.02 ||
+		place.W.Unit != GeometryRatio || place.W.Value != 0.25 ||
+		place.H.Unit != GeometryPixels || place.H.Value != 56 ||
+		place.RestoreTag != "browser" {
+		t.Fatalf("place request = %#v", place)
+	}
+	core.cfg.AllowGeometryOps = false
+	core.Twrite([]byte("\x1bPwindow forget browser\x1b\\"), false)
+	if len(hooks.geometry) != 3 {
+		t.Fatal("disabled window operation reached frontend")
+	}
+}
+
+func TestDslWindowGeometryRequiresToken(t *testing.T) {
+	core, hooks := newTestTerm(t, 10, 5)
+	core.cfg.AllowGeometryOps = true
+	core.cfg.GeometryToken = "secret"
+	core.Twrite([]byte("\x1bPwindow remember browser\x1b\\"), false)
+	if len(hooks.geometry) != 0 {
+		t.Fatal("unauthenticated geometry request reached frontend")
+	}
+	core.Twrite([]byte("\x1bPwindow auth secret remember browser\x1b\\"), false)
+	if len(hooks.geometry) != 1 || hooks.geometry[0].Action != GeometryRemember {
+		t.Fatalf("authenticated geometry requests = %#v", hooks.geometry)
+	}
+}

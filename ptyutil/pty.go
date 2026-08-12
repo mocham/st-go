@@ -49,7 +49,17 @@ func itoa(n int) string {
 // Start forks the shell connected to the pty slave.
 // cmdline[0] is both the program and argv[0]. Returns the child command.
 func Start(slave *os.File, cmdline []string, env []string) (*exec.Cmd, error) {
-	return start(slave, cmdline, env)
+	return StartDir(slave, cmdline, env, "")
+}
+
+// StartDir is Start with an optional child working directory.
+func StartDir(slave *os.File, cmdline []string, env []string, dir string) (*exec.Cmd, error) {
+	if len(cmdline) == 0 {
+		return nil, os.ErrInvalid
+	}
+	cmd := exec.Command(cmdline[0], cmdline[1:]...)
+	cmd.Dir = dir
+	return applyTTY(cmd, slave, env)
 }
 
 // StartArgv0 forks prog with a custom argv[0] (mirrors st's execsh which

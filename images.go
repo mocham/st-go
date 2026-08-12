@@ -22,58 +22,77 @@ var imageAtlas []uint32
 // the terminal width/height; otherwise it stays at native resolution, with
 // the draw loop truncating the width and scrolling vertically like text.
 // The glyphs are returned in row-major order (rows*cols entries).
-func (t *Terminal) ImageDecode(encoded []byte, fitW, fitH bool, page int) (cols, rows int, glyphs []term.Glyph, ok bool) {
+func (t *Terminal) ImageDecode(encoded []byte, opts term.ImageDecodeOptions) (cols, rows int, glyphs []term.Glyph, ok bool) {
 	// PDF: render the requested page (default first) to a bitmap via poppler.
 	if isPDF(encoded) {
-		return t.imageDecodePDF(encoded, fitW, fitH, page)
+		return t.imageDecodePDF(encoded, opts)
 	}
 	w, h, rgba, err := decodeImage(encoded)
 	if err || w <= 0 || h <= 0 {
 		return 0, 0, nil, false
 	}
 
-	// grid size
-	if !fitW && !fitH {
-		// native: each cell shows a raw cw x ch block of the image (many
-		// colors per cell, no resampling). Truncate the width to the
-		// terminal; columns beyond the terminal are discarded, not glyphed.
-		cols = (w + t.cw - 1) / t.cw
-		rows = (h + t.ch - 1) / t.ch
-		if cols > t.cols {
-			cols = t.cols
-		}
-	} else if fitH {
-		// fit height: rows = terminal rows; scale width to preserve the
-		// image aspect ratio accounting for the cell's pixel aspect
-		// (cw x ch), so the rendered shape matches the image.
-		rows = t.rows
-		if rows < 1 {
-			rows = 1
-		}
-		cols = w * rows * t.ch / (h * t.cw)
-		if cols < 1 {
-			cols = 1
-		}
-	} else { // fitW
-		cols = t.cols
-		if cols < 1 {
-			cols = 1
-		}
-		rows = h * cols * t.cw / (w * t.ch)
-		if rows < 1 {
-			rows = 1
-		}
-	}
+	logicalCols, logicalRows, cols, rows := t.imageGrid(w, h, opts)
+	scaled := opts.FitWidth || opts.FitHeight || opts.FitContain
 
 	glyphs = make([]term.Glyph, 0, cols*rows)
 	for gy := 0; gy < rows; gy++ {
 		for gx := 0; gx < cols; gx++ {
 			offset := len(imageAtlas)
-			t.appendImageBlock(w, h, rgba, gx, gy, cols, rows, fitW, fitH)
+			t.appendImageBlock(w, h, rgba, gx, gy, logicalCols, logicalRows, scaled)
 			glyphs = append(glyphs, term.Glyph{U: term.ImageRune, Fg: uint32(offset)})
 		}
 	}
 	return cols, rows, glyphs, true
+}
+
+func (t *Terminal) imageGrid(w, h int, opts term.ImageDecodeOptions) (logicalCols, logicalRows, cols, rows int) {
+	targetCols, targetRows := t.cols, t.rows
+	if opts.ViewCols > 0 {
+		targetCols = opts.ViewCols
+	}
+	if opts.ViewRows > 0 {
+		targetRows = opts.ViewRows
+	}
+	if targetCols < 1 {
+		targetCols = 1
+	}
+	if targetRows < 1 {
+		targetRows = 1
+	}
+
+	switch {
+	case opts.FitContain:
+		logicalCols = targetCols
+		logicalRows = h * logicalCols * t.cw / (w * t.ch)
+		if logicalRows > targetRows {
+			logicalRows = targetRows
+			logicalCols = w * logicalRows * t.ch / (h * t.cw)
+		}
+	case opts.FitHeight:
+		logicalRows = targetRows
+		logicalCols = w * logicalRows * t.ch / (h * t.cw)
+	case opts.FitWidth:
+		logicalCols = targetCols
+		logicalRows = h * logicalCols * t.cw / (w * t.ch)
+	default:
+		logicalCols = (w + t.cw - 1) / t.cw
+		logicalRows = (h + t.ch - 1) / t.ch
+	}
+	if logicalCols < 1 {
+		logicalCols = 1
+	}
+	if logicalRows < 1 {
+		logicalRows = 1
+	}
+	cols, rows = logicalCols, logicalRows
+	if cols > targetCols {
+		cols = targetCols
+	}
+	if opts.ViewRows > 0 && rows > targetRows {
+		rows = targetRows
+	}
+	return logicalCols, logicalRows, cols, rows
 }
 
 // isPDF reports whether the bytes look like a PDF file ("%PDF-" header).
@@ -91,15 +110,12 @@ func (t *Terminal) PDFPageCount(encoded []byte) int {
 
 // imageDecodePDF renders the first page of a PDF to a bitmap (BGRA) via
 // poppler, then breaks it into image-cell glyphs like any other image.
-func (t *Terminal) imageDecodePDF(encoded []byte, fitW, fitH bool, page int) (cols, rows int, glyphs []term.Glyph, ok bool) {
+func (t *Terminal) imageDecodePDF(encoded []byte, opts term.ImageDecodeOptions) (cols, rows int, glyphs []term.Glyph, ok bool) {
 	// target bitmap size in pixels
 	var pw, ph int
-	if fitH {
-		ph = t.rows * t.ch
-		pw = t.cols * t.cw
-	} else if fitW {
-		pw = t.cols * t.cw
-		ph = t.rows * t.ch
+	if opts.ViewCols > 0 && opts.ViewRows > 0 {
+		pw = opts.ViewCols * t.cw
+		ph = opts.ViewRows * t.ch
 	} else {
 		// native: render at a reasonable resolution (600dpi-ish is too big;
 		// use the terminal size) and let the draw loop scroll like text.
@@ -120,7 +136,7 @@ func (t *Terminal) imageDecodePDF(encoded []byte, fitW, fitH bool, page int) (co
 	if n < 1 {
 		return 0, 0, nil, false
 	}
-	page = ((page % n) + n) % n
+	page := ((opts.Page % n) + n) % n
 	bgra, _, ok := renderPDFPage(encoded, page, pw, ph)
 	if !ok {
 		return 0, 0, nil, false
@@ -131,32 +147,8 @@ func (t *Terminal) imageDecodePDF(encoded []byte, fitW, fitH bool, page int) (co
 	// appendImageBlock (fit mode scales per-cell, native shows raw pixels).
 	w, h := pw, ph
 
-	// grid size (same math as the raster branch)
-	if !fitW && !fitH {
-		cols = (w + t.cw - 1) / t.cw
-		rows = (h + t.ch - 1) / t.ch
-		if cols > t.cols {
-			cols = t.cols
-		}
-	} else if fitH {
-		rows = t.rows
-		if rows < 1 {
-			rows = 1
-		}
-		cols = w * rows * t.ch / (h * t.cw)
-		if cols < 1 {
-			cols = 1
-		}
-	} else { // fitW
-		cols = t.cols
-		if cols < 1 {
-			cols = 1
-		}
-		rows = h * cols * t.cw / (w * t.ch)
-		if rows < 1 {
-			rows = 1
-		}
-	}
+	logicalCols, logicalRows, cols, rows := t.imageGrid(w, h, opts)
+	scaled := opts.FitWidth || opts.FitHeight || opts.FitContain
 
 	// The atlas stores uint32 ARGB cells; convert the BGRA bitmap.
 	rgba := make([]uint32, len(bgra)/4)
@@ -171,7 +163,7 @@ func (t *Terminal) imageDecodePDF(encoded []byte, fitW, fitH bool, page int) (co
 	for gy := 0; gy < rows; gy++ {
 		for gx := 0; gx < cols; gx++ {
 			offset := len(imageAtlas)
-			t.appendImageBlockFromUint(w, h, rgba, gx, gy, cols, rows, fitW, fitH)
+			t.appendImageBlockFromUint(w, h, rgba, gx, gy, logicalCols, logicalRows, scaled)
 			glyphs = append(glyphs, term.Glyph{U: term.ImageRune, Fg: uint32(offset)})
 		}
 	}
@@ -180,8 +172,8 @@ func (t *Terminal) imageDecodePDF(encoded []byte, fitW, fitH bool, page int) (co
 
 // appendImageBlockFromUint is like appendImageBlock but consumes a []uint32
 // ARGB buffer instead of raw RGBA bytes.
-func (t *Terminal) appendImageBlockFromUint(w, h int, rgba []uint32, gx, gy, cols, rows int, fitW, fitH bool) {
-	if !fitW && !fitH {
+func (t *Terminal) appendImageBlockFromUint(w, h int, rgba []uint32, gx, gy, cols, rows int, scaled bool) {
+	if !scaled {
 		for yy := 0; yy < t.ch; yy++ {
 			sy := gy*t.ch + yy
 			for xx := 0; xx < t.cw; xx++ {
@@ -230,8 +222,8 @@ func (t *Terminal) appendImageBlockFromUint(w, h int, rgba []uint32, gx, gy, col
 // atlas. In native mode it copies the image's raw pixels for that cell
 // (1 image pixel = 1 cell pixel), clamping at the image edge. In fit mode
 // the image block for the cell is scaled to fill the cell.
-func (t *Terminal) appendImageBlock(w, h int, rgba []byte, gx, gy, cols, rows int, fitW, fitH bool) {
-	if !fitW && !fitH {
+func (t *Terminal) appendImageBlock(w, h int, rgba []byte, gx, gy, cols, rows int, scaled bool) {
+	if !scaled {
 		// native: each cell shows a raw cw x ch block of the image at its
 		// natural resolution (many colors per cell). At the image edge the
 		// block is partial; the remainder is filled with black.

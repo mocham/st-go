@@ -4,7 +4,9 @@ import (
 	"encoding/base64"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,11 +29,11 @@ func TestMatchSemantics(t *testing.T) {
 		mask, state int
 		want        bool
 	}{
-		{XKAnyMod, 0, true},           // any matches no-mod
-		{XKAnyMod, ShiftMask, true},   // any matches shift
-		{XKNoMod, 0, true},            // no-mod matches none
-		{XKNoMod, ShiftMask, false},   // no-mod fails with shift
-		{ShiftMask, ShiftMask, true},  // exact shift
+		{XKAnyMod, 0, true},                         // any matches no-mod
+		{XKAnyMod, ShiftMask, true},                 // any matches shift
+		{XKNoMod, 0, true},                          // no-mod matches none
+		{XKNoMod, ShiftMask, false},                 // no-mod fails with shift
+		{ShiftMask, ShiftMask, true},                // exact shift
 		{ShiftMask, ShiftMask | ControlMask, false}, // subset fails (exact)
 		{ControlMask, ControlMask, true},
 		{ShiftMask | ControlMask, ShiftMask | ControlMask, true},
@@ -53,15 +55,15 @@ func TestKmapExact(t *testing.T) {
 	trm.loadInputConfig(cfg)
 
 	cases := []struct {
-		ksym uint
+		ksym  uint
 		state uint
-		want string
+		want  string
 	}{
-		{0xFF51, 0, "\x1b[D"},               // Left
-		{0xFF51, ControlMask, "\x1b[1;5D"},  // Ctrl+Left
+		{0xFF51, 0, "\x1b[D"},                          // Left
+		{0xFF51, ControlMask, "\x1b[1;5D"},             // Ctrl+Left
 		{0xFF51, ShiftMask | ControlMask, "\x1b[1;6D"}, // Ctrl+Shift+Left
-		{0xFF53, 0, "\x1b[C"},               // Right
-		{0xFF08, 0, "\x7f"},                 // BackSpace no-mod
+		{0xFF53, 0, "\x1b[C"},                          // Right
+		{0xFF08, 0, "\x7f"},                            // BackSpace no-mod
 	}
 	for _, c := range cases {
 		s, m := trm.kmap(c.ksym, c.state)
@@ -110,9 +112,9 @@ func TestXtermColors(t *testing.T) {
 		idx  int
 		want uint32
 	}{
-		{16, 0xFF000000}, // cube (0,0,0)
-		{17, 0xFF00005F}, // cube (0,0,95)
-		{46, 0xFF00FF00}, // cube (0,255,0)
+		{16, 0xFF000000},  // cube (0,0,0)
+		{17, 0xFF00005F},  // cube (0,0,95)
+		{46, 0xFF00FF00},  // cube (0,255,0)
 		{231, 0xFFFFFFFF}, // cube (255,255,255)
 		{232, 0xFF080808}, // gray 8
 		{255, 0xFFEEEEEE}, // gray 238 (8+10*23=238)
@@ -250,12 +252,46 @@ func TestBase64Decode(t *testing.T) {
 	}
 }
 
+func TestDcsImageRectangle(t *testing.T) {
+	cfg := config.Default()
+	cfg.Cols, cfg.Rows = 12, 6
+	trm := &Terminal{cw: 16, ch: 28, cols: 12, rows: 6}
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+	for y := 0; y < core.Rows(); y++ {
+		core.Twrite([]byte(strings.Repeat("x", core.Cols())), false)
+		if y != core.Rows()-1 {
+			core.Twrite([]byte("\r\n"), false)
+		}
+	}
+	dir := t.TempDir()
+	path := dir + "/rect.png"
+	if err := os.WriteFile(path, makeTestPNG(t), 0644); err != nil {
+		t.Fatal(err)
+	}
+	core.Twrite([]byte("\x1bPopen '"+path+"' rect 2 2 4 3 fit-contain\x1b\\"), false)
+	found := false
+	for y := 0; y < core.Rows(); y++ {
+		for x := 0; x < core.Cols(); x++ {
+			isImage := core.LineAt(x, y).U == term.ImageRune
+			inside := x >= 1 && x < 5 && y >= 1 && y < 4
+			if isImage && !inside {
+				t.Fatalf("image escaped rectangle at %d,%d", x, y)
+			}
+			found = found || isImage
+		}
+	}
+	if !found {
+		t.Fatal("rectangle did not contain an image glyph")
+	}
+}
+
 // TestGeometryParse verifies st's -g geometry parsing (WxH+X+Y).
 func TestGeometryParse(t *testing.T) {
 	cases := []struct {
-		s          string
+		s                string
 		cols, rows, x, y int
-		mask       XGeometryMask
+		mask             XGeometryMask
 	}{
 		{"100x40", 100, 40, 0, 0, WidthValue | HeightValue},
 		{"100x40+10+20", 100, 40, 10, 20, AllValues},
@@ -632,7 +668,9 @@ func TestStChildEnvUnsetsSizeVars(t *testing.T) {
 	os.Setenv("COLUMNS", "20")
 	os.Setenv("LINES", "5")
 	os.Setenv("TERMCAP", "xterm")
-	env := stChildEnv("st-256color")
+	cfg := config.Default()
+	cfg.Termname = "st-256color"
+	env := stChildEnv(cfg)
 	m := map[string]string{}
 	for _, kv := range env {
 		for i := 0; i < len(kv); i++ {
@@ -944,7 +982,7 @@ func TestImageDecodePDF(t *testing.T) {
 		t.Skipf("no X: %v", err)
 	}
 	defer trm.Close()
-	cols, rows, glyphs, ok := trm.ImageDecode(pdf, false, true, 0)
+	cols, rows, glyphs, ok := trm.ImageDecode(pdf, term.ImageDecodeOptions{FitHeight: true})
 	if !ok || len(glyphs) == 0 {
 		t.Fatalf("pdf decode failed (cols=%d rows=%d glyphs=%d ok=%v)", cols, rows, len(glyphs), ok)
 	}
@@ -992,7 +1030,7 @@ func TestPDFModuloWrap(t *testing.T) {
 	defer trm.Close()
 
 	hash := func(page int) uint64 {
-		_, _, g, ok := trm.ImageDecode(data, false, true, page)
+		_, _, g, ok := trm.ImageDecode(data, term.ImageDecodeOptions{FitHeight: true, Page: page})
 		if !ok || len(g) == 0 {
 			return 0
 		}
@@ -1189,6 +1227,9 @@ func TestFBAltPathAndIncremental(t *testing.T) {
 	defer master.Close()
 	ptyutil.SetWinSize(master, 24, 80)
 	cmd := exec.Command("bash", "demo/file-browser.sh", sub)
+	cmd.Env = append(os.Environ(),
+		"ST_FILE_BROWSER_ICON_PARENT=U",
+		"ST_FILE_BROWSER_ICON_TEXT=T")
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = os.Stderr
@@ -1212,8 +1253,8 @@ func TestFBAltPathAndIncremental(t *testing.T) {
 		}
 	}()
 	time.Sleep(600 * time.Millisecond)
-	if clears := strings.Count(string(all), "\x1bPclear\x1b\\"); clears != 1 {
-		t.Fatalf("initial render issued %d full clears, want exactly 1", clears)
+	if clears := strings.Count(string(all), "\x1bPclear\x1b\\"); clears != 0 {
+		t.Fatalf("initial render issued %d atlas-destroying full clears, want none", clears)
 	}
 	// one Down move; must NOT trigger another full clear
 	master.Write([]byte("\x1b[B"))
@@ -1221,7 +1262,7 @@ func TestFBAltPathAndIncremental(t *testing.T) {
 	master.Write([]byte("\x1b[B"))
 	time.Sleep(300 * time.Millisecond)
 	allStr := string(all)
-	if clears := strings.Count(allStr, "\x1bPclear\x1b\\"); clears > 1 {
+	if clears := strings.Count(allStr, "\x1bPclear\x1b\\"); clears > 0 {
 		t.Fatalf("selection moves triggered %d full clears, want incremental redraw", clears)
 	}
 	// the alt-path list should contain s.txt (from <path>/sub), not r.txt
@@ -1230,6 +1271,13 @@ func TestFBAltPathAndIncremental(t *testing.T) {
 	}
 	if strings.Contains(allStr, "r.txt") {
 		t.Fatalf("alt-path list unexpectedly contains r.txt from parent dir")
+	}
+	if !strings.Contains(allStr, "U  ..") || !strings.Contains(allStr, "T  s.txt") {
+		t.Fatalf("configured file icons missing from browser output: %q", allStr)
+	}
+	if !strings.Contains(allStr, "window remember file-browser-") ||
+		!strings.Contains(allStr, " rect 2 3 ") {
+		t.Fatalf("tagged geometry or rectangle preview command missing: %q", allStr)
 	}
 	t.Logf("OK: alt path start + incremental redraw (single initial clear)")
 }
@@ -1302,7 +1350,7 @@ func TestFBSelectionKeepsList(t *testing.T) {
 	core.Redraw()
 	for _, n := range []string{"aaaa.txt", "bbbb.txt", "dddd.txt"} {
 		found := false
-		for y := 1; y < 6; y++ {
+		for y := 7; y < core.Rows()-2; y++ {
 			if strings.Contains(core.LineText(y), n) {
 				found = true
 			}
@@ -1317,7 +1365,7 @@ func TestFBSelectionKeepsList(t *testing.T) {
 	core.Redraw()
 	for _, n := range []string{"aaaa.txt", "bbbb.txt", "dddd.txt", "pic.png"} {
 		found := false
-		for y := 1; y < 6; y++ {
+		for y := 7; y < core.Rows()-2; y++ {
 			if strings.Contains(core.LineText(y), n) {
 				found = true
 			}
@@ -1327,4 +1375,296 @@ func TestFBSelectionKeepsList(t *testing.T) {
 		}
 	}
 	t.Logf("OK: list rows preserved on selection moves and after image preview")
+}
+
+// TestFBMouseDoubleClickOpener verifies SGR wheel/click events select entries
+// and a double click runs arbitrary shell code with the documented variables.
+func TestFBMouseDoubleClickOpener(t *testing.T) {
+	dir := t.TempDir()
+	file := dir + "/openme.txt"
+	marker := dir + "/.opened"
+	if err := os.WriteFile(file, []byte("preview me\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	master, slave, err := ptyutil.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	ptyutil.SetWinSize(master, 24, 80)
+	opener := `open_file() { printf '%s|%s' "$NAME" "$FILE" > "$BROWSER_DIR/.opened"; }; open_file`
+	cmd := exec.Command("bash", "demo/file-browser.sh", "--open", opener, dir)
+	cmd.Env = append(os.Environ(), "ST_FILE_BROWSER_DOUBLE_CLICK_MS=350")
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { master.Write([]byte("q")); cmd.Process.Kill() }()
+	slave.Close()
+	var outputMu sync.Mutex
+	var output []byte
+	go func() {
+		buf := make([]byte, 8192)
+		for {
+			n, err := master.Read(buf)
+			if n > 0 {
+				outputMu.Lock()
+				output = append(output, buf[:n]...)
+				outputMu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	want := "openme.txt|" + file
+	waitOpened := func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			data, err := os.ReadFile(marker)
+			if err == nil {
+				if string(data) == want {
+					return
+				}
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatal("configured opener did not run")
+	}
+
+	// Wheel down moves selection from the parent row to the file. Opening from
+	// the keyboard proves the SGR wheel report was decoded.
+	master.Write([]byte("\x1b[<65;60;9M"))
+	time.Sleep(80 * time.Millisecond)
+	master.Write([]byte("o"))
+	waitOpened()
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+
+	// At 80 columns the list starts at column 47 and row 8. Row 9 is the
+	// first real file after the parent entry.
+	click := []byte("\x1b[<0;60;9M")
+	master.Write(click)
+	time.Sleep(80 * time.Millisecond)
+	master.Write(click)
+	waitOpened()
+	time.Sleep(50 * time.Millisecond)
+	outputMu.Lock()
+	allOutput := string(output)
+	outputMu.Unlock()
+	if !strings.Contains(allOutput, "window place bottom-left 0px 0px 24% 8% restore file-browser-") {
+		t.Fatalf("double click did not emit minimize geometry: %q", allOutput)
+	}
+}
+
+func TestFBDefaultTextOpenerUsesRunningSt(t *testing.T) {
+	dir := t.TempDir()
+	file := dir + "/openme.md"
+	if err := os.WriteFile(file, []byte("preview me\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tools := t.TempDir()
+	marker := tools + "/opened"
+	fakeSt := tools + "/st"
+	script := "#!/bin/sh\nprintf '%s|%s' \"$1\" \"$2\" > \"$MARKER\"\n"
+	if err := os.WriteFile(fakeSt, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	master, slave, err := ptyutil.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	ptyutil.SetWinSize(master, 24, 80)
+	cmd := exec.Command("bash", "demo/file-browser.sh", dir)
+	cmd.Env = append(envWithout(os.Environ(), "ST_FILE_BROWSER_OPEN"),
+		"ST_GO_EXECUTABLE="+fakeSt,
+		"ST_FILE_BROWSER_DOUBLE_CLICK_MS=350",
+		"MARKER="+marker)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { master.Write([]byte("q")); cmd.Process.Kill() }()
+	slave.Close()
+	go func() {
+		buf := make([]byte, 8192)
+		for {
+			if _, err := master.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	click := []byte("\x1b[<0;60;9M")
+	master.Write(click)
+	time.Sleep(80 * time.Millisecond)
+	master.Write(click)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(marker)
+		if err == nil && string(data) == "vim|"+file {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("default text opener did not invoke ST_GO_EXECUTABLE vim <file>")
+}
+
+func startFileBrowserTest(t *testing.T, dir, opener string) (*os.File, *exec.Cmd, string, func() string) {
+	t.Helper()
+	master, slave, err := ptyutil.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ptyutil.SetWinSize(master, 24, 80)
+	marker := filepath.Join(dir, ".path-opened")
+	cmd := exec.Command("bash", "demo/file-browser.sh", "--open", opener, dir)
+	cmd.Env = append(os.Environ(), "MARKER="+marker, "LC_ALL=C")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, os.Stderr
+	if err := cmd.Start(); err != nil {
+		master.Close()
+		t.Fatal(err)
+	}
+	slave.Close()
+	var outputMu sync.Mutex
+	var output []byte
+	go func() {
+		buf := make([]byte, 8192)
+		for {
+			n, err := master.Read(buf)
+			if n > 0 {
+				outputMu.Lock()
+				output = append(output, buf[:n]...)
+				outputMu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		master.Write([]byte("q"))
+		cmd.Process.Kill()
+		master.Close()
+	})
+	time.Sleep(400 * time.Millisecond)
+	outputString := func() string {
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		return string(output)
+	}
+	return master, cmd, marker, outputString
+}
+
+func waitFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil && string(data) == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("%s did not contain %q", path, want)
+}
+
+func TestFBPathPromptRelativeEditing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "sub", "file.txt")
+	if err := os.WriteFile(file, []byte("text\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	opener := `printf '%s' "$FILE" > "$MARKER"`
+	master, _, marker, _ := startFileBrowserTest(t, dir, opener)
+	// Enter prompt, remove the initial '/', build "ub/file.tx", then use
+	// Ctrl+A/Ctrl+E insertion to produce "sub/file.txt".
+	master.Write([]byte("/\x7fub/file.tx\x01s\x05t\r"))
+	waitFileContent(t, marker, file)
+}
+
+func TestFBPathPromptWildcardPopup(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "alpha-one.txt")
+	second := filepath.Join(dir, "alpha-two.txt")
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, []byte("text\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opener := `printf '%s' "$FILE" > "$MARKER"`
+	master, _, marker, _ := startFileBrowserTest(t, dir, opener)
+	// Remove the initial slash, enter a wildcard, select the first C-locale
+	// match with Down, and activate it.
+	master.Write([]byte("/\x7falpha-*\x1b[B\r"))
+	waitFileContent(t, marker, first)
+}
+
+func TestFBPathPromptAbort(t *testing.T) {
+	dir := t.TempDir()
+	opener := `printf '%s' "$FILE" > "$MARKER"`
+	master, _, marker, output := startFileBrowserTest(t, dir, opener)
+	for _, sequence := range [][]byte{
+		[]byte("/abc\x1b"),
+		[]byte("/abc\x03"),
+		[]byte("/abc\x1b[<0;10;8M"),
+	} {
+		before := len(output())
+		master.Write(sequence)
+		time.Sleep(100 * time.Millisecond)
+		master.Write([]byte("r"))
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) && !strings.Contains(output()[before:], "Refreshed") {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if !strings.Contains(output()[before:], "Refreshed") {
+			t.Fatalf("browser did not return to normal mode after prompt abort %q", sequence)
+		}
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("aborted prompt unexpectedly opened a file: %v", err)
+	}
+}
+
+func TestGeometryRestoreConsumesClick(t *testing.T) {
+	cfg := config.Default()
+	trm, err := NewTerminal(cfg)
+	if err != nil {
+		t.Skipf("no X server: %v", err)
+	}
+	defer trm.Close()
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+	var written []byte
+	core.SetWriter(func(b []byte) { written = append(written, b...) })
+	core.Twrite([]byte("\x1b[?1000h\x1b[?1006h"), false)
+	r, err := trm.currentWindowRect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trm.geometryTags["browser"] = r
+	trm.restoreGeometryTag = "browser"
+	press := xproto.ButtonPressEvent{Detail: 1, EventX: 2, EventY: 2}
+	release := xproto.ButtonReleaseEvent{Detail: 1, EventX: 2, EventY: 2}
+	trm.bpress(press)
+	trm.brelease(release)
+	if len(written) != 0 {
+		t.Fatalf("restore click leaked mouse report %q", written)
+	}
+	trm.bpress(press)
+	if len(written) == 0 {
+		t.Fatal("click after restore was not reported")
+	}
 }

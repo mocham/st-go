@@ -215,6 +215,49 @@ type Term struct {
 	printerFn func([]byte)
 }
 
+// ImageDecodeOptions describes how a DCS open command should size an image.
+// ViewCols/ViewRows are zero for legacy whole-terminal behavior.
+type ImageDecodeOptions struct {
+	FitWidth   bool
+	FitHeight  bool
+	FitContain bool
+	Page       int
+	ViewCols   int
+	ViewRows   int
+}
+
+type GeometryUnit uint8
+
+const (
+	GeometryPixels GeometryUnit = iota
+	GeometryRatio
+)
+
+type GeometryValue struct {
+	Unit  GeometryUnit
+	Value float64
+}
+
+type WindowGeometryAction uint8
+
+const (
+	GeometryRemember WindowGeometryAction = iota
+	GeometryRestore
+	GeometryForget
+	GeometryPlace
+)
+
+// WindowGeometryRequest is emitted by the DCS window command. Anchor is one
+// of absolute, top-left, top, top-right, right, bottom-right, bottom,
+// bottom-left, or left. X/Y are positions for absolute and offsets otherwise.
+type WindowGeometryRequest struct {
+	Action     WindowGeometryAction
+	Tag        string
+	Anchor     string
+	X, Y, W, H GeometryValue
+	RestoreTag string
+}
+
 // Hooks is the frontend interface (mirrors win.h).
 type Hooks interface {
 	Bell()
@@ -238,9 +281,10 @@ type Hooks interface {
 	// per terminal cell (U=ImageRune, Fg/Bg packing the cell's pixel-block
 	// address in the frontend atlas). The original image data is freed.
 	// Returns the grid size and the glyphs in row-major order.
-	ImageDecode(encoded []byte, fitW, fitH bool, page int) (cols, rows int, glyphs []Glyph, ok bool)
+	ImageDecode(encoded []byte, opts ImageDecodeOptions) (cols, rows int, glyphs []Glyph, ok bool)
 	// ImageClearAll clears the image glyph atlas (terminal reset / clear).
 	ImageClearAll()
+	WindowGeometry(req WindowGeometryRequest)
 }
 
 // utfbyte/mask/min/max tables (port of st.c globals)
@@ -382,27 +426,27 @@ func NewTerm(cfg *config.Config, hooks Hooks) *Term {
 }
 
 // win.h wrapper functions forwarded to hooks (called from core).
-func (t *Term) xbell()             { t.hooks.Bell() }
-func (t *Term) xclipcopy()         { t.hooks.ClipCopy() }
+func (t *Term) xbell()     { t.hooks.Bell() }
+func (t *Term) xclipcopy() { t.hooks.ClipCopy() }
 func (t *Term) xdrawcursor(a, b int, g Glyph, c, d int, og Glyph) {
 	t.hooks.DrawCursor(a, b, g, c, d, og)
 }
 func (t *Term) xdrawline(l []Glyph, a, b, c int) { t.hooks.DrawLine(l, a, b, c) }
-func (t *Term) xfinishdraw()                      { t.hooks.FinishDraw() }
-func (t *Term) xloadcols()                        { t.hooks.LoadCols() }
+func (t *Term) xfinishdraw()                     { t.hooks.FinishDraw() }
+func (t *Term) xloadcols()                       { t.hooks.LoadCols() }
 func (t *Term) xsetcolorname(i int, s string) bool {
 	return t.hooks.SetColorName(i, s)
 }
 func (t *Term) xgetcolor(i int) (byte, byte, byte, bool) {
 	return t.hooks.GetColor(i)
 }
-func (t *Term) xseticontitle(s string)       { t.hooks.SetIconTitle(s) }
-func (t *Term) xsettitle(s string)           { t.hooks.SetTitle(s) }
-func (t *Term) xsetcursor(i int) bool        { return t.hooks.SetCursor(i) }
-func (t *Term) xsetmode(set bool, m uint)    { t.hooks.SetMode(set, m) }
-func (t *Term) xsetpointermotion(on bool)    { t.hooks.SetPointerMotion(on) }
-func (t *Term) xsetsel(s string)             { t.hooks.SetSel(s) }
-func (t *Term) xstartdraw() bool             { return t.hooks.StartDraw() }
+func (t *Term) xseticontitle(s string)    { t.hooks.SetIconTitle(s) }
+func (t *Term) xsettitle(s string)        { t.hooks.SetTitle(s) }
+func (t *Term) xsetcursor(i int) bool     { return t.hooks.SetCursor(i) }
+func (t *Term) xsetmode(set bool, m uint) { t.hooks.SetMode(set, m) }
+func (t *Term) xsetpointermotion(on bool) { t.hooks.SetPointerMotion(on) }
+func (t *Term) xsetsel(s string)          { t.hooks.SetSel(s) }
+func (t *Term) xstartdraw() bool          { return t.hooks.StartDraw() }
 
 func (t *Term) setWinMode(set bool, mode uint) {
 	if set {

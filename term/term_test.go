@@ -8,11 +8,17 @@ import (
 )
 
 type mockHooks struct {
-	screen []string
+	screen       []string
+	imageOptions ImageDecodeOptions
+	imageCols    int
+	imageRows    int
+	imageGlyphs  []Glyph
+	imageOK      bool
+	geometry     []WindowGeometryRequest
 }
 
-func (m *mockHooks) Bell()                     {}
-func (m *mockHooks) ClipCopy()                 {}
+func (m *mockHooks) Bell()                                            {}
+func (m *mockHooks) ClipCopy()                                        {}
 func (m *mockHooks) DrawCursor(a, b int, g Glyph, c, d int, og Glyph) {}
 func (m *mockHooks) DrawLine(line []Glyph, x1, y1, x2 int) {
 	var sb strings.Builder
@@ -28,19 +34,23 @@ func (m *mockHooks) DrawLine(line []Glyph, x1, y1, x2 int) {
 	}
 	m.screen[y1] = sb.String()
 }
-func (m *mockHooks) FinishDraw()            {}
-func (m *mockHooks) LoadCols()              {}
-func (m *mockHooks) SetColorName(i int, s string) bool { return false }
+func (m *mockHooks) FinishDraw()                             {}
+func (m *mockHooks) LoadCols()                               {}
+func (m *mockHooks) SetColorName(i int, s string) bool       { return false }
 func (m *mockHooks) GetColor(i int) (byte, byte, byte, bool) { return 0, 0, 0, false }
-func (m *mockHooks) SetIconTitle(s string) {}
-func (m *mockHooks) SetTitle(s string)     {}
-func (m *mockHooks) SetCursor(shape int) bool { return true }
-func (m *mockHooks) SetMode(set bool, mode uint) {}
-func (m *mockHooks) SetPointerMotion(on bool) {}
-func (m *mockHooks) SetSel(s string)        {}
-func (m *mockHooks) StartDraw() bool        { return true }
-func (m *mockHooks) ImageDecode(encoded []byte, fitW, fitH bool, page int) (int, int, []Glyph, bool) { return 0, 0, nil, false }
-func (m *mockHooks) ImageClearAll()          {}
+func (m *mockHooks) SetIconTitle(s string)                   {}
+func (m *mockHooks) SetTitle(s string)                       {}
+func (m *mockHooks) SetCursor(shape int) bool                { return true }
+func (m *mockHooks) SetMode(set bool, mode uint)             {}
+func (m *mockHooks) SetPointerMotion(on bool)                {}
+func (m *mockHooks) SetSel(s string)                         {}
+func (m *mockHooks) StartDraw() bool                         { return true }
+func (m *mockHooks) ImageDecode(encoded []byte, opts ImageDecodeOptions) (int, int, []Glyph, bool) {
+	m.imageOptions = opts
+	return m.imageCols, m.imageRows, m.imageGlyphs, m.imageOK
+}
+func (m *mockHooks) ImageClearAll()                           {}
+func (m *mockHooks) WindowGeometry(req WindowGeometryRequest) { m.geometry = append(m.geometry, req) }
 
 func newTestTerm(t *testing.T, cols, rows int) (*Term, *mockHooks) {
 	cfg := config.Default()

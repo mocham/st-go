@@ -52,12 +52,10 @@ Display an image file at the current cursor position:
 printf '\033Popen /path/to/image.png;\033\\'
 ```
 
-The image is split into a grid of glyphs — one per terminal cell — and placed
-into the screen buffer exactly like text. It is **not resized**; each cell
-shows the average color of the image pixels it covers. The image is written
-row by row, advancing the cursor (and scrolling the screen when the bottom is
-reached), just like text — so it scrolls with the buffer and is overwritten by
-new text.
+The image is split into a grid of glyphs, one per terminal cell, with each cell
+retaining its full pixel block. Without placement options it is written like
+text, advancing the cursor and scrolling at the bottom, so it scrolls with the
+buffer and can be overwritten by normal output.
 
 With a fit option the image is scaled to the terminal (preserving aspect
 ratio):
@@ -66,26 +64,48 @@ ratio):
 printf '\033Popen /path/to/image.png fit-width;\033\\'   # fit terminal width
 printf '\033Popen /path/to/image.png fit-height;\033\\'  # clear screen, then fit height
 printf '\033Popen /path/to/doc.pdf fit-height page 3;\033\\'  # PDF page 3
+printf '\033Popen /path/to/image.png rect 1 3 48 20 fit-contain;\033\\'
 ```
 
-`fit-height` clears the screen before drawing so the whole image is visible.
-Without a fit option the image keeps its native cell size.
+`fit-height` clears the screen only in legacy cursor-placement mode. `rect`
+uses one-based cell coordinates, clears only that rectangle, clips all output
+to it, and leaves the cursor unchanged. `fit-contain` preserves aspect ratio
+while fitting both rectangle dimensions.
 
 Supported DSL commands:
 
 | command | meaning |
 |---------|---------|
-| `open '<path>' [fit-width] [fit-height] [page N]` | load and display an image/PDF |
+| `open '<path>' [fit-width] [fit-height] [fit-contain] [page N]` | load and display an image/PDF |
+| `open '<path>' rect X Y W H [fit-contain] [page N]` | paint text/image/PDF inside a fixed cell rectangle |
 | `open '<path>'` (text file) | render a plain text file row-by-row from the cursor, stopping at the last row (no scroll) |
 | `setpwd '<dir>'`           | set the working directory for relative paths |
 | `clear`                    | clear the screen and remove all images |
 | `delete <id>`              | remove a previously opened image |
+| `window remember TAG`      | memorize the current terminal position and size |
+| `window restore TAG`       | restore a memorized geometry |
+| `window forget TAG`        | remove a memorized geometry |
+| `window place ANCHOR X Y W H [restore TAG]` | move/resize and optionally restore on the next left click |
 
 Unknown commands are ignored, so the DSL is forward-compatible. Plain text
 files (non-image, non-PDF) are detected by content and rendered as text rows
 starting at the current cursor position, stopping when the last screen row is
 reached — so a mini file browser can show a file tree in one pane and a text
 preview in another.
+
+Window geometry values require a unit: pixels (`320px`), a screen ratio
+(`0.25r`), or a percentage (`25%`). `absolute` treats X/Y as screen positions.
+The other anchors are `top-left`, `top`, `top-right`, `right`, `bottom-right`,
+`bottom`, `bottom-left`, and `left`; X/Y are offsets inward from that anchor.
+Corner and boundary placement is resolved against the X screen. A window
+placed with `restore TAG` stays mapped, consumes the next left-button
+press/release, and restores the tagged geometry. These operations obey
+`allowgeometryops`; the default config enables geometry while leaving the
+broader OSC clipboard/window operations controlled by `allowwindowops` off.
+At runtime st-go exports a random `ST_GO_GEOMETRY_TOKEN` capability to its
+child. Child-emitted window commands use `window auth TOKEN ...`; commands
+without the matching token are ignored. The file browser adds this prefix
+automatically.
 
 ## Requirements
 
@@ -180,7 +200,15 @@ the stub objects live in `third_party_wrapper/dummy-{stb,webp,pdf}.c`. See
 ./st -v                         # print version (st 0.9.2)
 ./st -config /path/config.json  # alternate config file
 ./st -t auto-gtex -e bash       # title/class/instance for WM tiling
+./st vim notes.md               # gvim-like terminal Vim window
+./st vim -c 'set number' notes.md
 ```
+
+`st vim [vim-options] <file>` treats the final argument as the file and passes
+the preceding arguments to Vim. It starts Vim with the file's directory as the
+child working directory, passes the basename after `--`, sets the initial
+terminal title to `emulated-vim`, and sizes the window to the screen except for
+a bottom strip reserved for the collapsed graphical file browser.
 
 ## Demo
 
@@ -194,17 +222,75 @@ Esc quits):
 ./st -e ./demo/image-viewer.sh -p 3 /path/to/docs   # start PDFs at page 3
 ```
 
-`demo/file-browser.sh` is a mini file browser: the right panel lists the
-current directory (`..` at the top, current entry highlighted), the left panel
-previews the selected file (text rows, or image/PDF via fit-height):
+`demo/file-browser.sh` is a graphical, pane-based file browser. The right pane
+contains file metadata and a scrollable directory list; the left pane previews
+text, images, and PDFs using the display DSL. It runs in the alternate screen
+and enables SGR mouse reporting:
 
 ```sh
 ./st -e ./demo/file-browser.sh           # browse the current directory
 ./st -e ./demo/file-browser.sh /some/path
+./st -e ./demo/file-browser.sh --hidden /some/path
 ```
 
-Up/Down move the active entry, Right enters a directory (or previews a file),
-Left goes up to the parent directory, `q`/Esc quits.
+Single-clicking or using the arrow keys selects an entry and updates its info
+and preview. Double-clicking opens a file (or enters a directory), and the mouse
+wheel scrolls the list. Over a PDF preview, the wheel changes pages. Keyboard
+controls include arrows, Page Up/Down, Enter, Backspace, `[`/`]` for PDF pages,
+`.` for hidden files, `r` to refresh, `/` to enter a path, and `q` to quit.
+
+The path prompt accepts absolute paths and paths relative to the current browser
+directory, including `file`, `./file`, and `../../file`. Backspace can remove
+the initial `/`; `Ctrl+A`/`Ctrl+E` move to the beginning/end. Live matching
+shows a popup menu, standard `*`, `?`, and bracket wildcards are expanded, and
+Up/Down selects a match before Enter activates it. Escape, `Ctrl+C`, or any
+mouse click cancels path entry.
+
+File, directory, symlink, image, PDF, text, archive, audio, video, source,
+configuration, and executable icons have built-in Unicode defaults. Override
+them in a partial terminal config:
+
+```json
+{
+  "file_browser": {
+    "icons": {
+      "directory": "D",
+      "pdf": "P",
+      "code": "C"
+    }
+  }
+}
+```
+
+The resolved values are exported to the browser. A one-shot
+`ST_FILE_BROWSER_ICON_PDF=X` environment variable takes precedence over JSON.
+
+The external opener is shell code rather than a command-plus-one-argument. Set
+it with `--open CODE` or `ST_FILE_BROWSER_OPEN`; `FILE`, `NAME`, and
+`BROWSER_DIR` are exported to `bash -c`, so dispatch functions and command
+sequences are supported:
+
+By default, text, markup, configuration, shell, and source-code extensions are
+opened through the exact st-go executable that launched the browser:
+`$ST_GO_EXECUTABLE vim "$FILE"`. Other formats continue to use `xdg-open`.
+
+```sh
+./st -e ./demo/file-browser.sh --open '
+  open_file() {
+    case $FILE in
+      *.pdf) zathura "$FILE" ;;
+      *.txt) xterm -e less "$FILE" ;;
+      *)     xdg-open "$FILE" ;;
+    esac
+  }
+  open_file
+' /some/path
+```
+
+Text, image, PDF, and directory selections redraw only the fixed preview
+rectangle, metadata, and changed list rows. Double-clicking a file remembers
+the full geometry, opens the configured command, and collapses the terminal to
+a mapped bottom-left strip; clicking that strip restores the saved geometry.
 
 > **tmux note:** the image DSL rides the DCS escape code, which tmux reserves
 > for its own protocol and does not forward from a pane to the outer terminal.

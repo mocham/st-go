@@ -53,6 +53,7 @@ type Terminal struct {
 
 	title       string
 	iconTitle   string
+	lockTitle   bool
 	cursorShape int
 	cursorThick int
 
@@ -65,9 +66,9 @@ type Terminal struct {
 	doubleClick   uint
 	tripleClick   uint
 
-	pasteTarget xproto.Atom
-	incrActive  bool
-	incrData    []byte
+	pasteTarget  xproto.Atom
+	incrActive   bool
+	incrData     []byte
 	incrProperty xproto.Atom
 
 	blinkMs uint
@@ -77,11 +78,14 @@ type Terminal struct {
 	// ttyResize is set by main to send TIOCSWINSZ to the pty master.
 	ttyResize func(rows, cols int)
 
-	keys      []keyDef
-	shortcuts []shortcut
+	keys       []keyDef
+	shortcuts  []shortcut
 	mshortcuts []mShortcut
 
-	selectionText string
+	selectionText         string
+	geometryTags          map[string]windowRect
+	restoreGeometryTag    string
+	suppressRestoreButton bool
 
 	mu       sync.Mutex
 	isClosed int32
@@ -154,31 +158,32 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 	}
 
 	t := &Terminal{
-		conn:        xc,
-		xu:          xu,
-		scr:         scr,
-		cfg:         cfg,
-		cols:        int(cfg.Cols),
-		rows:        int(cfg.Rows),
-		cw:          cw,
-		ch:          ch,
-		baseline:    baseline,
-		borderpx:    cfg.Borderpx,
-		ratio:        ratio,
-		title:        title,
-		iconTitle:    title,
-		x:            x,
-		y:            y,
-		geomMask:     geomMask,
-		isFixed:      isFixed,
-		cursorShape:  int(cfg.CursorShape),
-		cursorThick:  int(cfg.CursorThick),
-		atoms:       make(map[string]xproto.Atom),
-		ignoreMod:   cfg.IgnoreMod,
+		conn:          xc,
+		xu:            xu,
+		scr:           scr,
+		cfg:           cfg,
+		cols:          int(cfg.Cols),
+		rows:          int(cfg.Rows),
+		cw:            cw,
+		ch:            ch,
+		baseline:      baseline,
+		borderpx:      cfg.Borderpx,
+		ratio:         ratio,
+		title:         title,
+		iconTitle:     title,
+		x:             x,
+		y:             y,
+		geomMask:      geomMask,
+		isFixed:       isFixed,
+		cursorShape:   int(cfg.CursorShape),
+		cursorThick:   int(cfg.CursorThick),
+		atoms:         make(map[string]xproto.Atom),
+		ignoreMod:     cfg.IgnoreMod,
 		forceMouseMod: uint16(cfg.ForceMouseMod),
 		doubleClick:   cfg.DoubleClickMs,
 		tripleClick:   cfg.TripleClickMs,
 		blinkMs:       cfg.BlinkTimeout,
+		geometryTags:  make(map[string]windowRect),
 	}
 
 	for _, name := range []string{"WM_NAME", "WM_ICON_NAME", "WM_PROTOCOLS",
@@ -383,7 +388,7 @@ func (t *Terminal) setWMHints(winW, winH, x, y int) {
 
 	// x/y only used when geometry provides them (USPosition + PWinGravity)
 	if t.geomMask&(XValue|YValue) != 0 {
-		h[0] |= 1 // USPosition
+		h[0] |= 1   // USPosition
 		h[0] |= 512 // PWinGravity
 	} else {
 		h[1], h[2] = 0, 0
@@ -441,7 +446,7 @@ func (t *Terminal) actualRowsCols() (rows, cols int) {
 }
 
 func (t *Terminal) setTitle(s string) {
-	if s == "" {
+	if s == "" || t.lockTitle {
 		return
 	}
 	t.title = s
@@ -457,7 +462,7 @@ func (t *Terminal) setTitle(s string) {
 }
 
 func (t *Terminal) SetMode(set bool, mode uint) { t.setWinMode(set, mode) }
-func (t *Terminal) SetPointerMotion(on bool)      {}
+func (t *Terminal) SetPointerMotion(on bool)    {}
 
 // LoadCols mirrors st's xloadcols(): reset the palette to config defaults.
 func (t *Terminal) LoadCols() {

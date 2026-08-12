@@ -18,7 +18,7 @@ func (t *Terminal) SetSel(s string) {
 }
 
 func (t *Terminal) SetIconTitle(s string) {
-	if s == "" {
+	if s == "" || t.lockTitle {
 		return
 	}
 	t.iconTitle = s

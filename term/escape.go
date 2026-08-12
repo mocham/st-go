@@ -3,6 +3,7 @@ package term
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -545,17 +546,18 @@ func (t *Term) strparse() {
 
 // dcs handles a DCS (device control string) payload as a small display DSL.
 //
-//   ESC P <statement>; <statement>; ... ESC \
+//	ESC P <statement>; <statement>; ... ESC \
 //
 // Each statement is `command args...`; a statement ends with ';'. Quoted
 // strings ('...' or "...") keep spaces inside a single argument. Unknown
 // commands are ignored, so the DSL is forward-extensible.
 //
 // Supported commands:
-//   open '<path>' [col row]   load and display an image file at the cursor
-//                             (or at an explicit cell position)
-//   clear                     remove all images and placements
-//   delete <id>               remove one transmitted image
+//
+//	open '<path>' [col row]   load and display an image file at the cursor
+//	                          (or at an explicit cell position)
+//	clear                     remove all images and placements
+//	delete <id>               remove one transmitted image
 func (t *Term) dcs() {
 	stmt := string(t.strescseq.buf)
 	// split into statements on ';'
@@ -586,6 +588,8 @@ func (t *Term) dcs() {
 			t.dslClear()
 		case "delete":
 			t.dslDelete(args[1:])
+		case "window":
+			t.dslWindow(args[1:])
 		default:
 			log.Printf("dsl: unknown command %q\n", args[0])
 		}
@@ -647,8 +651,10 @@ func (t *Term) resolveImagePath(p string) string {
 
 // dslOpen loads an image file and displays it. Options (in any order after
 // the path):
-//   fit-width     scale the image to the terminal width
-//   fit-height    clear the screen, then scale to the terminal height
+//
+//	fit-width     scale the image to the terminal width
+//	fit-height    clear the screen, then scale to the terminal height
+//
 // Without a fit option the image is shown at its native cell size.
 // The image is written row by row at the cursor, advancing the cursor (and
 // scrolling at the bottom) exactly like text.
@@ -658,24 +664,57 @@ func (t *Term) dslOpen(args []string) {
 		return
 	}
 	path := t.resolveImagePath(args[0])
-	fitW, fitH := false, false
-	page := 0
+	opts := ImageDecodeOptions{}
+	rectSet := false
+	rx, ry, rw, rh := 0, 0, 0, 0
 	for i := 0; i < len(args[1:]); i++ {
 		a := args[1+i]
 		switch a {
 		case "fit-width":
-			fitW = true
+			opts.FitWidth = true
 		case "fit-height":
-			fitH = true
+			opts.FitHeight = true
+		case "fit-contain":
+			opts.FitContain = true
 		case "page":
 			// page N (1-based)
 			if i+1 < len(args[1:]) {
 				if n, err := strconv.Atoi(args[1+i+1]); err == nil && n > 0 {
-					page = n - 1
+					opts.Page = n - 1
 					i++
 				}
 			}
+		case "rect":
+			if i+4 >= len(args[1:]) {
+				log.Printf("dsl: rect requires X Y W H\n")
+				return
+			}
+			values := []*int{&rx, &ry, &rw, &rh}
+			for j := range values {
+				n, err := strconv.Atoi(args[1+i+1+j])
+				if err != nil || n < 1 {
+					log.Printf("dsl: invalid rect value %q\n", args[1+i+1+j])
+					return
+				}
+				*values[j] = n
+			}
+			rectSet = true
+			i += 4
 		}
+	}
+	if rectSet {
+		rx--
+		ry--
+		if rx >= t.col || ry >= t.row {
+			return
+		}
+		if rw > t.col-rx {
+			rw = t.col - rx
+		}
+		if rh > t.row-ry {
+			rh = t.row - ry
+		}
+		opts.ViewCols, opts.ViewRows = rw, rh
 	}
 
 	data, err := os.ReadFile(path)
@@ -691,6 +730,9 @@ func (t *Term) dslOpen(args []string) {
 	if t.looksLikeText(data) {
 		availRows := t.row - t.c.y
 		availCols := t.col - t.c.x
+		if rectSet {
+			availRows, availCols = rh, rw
+		}
 		if availRows < 1 {
 			availRows = 1
 		}
@@ -704,10 +746,15 @@ func (t *Term) dslOpen(args []string) {
 		if len(data) > need {
 			data = data[:need]
 		}
-		t.dslOpenText(data)
+		if rectSet {
+			t.tclearregion(rx, ry, rx+rw-1, ry+rh-1)
+			t.dslOpenTextBounds(data, rx, ry, rx+rw, ry+rh, false)
+		} else {
+			t.dslOpenText(data)
+		}
 		return
 	}
-	cols, rows, glyphs, ok := t.hooks.ImageDecode(data, fitW, fitH, page)
+	cols, rows, glyphs, ok := t.hooks.ImageDecode(data, opts)
 	if !ok {
 		log.Printf("dsl: failed to decode %q\n", path)
 		return
@@ -719,8 +766,25 @@ func (t *Term) dslOpen(args []string) {
 		rows = 1
 	}
 
-	// fit-height clears the screen and starts at the top
-	if fitH {
+	if rectSet {
+		t.tclearregion(rx, ry, rx+rw-1, ry+rh-1)
+		startX := rx + max(0, (rw-min(cols, rw))/2)
+		startY := ry + max(0, (rh-min(rows, rh))/2)
+		for gy := 0; gy < rows && gy < rh; gy++ {
+			for gx := 0; gx < cols && gx < rw; gx++ {
+				x, y := startX+gx, startY+gy
+				idx := gy*cols + gx
+				if x >= rx+rw || y >= ry+rh || idx >= len(glyphs) {
+					break
+				}
+				t.tsetchar(glyphs[idx].U, &glyphs[idx], x, y)
+			}
+		}
+		return
+	}
+
+	// Legacy fit-height clears the screen and starts at the top.
+	if opts.FitHeight {
 		t.tclearregion(0, 0, t.col-1, t.row-1)
 		t.tmoveto(0, 0)
 	}
@@ -801,12 +865,15 @@ func (t *Term) looksLikeText(data []byte) bool {
 // scroll). Lines longer than the visible width are truncated (the rest of the
 // line is dropped, not wrapped). Used by the mini file browser preview.
 func (t *Term) dslOpenText(data []byte) {
-	startX := t.c.x
-	y := t.c.y
+	t.dslOpenTextBounds(data, t.c.x, t.c.y, t.col, t.row, true)
+}
+
+func (t *Term) dslOpenTextBounds(data []byte, startX, startY, rowEnd, rowLimit int, moveCursor bool) {
+	saved := t.c
+	y := startY
 	// default text attribute: current cursor fg/bg, no decorations
 	attr := t.c.attr
 	col := startX
-	rowEnd := t.col // truncate at the screen's right edge
 	truncLine := false
 	render := func(u rune) bool {
 		if truncLine {
@@ -826,7 +893,7 @@ func (t *Term) dslOpenText(data []byte) {
 			// skip to the next newline (line was truncated at the edge)
 			if c == '\n' {
 				truncLine = false
-				if y == t.row-1 {
+				if y == rowLimit-1 {
 					break
 				}
 				y++
@@ -836,7 +903,7 @@ func (t *Term) dslOpenText(data []byte) {
 		}
 		switch c {
 		case '\n':
-			if y == t.row-1 {
+			if y == rowLimit-1 {
 				truncLine = false
 				goto done // stop at the last row
 			}
@@ -862,8 +929,11 @@ func (t *Term) dslOpenText(data []byte) {
 		}
 	}
 done:
-	// leave the cursor at the last written cell
-	t.tmoveto(col, y)
+	if moveCursor {
+		t.tmoveto(col, y)
+	} else {
+		t.c = saved
+	}
 	t.tfulldirt()
 }
 
@@ -888,6 +958,110 @@ func (t *Term) dslDelete(args []string) {
 	// images are broken into glyphs and not retained by id; deleting clears
 	// the screen and atlas
 	t.dslClear()
+}
+
+func (t *Term) dslWindow(args []string) {
+	if t.hooks == nil || t.cfg == nil || !t.cfg.AllowGeometryOps || len(args) < 2 {
+		return
+	}
+	if t.cfg.GeometryToken != "" {
+		if len(args) < 4 || args[0] != "auth" || args[1] != t.cfg.GeometryToken {
+			return
+		}
+		args = args[2:]
+	}
+	action, tag := args[0], args[1]
+	if action != "place" && !validGeometryTag(tag) {
+		log.Printf("dsl: invalid window geometry tag %q\n", tag)
+		return
+	}
+	switch action {
+	case "remember":
+		t.hooks.WindowGeometry(WindowGeometryRequest{Action: GeometryRemember, Tag: tag})
+	case "restore":
+		t.hooks.WindowGeometry(WindowGeometryRequest{Action: GeometryRestore, Tag: tag})
+	case "forget":
+		t.hooks.WindowGeometry(WindowGeometryRequest{Action: GeometryForget, Tag: tag})
+	case "place":
+		if len(args) < 6 || !validGeometryAnchor(tag) {
+			log.Printf("dsl: window place requires ANCHOR X Y W H\n")
+			return
+		}
+		values := make([]GeometryValue, 4)
+		for i := range values {
+			v, ok := parseGeometryValue(args[i+2])
+			if !ok {
+				log.Printf("dsl: invalid geometry value %q\n", args[i+2])
+				return
+			}
+			values[i] = v
+		}
+		if values[2].Value <= 0 || values[3].Value <= 0 ||
+			(values[2].Unit == GeometryRatio && values[2].Value > 1) ||
+			(values[3].Unit == GeometryRatio && values[3].Value > 1) {
+			log.Printf("dsl: window size must be positive and ratios at most 1\n")
+			return
+		}
+		req := WindowGeometryRequest{
+			Action: GeometryPlace, Anchor: tag,
+			X: values[0], Y: values[1], W: values[2], H: values[3],
+		}
+		if len(args) > 6 {
+			if len(args) != 8 || args[6] != "restore" || !validGeometryTag(args[7]) {
+				log.Printf("dsl: window place suffix must be restore TAG\n")
+				return
+			}
+			req.RestoreTag = args[7]
+		}
+		t.hooks.WindowGeometry(req)
+	}
+}
+
+func parseGeometryValue(s string) (GeometryValue, bool) {
+	unit := GeometryPixels
+	number := s
+	switch {
+	case strings.HasSuffix(s, "px"):
+		number = strings.TrimSuffix(s, "px")
+	case strings.HasSuffix(s, "r"):
+		unit = GeometryRatio
+		number = strings.TrimSuffix(s, "r")
+	case strings.HasSuffix(s, "%"):
+		unit = GeometryRatio
+		number = strings.TrimSuffix(s, "%")
+	default:
+		return GeometryValue{}, false
+	}
+	v, err := strconv.ParseFloat(number, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return GeometryValue{}, false
+	}
+	if strings.HasSuffix(s, "%") {
+		v /= 100
+	}
+	return GeometryValue{Unit: unit, Value: v}, true
+}
+
+func validGeometryTag(s string) bool {
+	if len(s) < 1 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
+			(r < '0' || r > '9') && r != '_' && r != '-' && r != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func validGeometryAnchor(s string) bool {
+	switch s {
+	case "absolute", "top-left", "top", "top-right", "right",
+		"bottom-right", "bottom", "bottom-left", "left":
+		return true
+	}
+	return false
 }
 
 // imageCellGlyph returns a plain image-cell glyph whose Fg packs the address
