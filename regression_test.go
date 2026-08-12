@@ -1638,6 +1638,153 @@ func TestFBPathPromptAbort(t *testing.T) {
 	}
 }
 
+// TestFBCommandPromptShellCmd verifies the ':' prompt runs a shell command in
+// the browsed directory with the selected file exported as $F and the
+// directory as $D.
+func TestFBCommandPromptShellCmd(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "cmd.txt")
+	if err := os.WriteFile(file, []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, ".cmd-run")
+	master, _, _, _ := startFileBrowserTest(t, dir, "true")
+	// move the selection onto cmd.txt, then run a command that records $D/$F
+	master.Write([]byte("\x1b[B"))
+	time.Sleep(100 * time.Millisecond)
+	master.Write([]byte(":printf '%s|%s' \"$D\" \"$F\" > " + marker + "\r"))
+	waitFileContent(t, marker, dir+"|"+file)
+}
+
+// TestFBCommandRenameSubstitution verifies the vim-style :s/old/new/ renames
+// every matching entry while leaving non-matching files and the parent entry
+// untouched.
+func TestFBCommandRenameSubstitution(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"report.txt", "notes.txt", "other.log"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	master, _, _, _ := startFileBrowserTest(t, dir, "true")
+	master.Write([]byte(":s/txt/md/\r"))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(dir, "report.md")); err != nil {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "notes.md")); err != nil {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "other.log")); err != nil {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "report.txt")); !os.IsNotExist(err) {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
+		return
+	}
+	t.Fatal(":s/txt/md/ did not rename report.txt and notes.txt")
+}
+
+// TestFBCommandRenameGlobal verifies the /g flag replaces every occurrence in
+// a filename, not just the first.
+func TestFBCommandRenameGlobal(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a-b-c.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	master, _, _, _ := startFileBrowserTest(t, dir, "true")
+	master.Write([]byte(":s/-/X/g\r"))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(dir, "aXbXc.txt")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "a-b-c.txt")); os.IsNotExist(err) {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal(":s/-/X/g did not replace every '-' in a-b-c.txt")
+}
+
+// TestFBCommandRenamePreviewHighlight verifies that typing a :s/ pattern paints
+// the affected filenames with the rename highlight color before Enter.
+func TestFBCommandRenamePreviewHighlight(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"report.txt", "notes.txt", "other.log"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	master, _, _, output := startFileBrowserTest(t, dir, "true")
+	// type the pattern but do NOT press Enter
+	master.Write([]byte(":s/txt/md/"))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(output(), "\x1b[38;5;16m\x1b[48;5;220m") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal(":s/ pattern did not paint affected rows in the rename highlight")
+}
+
+// TestFBCommandRenameSkipCollision verifies an entry whose target already
+// exists is skipped instead of overwritten.
+func TestFBCommandRenameSkipCollision(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "foo.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "foo.md"), []byte("y\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	master, _, _, output := startFileBrowserTest(t, dir, "true")
+	master.Write([]byte(":s/txt/md/\r"))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(output(), "Renamed 0") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "foo.txt")); err != nil {
+		t.Fatal("collision target was overwritten")
+	}
+}
+
+// TestFBHelpManual verifies :help renders the manual in the preview pane and
+// that ']' navigates to the next page like a PDF.
+func TestFBHelpManual(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	master, _, _, output := startFileBrowserTest(t, dir, "true")
+	master.Write([]byte(":help\r"))
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(output(), "USER MANUAL  1/") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	master.Write([]byte("]"))
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(output(), "USER MANUAL  2/") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal(":help manual did not advance to page 2 with ']'")
+}
+
 func TestGeometryRestoreConsumesClick(t *testing.T) {
 	cfg := config.Default()
 	trm, err := NewTerminal(cfg)

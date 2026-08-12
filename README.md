@@ -237,7 +237,8 @@ Single-clicking or using the arrow keys selects an entry and updates its info
 and preview. Double-clicking opens a file (or enters a directory), and the mouse
 wheel scrolls the list. Over a PDF preview, the wheel changes pages. Keyboard
 controls include arrows, Page Up/Down, Enter, Backspace, `[`/`]` for PDF pages,
-`.` for hidden files, `r` to refresh, `/` to enter a path, and `q` to quit.
+`.` for hidden files, `r` to refresh, `/` to enter a path, `:` to run a shell
+command (or `:s/old/new/` to rename, `:help` for the manual), and `q` to quit.
 
 The path prompt accepts absolute paths and paths relative to the current browser
 directory, including `file`, `./file`, and `../../file`. Backspace can remove
@@ -245,6 +246,31 @@ the initial `/`; `Ctrl+A`/`Ctrl+E` move to the beginning/end. Live matching
 shows a popup menu, standard `*`, `?`, and bracket wildcards are expanded, and
 Up/Down selects a match before Enter activates it. Escape, `Ctrl+C`, or any
 mouse click cancels path entry.
+
+The `:` key opens a shell command prompt built on the same modal input loop as
+the `/` path prompt. The selected file is exported as `$F` and the browsed
+directory as `$D`, and the command runs with the browsed directory as its
+working directory, so `:vim $F`, `:xdg-open $F`, or `:ls -l` all work. While a
+command runs the browser leaves the alternate screen and restores it
+afterward.
+
+A command beginning with `:s/` is a rename instead of a shell command. Vim-style
+`:s/old/new/` replaces the first occurrence of `old` in the name of every
+matching entry, and `:s/old/new/g` replaces every occurrence:
+
+```sh
+:s/txt/md/       # report.txt -> report.md, notes.txt -> notes.md
+:s/-/X/g         # a-b-c.txt -> aXbXc.txt
+```
+
+As the pattern is typed, every entry whose name would change is painted in a
+highlight color in the list so the change can be previewed before Enter commits
+it. Entries whose target already exists are skipped, and the parent entry is
+never renamed.
+
+`:help` opens a detailed user manual in the preview pane. It is navigated like
+a PDF — `]` next page, `[` previous page, and the mouse wheel flips pages —
+and `q` or Escape closes it.
 
 File, directory, symlink, image, PDF, text, archive, audio, video, source,
 configuration, and executable icons have built-in Unicode defaults. Override

@@ -45,7 +45,10 @@ CODE is evaluated by `bash -c` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
-scroll, [ and ] change PDF pages, . toggles hidden files, r refreshes, q quits.
+scroll, [ and ] change PDF pages, / enters a path, : runs a shell command
+(with $F = selected file and $D = current directory), :s/old/new/[g] renames
+matching entries, :help shows this manual, . toggles hidden files, r refreshes,
+q quits.
 Mouse: click selects, double-click opens/enters, wheel scrolls the list; over a
 PDF preview the wheel changes pages.
 EOF
@@ -117,15 +120,23 @@ DOUBLE_CLICK_MS=${ST_FILE_BROWSER_DOUBLE_CLICK_MS:-350}
 ((DOUBLE_CLICK_MS > 2000)) && DOUBLE_CLICK_MS=2000
 RESIZED=0
 CLEANED=0
-PATH_ACTIVE=0
-PATH_ABORT=0
-PATH_BUFFER=
-PATH_CURSOR=0
+PROMPT_ACTIVE=0
+PROMPT_ABORT=0
+PROMPT_MODE=
+PROMPT_BUFFER=
+PROMPT_CURSOR=0
 PATH_MATCHES=()
 PATH_MATCH_IDX=-1
 PATH_MATCH_TOP=0
 PATH_MESSAGE=
 PATH_POPUP_MAX=8
+CMD_MESSAGE=
+CMD_AFFECTED=()
+CMD_NEW_NAMES=()
+CMD_PREV_AFFECTED=()
+MANUAL_ACTIVE=0
+MANUAL_PAGE=1
+MANUAL_TOTAL=1
 
 CACHE_DIR=$(mktemp -d /tmp/st-go-browser.XXXXXX) || exit 1
 PREVIEW_LINK=$CACHE_DIR/content
@@ -161,6 +172,7 @@ IMAGE_STYLE=$'\033[38;5;213m'
 PDF_STYLE=$'\033[38;5;203m'
 INFO_STYLE=$'\033[38;5;110m'
 STATUS_STYLE=$'\033[38;5;254m\033[48;5;236m'
+RENAME_HL=$'\033[38;5;16m\033[48;5;220m\033[1m'
 
 dcs() { printf '\033P%s\033\\' "$1"; }
 window_dcs() {
@@ -181,7 +193,10 @@ cleanup() {
 }
 trap cleanup EXIT
 interrupt_browser() {
-	if ((PATH_ACTIVE)); then PATH_ABORT=1; else exit 130; fi
+	if ((PROMPT_ACTIVE)); then PROMPT_ABORT=1
+	elif ((MANUAL_ACTIVE)); then MANUAL_ACTIVE=0
+	else exit 130
+	fi
 }
 trap interrupt_browser INT
 trap 'exit 130' TERM HUP
@@ -449,7 +464,7 @@ draw_divider() {
 }
 
 draw_status() {
-	local help='  arrows navigate  Enter open  . hidden  r refresh  q quit'
+	local help='  arrows  Enter open  / path  : cmd  . hidden  r ref  q quit'
 	printf '\033[%d;1H%s%*s\033[%d;2H' "$ROWS" "$STATUS_STYLE" "$COLS" '' "$ROWS"
 	shorten "$STATUS" "$((COLS - ${#help} - 3))"; printf '%s' "$REPLY"
 	if ((COLS >= 76)); then printf '\033[%d;%dH%s' "$ROWS" "$((COLS - ${#help} + 1))" "$help"; fi
@@ -466,7 +481,7 @@ clear_path_popup() {
 
 path_display_name() {
 	local path=$1
-	if [[ $PATH_BUFFER != /* && $path == "$DIR/"* ]]; then path=${path#"$DIR/"}; fi
+	if [[ $PROMPT_BUFFER != /* && $path == "$DIR/"* ]]; then path=${path#"$DIR/"}; fi
 	[[ -d $path ]] && path+=/
 	display_text "$path"
 }
@@ -489,8 +504,8 @@ draw_path_prompt() {
 		if ((PATH_MATCH_TOP + i == PATH_MATCH_IDX)); then style=$SELECTED; else style=$STATUS_STYLE; fi
 		draw_text "$row" 1 "$COLS" "$style" "$shown"
 	done
-	before=${PATH_BUFFER:0:PATH_CURSOR}
-	after=${PATH_BUFFER:PATH_CURSOR}
+	before=${PROMPT_BUFFER:0:PROMPT_CURSOR}
+	after=${PROMPT_BUFFER:PROMPT_CURSOR}
 	display_text "$before"; before=$REPLY
 	display_text "$after"; after=$REPLY
 	shown=" / $before${SELECTED} ${RESET}${STATUS_STYLE}$after"
@@ -508,7 +523,7 @@ path_has_glob() { [[ $1 == *'*'* || $1 == *'?'* || $1 == *'['* ]]; }
 
 update_path_matches() {
 	local completion=${1:-1} pattern f old_opts old_globignore_set=0 old_globignore=
-	path_pattern "$PATH_BUFFER" "$completion"; pattern=$REPLY
+	path_pattern "$PROMPT_BUFFER" "$completion"; pattern=$REPLY
 	old_opts=$(shopt -p nullglob failglob dotglob nocaseglob globstar extglob || true)
 	if [[ -v GLOBIGNORE ]]; then old_globignore_set=1; old_globignore=$GLOBIGNORE; fi
 	unset GLOBIGNORE
@@ -529,24 +544,32 @@ update_path_matches() {
 	PATH_MESSAGE=
 }
 
-path_insert() {
+prompt_insert() {
 	local text=$1
-	PATH_BUFFER=${PATH_BUFFER:0:PATH_CURSOR}$text${PATH_BUFFER:PATH_CURSOR}
-	PATH_CURSOR=$((PATH_CURSOR + ${#text}))
-	update_path_matches 1
+	PROMPT_BUFFER=${PROMPT_BUFFER:0:PROMPT_CURSOR}$text${PROMPT_BUFFER:PROMPT_CURSOR}
+	PROMPT_CURSOR=$((PROMPT_CURSOR + ${#text}))
+	refresh_prompt_matches
 }
 
-path_backspace() {
-	((PATH_CURSOR > 0)) || return
-	PATH_BUFFER=${PATH_BUFFER:0:PATH_CURSOR-1}${PATH_BUFFER:PATH_CURSOR}
-	PATH_CURSOR=$((PATH_CURSOR - 1))
-	update_path_matches 1
+prompt_backspace() {
+	((PROMPT_CURSOR > 0)) || return
+	PROMPT_BUFFER=${PROMPT_BUFFER:0:PROMPT_CURSOR-1}${PROMPT_BUFFER:PROMPT_CURSOR}
+	PROMPT_CURSOR=$((PROMPT_CURSOR - 1))
+	refresh_prompt_matches
 }
 
-path_delete() {
-	((PATH_CURSOR < ${#PATH_BUFFER})) || return
-	PATH_BUFFER=${PATH_BUFFER:0:PATH_CURSOR}${PATH_BUFFER:PATH_CURSOR+1}
-	update_path_matches 1
+prompt_delete() {
+	((PROMPT_CURSOR < ${#PROMPT_BUFFER})) || return
+	PROMPT_BUFFER=${PROMPT_BUFFER:0:PROMPT_CURSOR}${PROMPT_BUFFER:PROMPT_CURSOR+1}
+	refresh_prompt_matches
+}
+
+refresh_prompt_matches() {
+	if [[ $PROMPT_MODE == path ]]; then
+		update_path_matches 1
+	else
+		update_command_preview
+	fi
 }
 
 path_select_delta() {
@@ -858,10 +881,10 @@ handle_csi() {
 activate_typed_path() {
 	local path=$1
 	if [[ -d $path ]]; then
-		PATH_ACTIVE=0
+		PROMPT_ACTIVE=0
 		change_directory "$path"
 	else
-		PATH_ACTIVE=0
+		PROMPT_ACTIVE=0
 		open_path "$path" 0
 		render_all
 	fi
@@ -873,8 +896,8 @@ submit_path_prompt() {
 		activate_typed_path "${PATH_MATCHES[$PATH_MATCH_IDX]}"
 		return
 	fi
-	path_pattern "$PATH_BUFFER" 0; exact=$REPLY
-	if ! path_has_glob "$PATH_BUFFER" && [[ -e $exact || -L $exact ]]; then
+	path_pattern "$PROMPT_BUFFER" 0; exact=$REPLY
+	if ! path_has_glob "$PROMPT_BUFFER" && [[ -e $exact || -L $exact ]]; then
 		activate_typed_path "$exact"
 		return
 	fi
@@ -887,13 +910,13 @@ submit_path_prompt() {
 	draw_path_prompt
 }
 
-drain_path_mouse() {
+drain_prompt_mouse() {
 	local char payload=
 	while ((${#payload} < 64)) && IFS= read -rsn1 -t 0.05 char; do
 		payload+=$char
 		[[ $char == M || $char == m ]] && break
 	done
-	PATH_ABORT=1
+	PROMPT_ABORT=1
 }
 
 handle_path_csi() {
@@ -901,11 +924,11 @@ handle_path_csi() {
 	case $first in
 		A) path_select_delta -1 ;;
 		B) path_select_delta 1 ;;
-		C) ((PATH_CURSOR < ${#PATH_BUFFER})) && PATH_CURSOR=$((PATH_CURSOR + 1)) ;;
-		D) ((PATH_CURSOR > 0)) && PATH_CURSOR=$((PATH_CURSOR - 1)) ;;
-		H) PATH_CURSOR=0 ;;
-		F) PATH_CURSOR=${#PATH_BUFFER} ;;
-		'<') drain_path_mouse ;;
+		C) ((PROMPT_CURSOR < ${#PROMPT_BUFFER})) && PROMPT_CURSOR=$((PROMPT_CURSOR + 1)) ;;
+		D) ((PROMPT_CURSOR > 0)) && PROMPT_CURSOR=$((PROMPT_CURSOR - 1)) ;;
+		H) PROMPT_CURSOR=0 ;;
+		F) PROMPT_CURSOR=${#PROMPT_BUFFER} ;;
+		'<') drain_prompt_mouse ;;
 		[0-9])
 			rest=$first
 			while ((${#rest} < 16)) && IFS= read -rsn1 -t 0.05 char; do
@@ -913,62 +936,441 @@ handle_path_csi() {
 				[[ $char == '~' || $char =~ [A-Za-z] ]] && break
 			done
 			case $rest in
-				1~|7~) PATH_CURSOR=0 ;;
-				3~) path_delete ;;
-				4~|8~) PATH_CURSOR=${#PATH_BUFFER} ;;
+				1~|7~) PROMPT_CURSOR=0 ;;
+				3~) prompt_delete ;;
+				4~|8~) PROMPT_CURSOR=${#PROMPT_BUFFER} ;;
 			esac
 			;;
-		*) PATH_ABORT=1 ;;
+		*) PROMPT_ABORT=1 ;;
 	esac
 }
 
-path_prompt() {
-	local key next first
-	PATH_ACTIVE=1
-	PATH_ABORT=0
-	PATH_BUFFER=/
-	PATH_CURSOR=1
+handle_command_csi() {
+	local first=$1 char rest
+	case $first in
+		A|B) ;;
+		C) ((PROMPT_CURSOR < ${#PROMPT_BUFFER})) && PROMPT_CURSOR=$((PROMPT_CURSOR + 1)) ;;
+		D) ((PROMPT_CURSOR > 0)) && PROMPT_CURSOR=$((PROMPT_CURSOR - 1)) ;;
+		H) PROMPT_CURSOR=0 ;;
+		F) PROMPT_CURSOR=${#PROMPT_BUFFER} ;;
+		'<') drain_prompt_mouse ;;
+		[0-9])
+			rest=$first
+			while ((${#rest} < 16)) && IFS= read -rsn1 -t 0.05 char; do
+				rest+=$char
+				[[ $char == '~' || $char =~ [A-Za-z] ]] && break
+			done
+			case $rest in
+				1~|7~) PROMPT_CURSOR=0 ;;
+				3~) prompt_delete ;;
+				4~|8~) PROMPT_CURSOR=${#PROMPT_BUFFER} ;;
+			esac
+			;;
+		*) PROMPT_ABORT=1 ;;
+	esac
+}
+
+handle_prompt_csi() {
+	local mode=$1 first=$2
+	if [[ $mode == path ]]; then
+		handle_path_csi "$first"
+	else
+		handle_command_csi "$first"
+	fi
+}
+
+submit_prompt() {
+	local mode=$1
+	if [[ $mode == path ]]; then submit_path_prompt; else submit_command; fi
+}
+
+modal_prompt() {
+	local mode=$1 init=$2 key next first
+	PROMPT_MODE=$mode
+	PROMPT_ACTIVE=1
+	PROMPT_ABORT=0
+	PROMPT_BUFFER=$init
+	PROMPT_CURSOR=${#PROMPT_BUFFER}
 	PATH_MATCH_IDX=-1
+	PATH_MATCH_TOP=0
 	PATH_MESSAGE=
-	update_path_matches 1
-	draw_path_prompt
-	while ((PATH_ACTIVE && !PATH_ABORT)); do
+	CMD_MESSAGE=
+	CMD_AFFECTED=()
+	CMD_NEW_NAMES=()
+	CMD_PREV_AFFECTED=()
+	refresh_prompt_matches
+	if [[ $mode == path ]]; then draw_path_prompt; else draw_command_prompt; fi
+	while ((PROMPT_ACTIVE && !PROMPT_ABORT)); do
 		if ((RESIZED)); then
 			RESIZED=0
 			render_all
-			((COMPACT)) && { PATH_ABORT=1; break; }
-			draw_path_prompt
+			((COMPACT)) && { PROMPT_ABORT=1; break; }
+			if [[ $mode == path ]]; then draw_path_prompt; else draw_command_prompt; fi
 		fi
 		if ! IFS= read -rsn1 -t 0.1 key; then
-			((PATH_ABORT)) && break
+			((PROMPT_ABORT)) && break
 			((RESIZED)) && continue
 			[[ -t 0 ]] && continue
-			PATH_ACTIVE=0
+			PROMPT_ACTIVE=0
 			RUNNING=0
 			break
 		fi
 		case $key in
-			''|$'\r'|$'\n') submit_path_prompt ;;
-			$'\177'|$'\b') path_backspace ;;
-			$'\001') PATH_CURSOR=0 ;;
-			$'\005') PATH_CURSOR=${#PATH_BUFFER} ;;
-			$'\003') PATH_ABORT=1 ;;
+			''|$'\r'|$'\n') submit_prompt "$mode" ;;
+			$'\177'|$'\b') prompt_backspace ;;
+			$'\001') PROMPT_CURSOR=0 ;;
+			$'\005') PROMPT_CURSOR=${#PROMPT_BUFFER} ;;
+			$'\003') PROMPT_ABORT=1 ;;
 			$'\e')
 				if IFS= read -rsn1 -t 0.05 next; then
-					if [[ $next == '[' ]] && IFS= read -rsn1 -t 0.05 first; then handle_path_csi "$first"; else PATH_ABORT=1; fi
-				else PATH_ABORT=1
+					if [[ $next == '[' ]] && IFS= read -rsn1 -t 0.05 first; then
+						handle_prompt_csi "$mode" "$first"
+					else PROMPT_ABORT=1
+					fi
+				else PROMPT_ABORT=1
 				fi
 				;;
 			$'\000'|$'\002'|$'\004'|$'\006'|$'\007'|$'\013'|$'\014'|$'\016'|$'\017'|$'\020'|$'\021'|$'\022'|$'\023'|$'\024'|$'\025'|$'\026'|$'\027'|$'\030'|$'\031'|$'\032'|$'\034'|$'\035'|$'\036'|$'\037') ;;
-			*) path_insert "$key" ;;
+			*) prompt_insert "$key" ;;
 		esac
-		((PATH_ACTIVE && !PATH_ABORT)) && draw_path_prompt
+		if ((PROMPT_ACTIVE && !PROMPT_ABORT)); then
+			if [[ $mode == path ]]; then draw_path_prompt; else draw_command_prompt; fi
+		fi
 	done
-	if ((PATH_ABORT)); then
-		PATH_ACTIVE=0
-		STATUS='Path entry cancelled'
+	if ((PROMPT_ABORT)); then
+		PROMPT_ACTIVE=0
+		STATUS='Entry cancelled'
 		render_all
 	fi
+}
+
+path_prompt() { modal_prompt path /; }
+
+command_prompt() { modal_prompt cmd :; }
+
+update_command_preview() {
+	CMD_AFFECTED=()
+	CMD_NEW_NAMES=()
+	CMD_MESSAGE=
+	[[ $PROMPT_BUFFER == :s/* ]] || return
+	if ! parse_subst "$PROMPT_BUFFER"; then
+		CMD_MESSAGE='format :s/old/new/[/g]'
+		return
+	fi
+	local i path name newname
+	for i in "${!FILES[@]}"; do
+		path=${FILES[$i]}
+		[[ $path == "$DIR/.." ]] && continue
+		name=${path##*/}
+		if ((CMD_GLOBAL)); then newname=${name//"$CMD_OLD"/"$CMD_NEW"}
+		else newname=${name/"$CMD_OLD"/"$CMD_NEW"}; fi
+		[[ $newname == "$name" ]] && continue
+		CMD_AFFECTED+=("$i")
+		CMD_NEW_NAMES+=("$newname")
+	done
+	CMD_MESSAGE="${#CMD_AFFECTED[@]} file(s) to rename"
+}
+
+parse_subst() {
+	local buf=$1 rest
+	CMD_GLOBAL=0
+	[[ $buf == :s/* ]] || return 1
+	[[ $buf == :s/*/ || $buf == :s/*/g ]] || return 1
+	rest=${buf#:s/}
+	CMD_OLD=${rest%%/*}
+	rest=${rest#*/}
+	CMD_NEW=${rest%%/*}
+	rest=${rest#*/}
+	if [[ -n $rest ]]; then
+		[[ $rest == g ]] || return 1
+		CMD_GLOBAL=1
+	fi
+	[[ -n $CMD_OLD ]] || return 1
+	return 0
+}
+
+draw_list_row_hl() {
+	local slot=$1 index=$2 row path label
+	((slot < 0 || slot >= VISIBLE)) && return
+	row=$((LIST_TOP + slot))
+	((row > LIST_BOTTOM)) && return
+	path=${FILES[$index]}
+	entry_label "$path"; label=" $REPLY"
+	draw_text "$row" "$LIST_X" "$LIST_W" "$RENAME_HL" "$label"
+}
+
+paint_affected_rows() {
+	local i idx in_set
+	for i in "${CMD_PREV_AFFECTED[@]}"; do
+		in_set=0
+		for idx in "${CMD_AFFECTED[@]}"; do
+			[[ $idx == "$i" ]] && { in_set=1; break; }
+		done
+		((in_set)) || draw_list_row "$((i - VIEW_TOP))"
+	done
+	CMD_PREV_AFFECTED=("${CMD_AFFECTED[@]}")
+	for idx in "${CMD_AFFECTED[@]}"; do
+		draw_list_row_hl "$((idx - VIEW_TOP))" "$idx"
+	done
+}
+
+draw_command_prompt() {
+	local before after shown
+	paint_affected_rows
+	before=${PROMPT_BUFFER:0:PROMPT_CURSOR}
+	after=${PROMPT_BUFFER:PROMPT_CURSOR}
+	display_text "$before"; before=$REPLY
+	display_text "$after"; after=$REPLY
+	shown=" $before${SELECTED} ${RESET}${STATUS_STYLE}$after"
+	if [[ -n $CMD_MESSAGE ]]; then shown+="  [$CMD_MESSAGE]"; fi
+	draw_text "$ROWS" 1 "$COLS" "$STATUS_STYLE" "$shown"
+}
+
+submit_command() {
+	local code=$PROMPT_BUFFER
+	PROMPT_ACTIVE=0
+	if [[ $code == :s/* ]]; then
+		run_substitution
+	elif [[ $code == :help ]]; then
+		manual_mode
+	else
+		if [[ $code == :* ]]; then run_shell_command "${code#:}"; else run_shell_command "$code"; fi
+	fi
+}
+
+run_substitution() {
+	if ! parse_subst "$PROMPT_BUFFER"; then
+		STATUS='Invalid substitution; expected :s/old/new/ or :s/old/new/g'
+		render_all
+		return
+	fi
+	update_command_preview
+	if ((${#CMD_AFFECTED[@]} == 0)); then
+		STATUS='No filenames matched'
+		render_all
+		return
+	fi
+	local i idx path name newname moved=0 skipped=0
+	for i in "${!CMD_AFFECTED[@]}"; do
+		idx=${CMD_AFFECTED[$i]}
+		path=${FILES[$idx]}
+		name=${path##*/}
+		newname=${CMD_NEW_NAMES[$i]}
+		if [[ -e $DIR/$newname || -L $DIR/$newname ]]; then
+			skipped=$((skipped + 1))
+			continue
+		fi
+		if mv -- "$path" "$DIR/$newname" 2>/dev/null; then
+			moved=$((moved + 1))
+		else
+			skipped=$((skipped + 1))
+		fi
+	done
+	refresh_list
+	STATUS="Renamed $moved, skipped $skipped"
+	draw_status
+}
+
+run_shell_command() {
+	local code=$1 f= name=
+	if [[ -z ${code//[[:space:]]/} ]]; then
+		STATUS='Nothing to run'
+		render_all
+		return
+	fi
+	if ((IDX >= 0 && IDX < ${#FILES[@]})); then
+		f=${FILES[$IDX]}
+		base_name "$f"; name=$REPLY
+	fi
+	printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l'
+	(
+		cd -- "$DIR" 2>/dev/null || exit 1
+		D=$DIR F=$f NAME=$name BROWSER_DIR=$DIR bash -c "$code"
+	)
+	printf '\033[?1049h\033[?25l\033[?1000h\033[?1006h'
+	STATUS='Command finished'
+	render_all
+}
+
+manual_text() {
+	cat <<'MANUAL'
+ST-GO FILE BROWSER  USER MANUAL
+
+NAVIGATION
+  Up/Down or click      select an entry
+  PageUp/PageDown       jump by a screen
+  Home/End              first/last entry
+  Enter                 open file or enter directory
+  Backspace             go to parent directory
+  Middle click          go to parent directory
+
+PREVIEW
+  The left pane previews the selected entry: text, images, and PDFs.
+  Wheel over a PDF preview changes pages; [ and ] do the same.
+  A text preview stops at the last visible row and never scrolls.
+
+COMMAND PROMPT  (:)
+  Press : to open a shell command prompt. The selected file is
+  exported as $F and the current directory as $D, and the command
+  runs with the current directory as its working directory:
+    :ls -l
+    :vim $F
+    :xdg-open $F
+  Edit with Left/Right, Home/End, Ctrl+A/Ctrl+E, Backspace and
+  Delete. Escape, Ctrl+C, or a mouse click cancels. Enter runs.
+
+RENAME  (:s/old/new/)
+  A command beginning with :s/ is a rename, not a shell command:
+    :s/txt/md/       rename entries: first txt -> md
+    :s/txt/md/g      rename entries: every txt -> md
+  While you type, every entry whose name would change is painted
+  yellow in the list so you can preview the change before Enter.
+  Press Enter to apply. Entries whose new name already exists are
+  skipped. The parent entry is never renamed.
+
+MANUAL  (:help)
+  Press :help to open this manual in the preview pane. Navigate it
+  like a PDF: ] next page, [ previous page, wheel to flip. Press q
+  or Escape to close.
+
+PATH PROMPT  (/)
+  Press / to enter a path. Absolute paths and paths relative to the
+  browser directory work, including wildcards:
+    /home/user/file.txt
+    sub/*.go
+  A popup lists live matches; Up/Down selects one before Enter.
+  Backspace removes the leading / to type relative paths.
+
+OTHER KEYS
+  .                toggle hidden files
+  r                refresh the listing
+  q                quit
+
+MOUSE
+  Click          select
+  Double-click   open file or enter directory
+  Wheel          scroll the list (or flip PDF pages over the preview)
+  Middle click   go to parent
+
+HINTS
+  Double-clicking a file collapses the terminal to a bottom strip;
+  clicking the strip restores it. All filenames are sanitized before
+  drawing, so names with spaces, quotes, or control characters are
+  handled safely. Override openers and icons with --open,
+  ST_FILE_BROWSER_OPEN, ST_FILE_BROWSER_ICON_*, and the terminal
+  config file_browser section.
+MANUAL
+}
+
+wrap_manual_line() {
+	local text=$1 width=$2 word buf= first=1
+	WRAPPED=()
+	for word in $text; do
+		if ((first)); then
+			buf=$word
+			first=0
+		elif ((${#buf} + 1 + ${#word} <= width)); then
+			buf+=" $word"
+		else
+			WRAPPED+=("$buf")
+			buf=$word
+		fi
+	done
+	[[ -n $buf ]] && WRAPPED+=("$buf")
+}
+
+build_manual_lines() {
+	local line width=$((PREVIEW_W - 4)) i
+	((width < 8)) && width=8
+	MANUAL_LINES=()
+	while IFS= read -r line; do
+		wrap_manual_line "$line" "$width"
+		for i in "${!WRAPPED[@]}"; do MANUAL_LINES+=("${WRAPPED[$i]}"); done
+	done <<<"$(manual_text)"
+}
+
+draw_manual() {
+	local page=$1 height start i row line total
+	height=$((ROWS - 5))
+	((height < 1)) && height=1
+	build_manual_lines
+	total=$(((${#MANUAL_LINES[@]} + height - 1) / height))
+	((total < 1)) && total=1
+	((page > total)) && page=$total
+	((page < 1)) && page=1
+	MANUAL_PAGE=$page
+	MANUAL_TOTAL=$total
+	clear_preview
+	draw_preview_title "USER MANUAL  $page/$total"
+	start=$(((page - 1) * height))
+	for ((i=0; i<height; i++)); do
+		row=$((4 + i))
+		line=${MANUAL_LINES[$((start + i))]:-}
+		draw_text "$row" 3 "$((PREVIEW_W - 4))" "$RESET" "$line"
+	done
+	STATUS="Manual  $page/$total   ] next  [ prev  wheel  q close"
+	draw_status
+}
+
+manual_sgr_page_change() {
+	local char payload= cb x y final button
+	while ((${#payload} < 64)) && IFS= read -rsn1 -t 0.05 char; do
+		payload+=$char
+		[[ $char == M || $char == m ]] && break
+	done
+	if [[ $payload =~ ^([0-9]+)\;([0-9]+)\;([0-9]+)([Mm])$ ]]; then
+		cb=${BASH_REMATCH[1]}; x=${BASH_REMATCH[2]}; y=${BASH_REMATCH[3]}; final=${BASH_REMATCH[4]}
+		[[ $final == M ]] || return
+		button=$((cb & 3))
+		if ((cb & 64)); then
+			if ((button == 0)); then ((MANUAL_PAGE > 1)) && { MANUAL_PAGE=$((MANUAL_PAGE - 1)); draw_manual "$MANUAL_PAGE"; }
+			elif ((button == 1)); then ((MANUAL_PAGE < MANUAL_TOTAL)) && { MANUAL_PAGE=$((MANUAL_PAGE + 1)); draw_manual "$MANUAL_PAGE"; }
+			fi
+		else
+			MANUAL_ACTIVE=0
+		fi
+	fi
+}
+
+manual_mode() {
+	local key next first
+	MANUAL_PAGE=1
+	MANUAL_ACTIVE=1
+	draw_manual "$MANUAL_PAGE"
+	while ((MANUAL_ACTIVE)); do
+		if ((RESIZED)); then
+			RESIZED=0
+			render_all
+			((COMPACT)) && { MANUAL_ACTIVE=0; break; }
+			draw_manual "$MANUAL_PAGE"
+		fi
+		if ! IFS= read -rsn1 -t 0.1 key; then
+			((RESIZED)) && continue
+			[[ -t 0 ]] && continue
+			MANUAL_ACTIVE=0
+			RUNNING=0
+			break
+		fi
+		case $key in
+			'[') ((MANUAL_PAGE > 1)) && { MANUAL_PAGE=$((MANUAL_PAGE - 1)); draw_manual "$MANUAL_PAGE"; } ;;
+			']') ((MANUAL_PAGE < MANUAL_TOTAL)) && { MANUAL_PAGE=$((MANUAL_PAGE + 1)); draw_manual "$MANUAL_PAGE"; } ;;
+			q|Q|$'\003') MANUAL_ACTIVE=0 ;;
+			$'\e')
+				if IFS= read -rsn1 -t 0.05 next; then
+					if [[ $next == '[' ]] && IFS= read -rsn1 -t 0.05 first; then
+						case $first in
+							'<') manual_sgr_page_change ;;
+							*) MANUAL_ACTIVE=0 ;;
+						esac
+					else MANUAL_ACTIVE=0
+					fi
+				else MANUAL_ACTIVE=0
+				fi
+				;;
+		esac
+	done
+	STATUS='Manual closed'
+	render_all
 }
 
 terminal_size
@@ -987,6 +1389,7 @@ while ((RUNNING)); do
 	case $key in
 		q|Q) RUNNING=0 ;;
 		'/') reset_click; path_prompt ;;
+		':') reset_click; command_prompt ;;
 		'.') reset_click; toggle_hidden ;;
 		r|R) reset_click; refresh_list ;;
 		o|O) reset_click; open_selected 0 ;;
