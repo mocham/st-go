@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"os"
 	"os/exec"
@@ -97,6 +98,37 @@ func TestFunctionKeyMap(t *testing.T) {
 		if !matched || s != c.want {
 			t.Errorf("kmap(%#x,%#x)=%q,%v want %q", c.ksym, c.state, s, matched, c.want)
 		}
+	}
+}
+
+// TestLegacyMouseReportUsesRawBytes verifies X10/xterm mouse coordinates are
+// not UTF-8 encoded. Vim consumes exactly three binary fields after ESC [ M;
+// an expanded coordinate leaves the final byte to be interpreted as text.
+func TestLegacyMouseReportUsesRawBytes(t *testing.T) {
+	cfg := config.Default()
+	trm := &Terminal{}
+	core := term.NewTerm(cfg, trm)
+	trm.termCore = core
+	core.Twrite([]byte("\x1b[?1000h"), false)
+
+	for _, tc := range []struct {
+		name string
+		x    int
+		cx   byte
+	}{
+		{name: "last ASCII coordinate", x: 94, cx: 0x7f},
+		{name: "first high coordinate", x: 95, cx: 0x80},
+		{name: "protocol limit", x: 222, cx: 0xff},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []byte
+			core.SetWriter(func(b []byte) { got = append(got, b...) })
+			trm.mousereport(1, 0, tc.x, 23, evPress)
+			want := []byte{0x1b, '[', 'M', 0x20, tc.cx, 0x38}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("legacy report = % x, want % x", got, want)
+			}
+		})
 	}
 }
 

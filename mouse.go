@@ -249,17 +249,19 @@ func (t *Terminal) mousereport(btn byte, state uint16, x, y int, etype byte) {
 		}
 	}
 
-	var s string
+	var report []byte
 	if t.termCore.WinMode()&term.ModeMouseSgr != 0 {
 		c := byte('M')
 		if etype == evRelease {
 			c = 'm'
 		}
-		s = "\x1b[<" + itoa(code) + ";" + itoa(x+1) + ";" + itoa(y+1) + string(c)
+		report = []byte("\x1b[<" + itoa(code) + ";" + itoa(x+1) + ";" + itoa(y+1) + string(c))
 	} else if x < 223 && y < 223 {
-		s = "\x1b[M" + string(rune(32+code)) + string(rune(32+x+1)) + string(rune(32+y+1))
+		// Legacy X10 fields are raw bytes. Converting values >= 0x80 to a
+		// Go string would UTF-8 encode them and leave stray input in clients.
+		report = []byte{0x1b, '[', 'M', byte(32 + code), byte(32 + x + 1), byte(32 + y + 1)}
 	} else {
 		return
 	}
-	t.termCore.WriteToTTY([]byte(s), false)
+	t.termCore.WriteToTTY(report, false)
 }
