@@ -182,22 +182,23 @@ type Term struct {
 	row, col int
 	line     []Line
 	alt      []Line
-	// queue-based painting: changed cell regions awaiting repaint, plus the
-	// stop/resume (synchronized update, DECSET 2026) pause counter and the
-	// frontend's paint dispatcher.
-	regions      []Region
-	paintPaused  int
-	paintFn      func(flushNow bool)
-	c        TCursor
-	ocx, ocy int
-	top, bot int
-	mode     uint
-	esc      uint
-	trantbl  [4]int
-	charset  int
-	icharset int
-	tabs     []bool
-	lastc    rune
+	// Queue-based painting: changed cell regions awaiting repaint, application
+	// synchronized-output state, nested internal paint batches, and the
+	// frontend's synchronous paint dispatcher.
+	regions            []Region
+	syncOutput         bool
+	internalPaintDepth int
+	paintFn            func()
+	c                  TCursor
+	ocx, ocy           int
+	top, bot           int
+	mode               uint
+	esc                uint
+	trantbl            [4]int
+	charset            int
+	icharset           int
+	tabs               []bool
+	lastc              rune
 
 	cfg        *config.Config
 	hooks      Hooks
@@ -490,15 +491,15 @@ func (t *Term) winModeIs(flag uint) bool { return t.winMode&flag != 0 }
 // progress line is drawn in the bottom row of the rect. Any write/erase into
 // the rect cancels it.
 type animation struct {
-	data      []byte // encoded animated image
-	opts      ImageDecodeOptions
-	durations []int // ms per frame
-	frameCount int
-	cols, rows int
+	data                       []byte // encoded animated image
+	opts                       ImageDecodeOptions
+	durations                  []int // ms per frame
+	frameCount                 int
+	cols, rows                 int
 	rectX, rectY, rectW, rectH int
-	startAt time.Time
-	idx     int
-	done    bool
+	startAt                    time.Time
+	idx                        int
+	done                       bool
 }
 
 // SetAnim starts playing an animated image in the rect (rx,ry,rw,rh),
@@ -507,7 +508,7 @@ func (t *Term) SetAnim(data []byte, opts ImageDecodeOptions, durations []int, co
 	t.anim = &animation{
 		data: data, opts: opts, durations: durations,
 		frameCount: len(durations),
-		cols: cols, rows: rows,
+		cols:       cols, rows: rows,
 		rectX: rx, rectY: ry, rectW: rw, rectH: rh,
 		startAt: time.Now(), idx: -1,
 	}
@@ -627,9 +628,9 @@ func (t *Term) drawAnimFrame(a *animation, idx int, glyphs []Glyph) {
 
 // --- queue-based painting -------------------------------------------------
 // Virtual painting (Twrite, image placement, animation frames, selection)
-// marks changed cell regions; a single actual-paint worker drains them, draws
-// the union into the framebuffer and sends one X11 blit per batch. DECSET 2026
-// (PaintStop/PaintResume) lets applications batch output and flush once.
+// marks changed cell regions. The frontend decides when to drain them: PTY
+// output is latency-batched, while X/input/timer events paint immediately.
+// DECSET 2026 defers PTY paints until DECRST 2026 commits the batch.
 
 // Region is an inclusive cell rectangle pending repaint.
 type Region struct {
@@ -638,6 +639,8 @@ type Region struct {
 
 // Empty reports whether the region is invalid (nothing to paint).
 func (r Region) Empty() bool { return r.X1 > r.X2 || r.Y1 > r.Y2 }
+
+func emptyRegion() Region { return Region{X1: 1, X2: 0, Y1: 1, Y2: 0} }
 
 func regionUnion(a, b Region) Region {
 	if b.X1 < a.X1 {
@@ -693,38 +696,51 @@ func (t *Term) TakeRegions() []Region {
 // HasPendingPaint reports whether regions await repaint.
 func (t *Term) HasPendingPaint() bool { return len(t.regions) > 0 }
 
-// IsPaintPaused reports whether repainting is currently stopped (2026h).
-func (t *Term) IsPaintPaused() bool { return t.paintPaused > 0 }
+// IsPaintPaused reports whether application synchronization or an internal
+// atomic update currently defers painting.
+func (t *Term) IsPaintPaused() bool { return t.syncOutput || t.internalPaintDepth > 0 }
 
-// SetPaintFn registers the frontend's paint dispatcher. When nil, Draw runs
-// synchronously on a paint request (tests without a paint worker).
-func (t *Term) SetPaintFn(fn func(flushNow bool)) { t.paintFn = fn }
+// SetPaintFn registers the frontend's synchronous paint dispatcher. The
+// caller serializes it with terminal mutation (the frontend uses Terminal.mu).
+func (t *Term) SetPaintFn(fn func()) { t.paintFn = fn }
 
-// PaintStop defers repainting until the matching PaintResume (DECSET 2026h).
-// Regions keep queueing while paused; the resume flushes them as one batch.
+// SetSynchronizedOutput implements DEC private mode 2026. Mode set/reset is
+// idempotent; reset commits queued output immediately.
+func (t *Term) SetSynchronizedOutput(set bool) {
+	if t.syncOutput == set {
+		return
+	}
+	t.syncOutput = set
+	if !set {
+		t.requestPaint()
+	}
+}
+
+// PaintStop starts a nested internal atomic update (image/animation drawing).
 func (t *Term) PaintStop() {
-	t.paintPaused++
-	if t.paintPaused > 64 {
-		t.paintPaused = 64
+	t.internalPaintDepth++
+	if t.internalPaintDepth > 64 {
+		t.internalPaintDepth = 64
 	}
 }
 
-// PaintResume restarts painting and requests one repaint of the queued batch.
+// PaintResume ends a nested internal update and commits unless application
+// synchronized output still owns the outer transaction.
 func (t *Term) PaintResume() {
-	if t.paintPaused > 0 {
-		t.paintPaused--
+	if t.internalPaintDepth > 0 {
+		t.internalPaintDepth--
 	}
-	if t.paintPaused == 0 {
-		t.requestPaint(true)
+	if !t.IsPaintPaused() {
+		t.requestPaint()
 	}
 }
 
-func (t *Term) requestPaint(flushNow bool) {
-	if t.paintPaused > 0 {
+func (t *Term) requestPaint() {
+	if t.IsPaintPaused() || !t.HasPendingPaint() {
 		return
 	}
 	if t.paintFn != nil {
-		t.paintFn(flushNow)
+		t.paintFn()
 	} else {
 		t.Draw()
 	}
@@ -732,4 +748,4 @@ func (t *Term) requestPaint(flushNow bool) {
 
 // PaintDirty requests a repaint of the currently queued regions without
 // enqueuing a full-screen region. This is the per-output paint trigger.
-func (t *Term) PaintDirty() { t.requestPaint(false) }
+func (t *Term) PaintDirty() { t.requestPaint() }

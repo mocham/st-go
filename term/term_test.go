@@ -8,23 +8,25 @@ import (
 )
 
 type mockHooks struct {
-	screen       []string
-	imageOptions ImageDecodeOptions
-	imageCols    int
-	imageRows    int
-	imageGlyphs  []Glyph
-	imageOK      bool
+	screen          []string
+	imageOptions    ImageDecodeOptions
+	imageCols       int
+	imageRows       int
+	imageGlyphs     []Glyph
+	imageOK         bool
 	animDurations   []int
 	animFrameCount  int
 	animFrameGlyphs [][]Glyph // glyphs returned for frame i
 	animOK          bool
-	geometry     []WindowGeometryRequest
+	geometry        []WindowGeometryRequest
+	drawRegions     []Region
 }
 
 func (m *mockHooks) Bell()                                            {}
 func (m *mockHooks) ClipCopy()                                        {}
 func (m *mockHooks) DrawCursor(a, b int, g Glyph, c, d int, og Glyph) {}
 func (m *mockHooks) DrawLine(line []Glyph, x1, y1, x2 int) {
+	m.drawRegions = append(m.drawRegions, Region{X1: x1, Y1: y1, X2: x2 - 1, Y2: y1})
 	var sb strings.Builder
 	for i, g := range line {
 		if i == 0 || g.U != 0 {

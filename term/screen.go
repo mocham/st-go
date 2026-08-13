@@ -257,8 +257,8 @@ func (t *Term) selscroll(orig, n int) {
 
 // Tattrset reports whether any visible cell has the given attribute.
 func (t *Term) Tattrset(attr uint16) bool {
-	for i := 0; i < t.row-1; i++ {
-		for j := 0; j < t.col-1; j++ {
+	for i := 0; i < t.row; i++ {
+		for j := 0; j < t.col; j++ {
 			if t.line[i][j].Mode&attr != 0 {
 				return true
 			}
@@ -274,8 +274,8 @@ func (t *Term) tsetdirt(top, bot int) {
 }
 
 func (t *Term) tsetdirtattr(attr uint16) {
-	for i := 0; i < t.row-1; i++ {
-		for j := 0; j < t.col-1; j++ {
+	for i := 0; i < t.row; i++ {
+		for j := 0; j < t.col; j++ {
 			if t.line[i][j].Mode&attr != 0 {
 				t.tsetdirt(i, i)
 				break
@@ -396,6 +396,7 @@ func (t *Term) tmoveto(x, y int) {
 	t.c.state &^= cursorWrapNext
 	t.c.x = clamp(x, 0, t.col-1)
 	t.c.y = clamp(y, miny, maxy)
+	t.markDirty(t.c.x, t.c.y, t.c.x, t.c.y)
 }
 
 var vt100_0 [62]rune
@@ -431,7 +432,7 @@ func (t *Term) tsetchar(u rune, attr *Glyph, x, y int) {
 		t.line[y][x-1].Mode &^= ATTRWide
 	}
 
-	t.markDirty(x, x, y, y)
+	t.markDirty(x, y, x, y)
 	t.line[y][x] = *attr
 	t.line[y][x].U = u
 }
@@ -630,13 +631,13 @@ func (t *Term) csiparse() {
 	}
 }
 
-// Draw drains the queued repaint regions and draws them through the hooks
-// (the single actual-paint worker calls this under the lock). It always
-// redraws the cursor and returns the bounding region (union of the dirty
-// regions and the cursor cells) so the frontend can blit just that area.
+// Draw drains the queued repaint regions and draws them through the hooks.
+// The frontend calls it in the same serialized context as the mutation that
+// triggered painting. It always redraws the cursor and returns the bounding
+// region so the frontend can blit just that area.
 func (t *Term) Draw() Region {
 	regions := t.TakeRegions()
-	r := Region{}
+	r := emptyRegion()
 	for _, q := range regions {
 		if r.Empty() {
 			r = q
@@ -645,7 +646,7 @@ func (t *Term) Draw() Region {
 		}
 	}
 	if !t.xstartdraw() {
-		return Region{}
+		return emptyRegion()
 	}
 	cx := t.c.x
 	t.ocx = clamp(t.ocx, 0, t.col-1)
@@ -658,7 +659,7 @@ func (t *Term) Draw() Region {
 	}
 	if !r.Empty() {
 		for y := r.Y1; y <= r.Y2; y++ {
-			t.xdrawline(t.line[y], r.X1, y, r.X2)
+			t.xdrawline(t.line[y], r.X1, y, r.X2+1)
 		}
 	}
 	cxr := Region{min(cx, t.ocx), min(t.c.y, t.ocy), max(cx, t.ocx), max(t.c.y, t.ocy)}
@@ -677,21 +678,26 @@ func (t *Term) Draw() Region {
 // Redraw forces a full repaint of the whole screen.
 func (t *Term) Redraw() {
 	t.tfulldirt()
-	t.requestPaint(true)
+	t.requestPaint()
+}
+
+// RedrawAttr repaints rows containing attr without forcing a full redraw.
+func (t *Term) RedrawAttr(attr uint16) {
+	t.tsetdirtattr(attr)
+	t.requestPaint()
 }
 
 // ClearSel public wrapper.
-func (t *Term) SelClear() { t.selclear() }
-func (t *Term) SelStart(col, row, snap int) { t.selstart(col, row, snap) }
+func (t *Term) SelClear()                         { t.selclear() }
+func (t *Term) SelStart(col, row, snap int)       { t.selstart(col, row, snap) }
 func (t *Term) SelExtend(col, row, typ, done int) { t.selextend(col, row, typ, done) }
-func (t *Term) Selected(x, y int) bool { return t.selected(x, y) }
+func (t *Term) Selected(x, y int) bool            { return t.selected(x, y) }
 
 // WinMode exposes window mode flags.
 func (t *Term) WinMode() uint { return t.winMode }
 
 // Rows returns the number of screen rows (test/debug helper).
 func (t *Term) Rows() int { return t.row }
-
 
 // CursorX returns the cursor column (test helper).
 func (t *Term) CursorX() int { return t.c.x }

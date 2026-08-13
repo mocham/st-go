@@ -10,31 +10,32 @@ import (
 	"st-go/term"
 )
 
-// run is the main event loop, mirroring st's run(). Virtual painting (model
-// mutations under t.mu) is concurrent; actual painting is handled by the
-// single paint worker (paint.go).
+// run is the X event loop, mirroring st's run(). X/input/timer mutations paint
+// synchronously under t.mu; PTY output owns its separate latency scheduler.
 func (t *Terminal) run(termCore *term.Term) {
 	// keyboard mapping setup
-	t.setupKeys()
-
+	if keymapReply == nil {
+		t.setupKeys()
+	}
 	t.termCore = termCore
 
-	// one worker performs all actual X11 painting (framebuffer -> PutImage).
-	t.initPaintWorker()
-	termCore.SetPaintFn(func(flushNow bool) { t.paintRequest(flushNow) })
-
-	// cursor blink timer (virtual mutation; the paint worker renders it)
+	// Blinking cells are an external drawing trigger and paint immediately.
 	if t.blinkMs > 0 {
 		go func() {
+			ticker := time.NewTicker(time.Duration(t.blinkMs) * time.Millisecond)
+			defer ticker.Stop()
 			for {
-				time.Sleep(time.Duration(t.blinkMs) * time.Millisecond)
-				t.mu.Lock()
-				if t.termCore != nil && t.termCore.Tattrset(term.ATTRBlink) {
-					t.toggleBlink()
-					t.termCore.PaintDirty()
-					t.paintRequest(true)
+				select {
+				case <-ticker.C:
+					t.mu.Lock()
+					if t.termCore != nil && t.termCore.Tattrset(term.ATTRBlink) {
+						t.toggleBlink()
+						t.termCore.RedrawAttr(term.ATTRBlink)
+					}
+					t.mu.Unlock()
+				case <-t.done:
+					return
 				}
-				t.mu.Unlock()
 			}
 		}()
 	}
@@ -43,13 +44,19 @@ func (t *Terminal) run(termCore *term.Term) {
 	// `anim`). Each frame is wrapped in PaintStop/PaintResume, so one frame =
 	// one atomic paint batch = one flush.
 	go func() {
+		ticker := time.NewTicker(25 * time.Millisecond)
+		defer ticker.Stop()
 		for {
-			time.Sleep(25 * time.Millisecond)
-			t.mu.Lock()
-			if t.termCore != nil {
-				t.termCore.TickAnim(time.Now())
+			select {
+			case now := <-ticker.C:
+				t.mu.Lock()
+				if t.termCore != nil {
+					t.termCore.TickAnim(now)
+				}
+				t.mu.Unlock()
+			case <-t.done:
+				return
 			}
-			t.mu.Unlock()
 		}
 	}()
 
@@ -67,6 +74,9 @@ func (t *Terminal) run(termCore *term.Term) {
 		}
 		t.mu.Lock()
 		t.handleEvent(ev)
+		// Selection start and similar handlers only mark damage. Flush any
+		// such external damage before returning to WaitForEvent.
+		t.termCore.PaintDirty()
 		t.mu.Unlock()
 	}
 }
@@ -84,7 +94,13 @@ func (t *Terminal) handleEvent(ev xgb.Event) {
 	switch e := ev.(type) {
 	case xproto.ExposeEvent:
 		if e.Count == 0 {
-			t.termCore.Redraw()
+			if t.termCore.IsPaintPaused() {
+				// Preserve synchronized output: re-submit the last committed
+				// framebuffer without draining the staged terminal model.
+				t.putFramebufferRegion(0, 0, fbW, fbH)
+			} else {
+				t.termCore.Redraw()
+			}
 		}
 	case xproto.KeyPressEvent:
 		t.kpress(e)

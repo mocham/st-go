@@ -193,12 +193,7 @@ func (t *Term) tsetmode(priv, set bool, args []int, narg int) {
 			case 2004:
 				t.setWinMode(set, ModeBrcktPaste)
 			case 2026:
-				// synchronized output: batch painting until the reset
-				if set {
-					t.PaintStop()
-				} else {
-					t.PaintResume()
-				}
+				t.SetSynchronizedOutput(set)
 			case 1001, 1005, 1015:
 			default:
 				log.Printf("erresc: unknown private set/reset mode %d\n", a)

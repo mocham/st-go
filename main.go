@@ -194,7 +194,11 @@ func main() {
 	}
 
 	core := term.NewTerm(cfg, t)
-	t.termCore = core
+	t.attachTerm(core)
+	t.setupKeys()
+	t.mu.Lock()
+	core.Redraw()
+	t.mu.Unlock()
 
 	// pty
 	master, slave, err := ptyutil.Open()
@@ -250,29 +254,59 @@ func main() {
 		ptyutil.SetWinSize(master, rows, cols)
 	}
 
-	// pty reader goroutine: virtual painting (model mutations under t.mu).
-	// Lazy write: it absorbs an output burst and requests one paint when the
-	// stream goes idle (or after a short cap), so `cat bigfile` flushes once
-	// while interactive bursts stay responsive.
+	// The PTY reader owns terminal-output paint scheduling. Interactive bursts
+	// settle for MinLatency, continuous output paints by MaxLatency, and DEC
+	// synchronized output (2026) suppresses both until its reset commits.
 	go func() {
 		buf := make([]byte, 8192)
 		var pending []byte
 		fd := int(master.Fd())
 		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		minLatency := durationMilliseconds(cfg.MinLatency)
+		maxLatency := durationMilliseconds(cfg.MaxLatency)
+		if maxLatency < minLatency {
+			maxLatency = minLatency
+		}
 		for {
 			n, err := unix.Read(fd, buf)
 			if err != nil || n == 0 {
 				os.Exit(0)
 			}
-			t.mu.Lock()
 			pending = append(pending, buf[:n]...)
-			written := core.Twrite(pending, false)
+			written := t.writeTerminalOutput(core, pending)
 			pending = pending[written:]
-			t.mu.Unlock()
-			// keep absorbing while more data arrives within a short window
+			firstOutput := time.Now()
+			lastOutput := firstOutput
 			for {
-				np, perr := unix.Poll(fds, 30)
-				if perr != nil || np == 0 {
+				t.mu.Lock()
+				paused := core.IsPaintPaused()
+				hasDamage := core.HasPendingPaint()
+				t.mu.Unlock()
+				if !hasDamage {
+					break
+				}
+				timeout := 30 * time.Millisecond
+				if !paused {
+					softDeadline := lastOutput.Add(minLatency)
+					hardDeadline := firstOutput.Add(maxLatency)
+					deadline := softDeadline
+					if hardDeadline.Before(deadline) {
+						deadline = hardDeadline
+					}
+					if !time.Now().Before(deadline) {
+						t.paintTerminalOutput(core)
+						break
+					}
+					timeout = time.Until(deadline)
+				}
+				np, perr := unix.Poll(fds, pollMilliseconds(timeout))
+				if perr != nil {
+					break
+				}
+				if np == 0 {
+					if !paused {
+						t.paintTerminalOutput(core)
+					}
 					break
 				}
 				if fds[0].Revents&unix.POLLHUP != 0 {
@@ -282,19 +316,29 @@ func main() {
 				if rerr != nil || m == 0 {
 					os.Exit(0)
 				}
-				t.mu.Lock()
 				pending = append(pending, buf[:m]...)
-				written := core.Twrite(pending, false)
+				written := t.writeTerminalOutput(core, pending)
 				pending = pending[written:]
-				t.mu.Unlock()
+				lastOutput = time.Now()
 			}
-			// stream went idle: paint the accumulated output once
-			t.paintRequest(false)
 		}
 	}()
 
-	core.Redraw()
 	t.run(core)
+}
+
+func durationMilliseconds(ms float64) time.Duration {
+	if ms <= 0 {
+		return 0
+	}
+	return time.Duration(ms * float64(time.Millisecond))
+}
+
+func pollMilliseconds(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	return int((d + time.Millisecond - 1) / time.Millisecond)
 }
 
 func newGeometryToken() string {

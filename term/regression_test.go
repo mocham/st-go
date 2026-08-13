@@ -446,21 +446,72 @@ func TestPaintStopResumeBatches(t *testing.T) {
 	cfg.Cols = 40
 	cfg.Rows = 20
 	trm, _ := newTermHooks(cfg)
+	trm.Draw() // discard initialization damage
+	var commits []Region
+	trm.SetPaintFn(func() { commits = append(commits, trm.Draw()) })
 	trm.PaintStop()
-	trm.Twrite([]byte("abc"), false)  // marks row 0
+	trm.Twrite([]byte("abc"), false)        // marks row 0
 	trm.Twrite([]byte("\x1b[2;5Hx"), false) // marks row 1
 	if !trm.HasPendingPaint() {
 		t.Fatal("no regions queued while paused")
 	}
 	trm.PaintResume()
-	r := trm.Draw() // drain
+	if len(commits) != 1 {
+		t.Fatalf("resume committed %d paints, want 1", len(commits))
+	}
+	r := commits[0]
 	if r.Empty() {
-		t.Fatal("Draw returned no region")
+		t.Fatal("commit returned no region")
 	}
 	if r.Y1 != 0 || r.Y2 < 1 {
 		t.Fatalf("bounding region rows = %d..%d, want 0..1", r.Y1, r.Y2)
 	}
 	if trm.HasPendingPaint() {
 		t.Fatal("regions not drained by Draw")
+	}
+}
+
+func TestDscSync2026IsIdempotent(t *testing.T) {
+	trm, _ := newTermHooks(config.Default())
+	trm.Draw() // discard initialization damage
+	commits := 0
+	trm.SetPaintFn(func() {
+		commits++
+		trm.Draw()
+	})
+
+	trm.Twrite([]byte("\x1b[?2026h\x1b[?2026hhello"), false)
+	trm.PaintDirty()
+	if commits != 0 {
+		t.Fatalf("paint committed while synchronized: %d", commits)
+	}
+	trm.Twrite([]byte("\x1b[?2026l"), false)
+	if commits != 1 || trm.IsPaintPaused() {
+		t.Fatalf("one reset committed %d paints, paused=%v", commits, trm.IsPaintPaused())
+	}
+}
+
+func TestSetCharQueuesExactCell(t *testing.T) {
+	trm, hooks := newTermHooks(config.Default())
+	trm.Draw() // discard initialization damage
+	hooks.drawRegions = nil
+	// cursor moves queue the cursor cell, and a written char queues exactly
+	// its own cell (plus the post-write cursor advance)
+	trm.Twrite([]byte("\x1b[3;6HX"), false)
+	want := Region{X1: 5, Y1: 2, X2: 5, Y2: 2}
+	regions := trm.TakeRegions()
+	found := false
+	for _, r := range regions {
+		if r == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("character cell not damaged: %+v", regions)
+	}
+	trm.markDirty(want.X1, want.Y1, want.X2, want.Y2)
+	trm.Draw()
+	if len(hooks.drawRegions) != 1 || hooks.drawRegions[0] != want {
+		t.Fatalf("rasterized damage = %+v, want [%+v]", hooks.drawRegions, want)
 	}
 }

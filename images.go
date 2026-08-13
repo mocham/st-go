@@ -371,9 +371,9 @@ func (t *Terminal) writeImageBlock(offset, w, h int, rgba []byte, gx, gy, cols, 
 				o := offset + yy*t.cw + xx
 				if sy < h && sx < w {
 					po := (sy*w + sx) * 4
-					imageAtlas[o] = 0xFF000000|
-						uint32(rgba[po])<<16|
-						uint32(rgba[po+1])<<8|
+					imageAtlas[o] = 0xFF000000 |
+						uint32(rgba[po])<<16 |
+						uint32(rgba[po+1])<<8 |
 						uint32(rgba[po+2])
 				} else {
 					imageAtlas[o] = 0xFF000000
@@ -411,9 +411,9 @@ func (t *Terminal) writeImageBlock(offset, w, h int, rgba []byte, gx, gy, cols, 
 			}
 			o := offset + yy*t.cw + xx
 			po := (sy*w + sx) * 4
-			imageAtlas[o] = 0xFF000000|
-				uint32(rgba[po])<<16|
-				uint32(rgba[po+1])<<8|
+			imageAtlas[o] = 0xFF000000 |
+				uint32(rgba[po])<<16 |
+				uint32(rgba[po+1])<<8 |
 				uint32(rgba[po+2])
 		}
 	}
@@ -442,7 +442,6 @@ func (t *Terminal) drawImageCell(g term.Glyph, x, y int) {
 		src := offset + yy*t.cw
 		copy(framebuf[dst:dst+t.cw], imageAtlas[src:src+t.cw])
 	}
-	fbDirty = true
 }
 
 // ImageClearAll clears the image glyph atlas (terminal reset / clear).

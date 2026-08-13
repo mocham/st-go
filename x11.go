@@ -74,14 +74,12 @@ type Terminal struct {
 	blinkMs uint
 
 	termCore *term.Term
-
-	// single actual-painting worker: virtual painting enqueues regions into
-	// the term core; this worker drains them, draws into the framebuffer under
-	// t.mu, then sends the X11 blit outside the lock.
-	paintCh      chan *paintReq
-	paintMu      sync.Mutex
-	paintPending *paintReq
-	paintStop    chan struct{}
+	// inPTYWrite lets the synchronous paint callback distinguish terminal
+	// output from X/input/timer redraws. PTY paints are scheduled by main's
+	// latency loop; all other redraws paint immediately.
+	inPTYWrite        bool
+	ptyPaintRequested bool
+	done              chan struct{}
 
 	// ttyResize is set by main to send TIOCSWINSZ to the pty master.
 	ttyResize func(rows, cols int)
@@ -192,6 +190,7 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 		tripleClick:   cfg.TripleClickMs,
 		blinkMs:       cfg.BlinkTimeout,
 		geometryTags:  make(map[string]windowRect),
+		done:          make(chan struct{}),
 	}
 
 	for _, name := range []string{"WM_NAME", "WM_ICON_NAME", "WM_PROTOCOLS",
@@ -514,8 +513,12 @@ func uint32Bytes(v uint32) []byte {
 }
 
 func (t *Terminal) Close() {
-	atomic.StoreInt32(&t.isClosed, 1)
-	t.stopPaintWorker()
+	if !atomic.CompareAndSwapInt32(&t.isClosed, 0, 1) {
+		return
+	}
+	if t.done != nil {
+		close(t.done)
+	}
 	if t.pixmap != 0 {
 		xproto.FreePixmap(t.conn, t.pixmap)
 	}

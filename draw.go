@@ -10,8 +10,6 @@ import (
 var (
 	fbW, fbH int
 	framebuf []uint32
-	fbDirty  bool
-	fbMu     sync.Mutex
 )
 
 func ensureFramebuffer(w, h int) {
@@ -27,7 +25,6 @@ func (t *Terminal) clearFramebuffer() {
 	for i := range framebuf {
 		framebuf[i] = bg
 	}
-	fbDirty = true
 }
 
 func itoa(n int) string {
@@ -51,8 +48,8 @@ type glyphKey struct {
 }
 
 var (
-	glyphCache  = make(map[glyphKey][]uint32)
-	glyphMu     sync.RWMutex
+	glyphCache = make(map[glyphKey][]uint32)
+	glyphMu    sync.RWMutex
 )
 
 // drawGlyphAt renders rune u with fg/bg colors into the framebuffer at cell (x,y).
@@ -98,7 +95,6 @@ func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
 		src := yy * w
 		copy(framebuf[dst:dst+w], img[src:src+w])
 	}
-	fbDirty = true
 }
 
 // fillRect fills a region of the framebuffer with argb color.
@@ -120,12 +116,11 @@ func (t *Terminal) fillRect(argb uint32, px, py, w, h int) {
 			dst[i] = argb
 		}
 	}
-	fbDirty = true
 }
 
 // term.Hooks implementation
 
-func (t *Terminal) Bell() {}
+func (t *Terminal) Bell()     {}
 func (t *Terminal) ClipCopy() {}
 
 func (t *Terminal) DrawLine(line []term.Glyph, x1, y1, x2 int) {
@@ -228,6 +223,6 @@ func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, ox, oy int, og term.Glyp
 	}
 }
 
-// FinishDraw is a no-op: the single paint worker owns the framebuffer->X11
-// blit (see paint.go), so the term core's rasterize step needs no flush here.
+// FinishDraw is a no-op: paint.go submits the completed dirty region after the
+// terminal core finishes rasterizing it.
 func (t *Terminal) FinishDraw() {}

@@ -21,7 +21,7 @@ func TestRenderToX(t *testing.T) {
 	defer trm.Close()
 	trm.loadInputConfig(cfg)
 	core := term.NewTerm(cfg, trm)
-	trm.termCore = core
+	trm.attachTerm(core)
 	core.Twrite([]byte("Hello ST-Go!"), false)
 	core.Redraw()
 	time.Sleep(300 * time.Millisecond)
