@@ -645,6 +645,15 @@ func (t *Term) Draw() Region {
 			r = regionUnion(r, q)
 		}
 	}
+	// A resize can shrink the screen while damage from the old dimensions is
+	// still queued (notably during synchronized output). Intersect that damage
+	// with the current screen before indexing lines and cells.
+	if !r.Empty() {
+		r.X1 = max(r.X1, 0)
+		r.Y1 = max(r.Y1, 0)
+		r.X2 = min(r.X2, t.col-1)
+		r.Y2 = min(r.Y2, t.row-1)
+	}
 	if !t.xstartdraw() {
 		return emptyRegion()
 	}

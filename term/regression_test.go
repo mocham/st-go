@@ -75,6 +75,31 @@ func TestResizeClampsCursor(t *testing.T) {
 	}
 }
 
+// TestResizeClampsQueuedDamage verifies that damage queued for the old screen
+// cannot address lines or cells outside the new screen after a shrink.
+func TestResizeClampsQueuedDamage(t *testing.T) {
+	cfg := config.Default()
+	cfg.Cols = 80
+	cfg.Rows = 24
+	trm, hooks := newTermHooks(cfg)
+
+	trm.SetSynchronizedOutput(true)
+	trm.Redraw()
+	trm.Tresize(43, 5)
+	hooks.drawRegions = nil
+	trm.SetSynchronizedOutput(false)
+
+	if len(hooks.drawRegions) != 5 {
+		t.Fatalf("drawn rows after shrink = %d, want 5", len(hooks.drawRegions))
+	}
+	for y, got := range hooks.drawRegions {
+		want := Region{X1: 0, Y1: y, X2: 42, Y2: y}
+		if got != want {
+			t.Fatalf("draw region %d = %+v, want %+v", y, got, want)
+		}
+	}
+}
+
 // TestWideCharGlyph verifies a wide (CJK) rune sets ATTR_WIDE on its cell and
 // ATTR_WDUMMY on the following cell.
 func TestWideCharGlyph(t *testing.T) {

@@ -178,7 +178,7 @@ case ${FILE,,} in
     "$editor" vim "$FILE"
     ;;
   *)
-    xdg-open "$FILE"
+    bar external "$FILE"
     ;;
 esac`
 
