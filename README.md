@@ -23,7 +23,7 @@ parser and screen model, and the X11 frontend is built on the pure-Go
   downloads the needed source tarballs, extracts them, and builds the static
   archives automatically.
 - **Tiered build sizes.** One source tree produces several binaries — from a
-  minimal `st-min` (text only, ~8 MB) up to a full-featured `st` (~15 MB). See
+  minimal `st-min` (text only, ~8 MB) up to a full-featured `st` (~16.5 MB). See
   [Build targets](#build-targets).
 - Full VT100/ANSI escape-sequence handling (cursor movement, editing, erase,
   scroll regions, SGR colors, alt-screen, DECSET/DECRST modes)
@@ -137,17 +137,17 @@ not a dynamic executable
 ## Build targets
 
 The same Go source builds several binaries that differ only in which
-third-party C libraries are linked. When a library is dropped, a **dummy
-object** (a no-op stub) is linked in its place, so the code compiles and runs
-unconditionally — the affected feature just does nothing instead of crashing.
-This is how `st-min` can omit image/PDF decoding without any `//go:build` tags.
+third-party C libraries are linked. When a decoder is dropped, a **dummy
+object** (a no-op stub) is linked in its place, so the affected feature does
+nothing instead of crashing. The full build also enables its SQLite WebP cache
+with a build tag; reduced builds omit SQLite entirely.
 
 | target   | extra libraries        | image/PDF support          | size    |
 |----------|------------------------|----------------------------|---------|
 | `st-min` | (freetype only)        | none                       | ~8 MB   |
 | `st-stb` | + stb_image            | PNG/JPEG/GIF/BMP/TGA       | ~8.6 MB |
 | `st-pdf` | + stb_image + poppler  | raster images + PDF        | ~14.6 MB|
-| `st`     | + stb_image + webp + poppler | all of the above + WebP | ~15 MB |
+| `st`     | + stb_image + webp + poppler + SQLite | all of the above + WebP | ~16.5 MB |
 
 ### `st-min` — the minimal build
 
@@ -182,8 +182,8 @@ Beyond `st-min`, each target adds libraries on top of the previous one:
   API (`page_renderer` → raw BGRA; no cairo/glib/gobject/ffi/pixman/lcms/
   openjpeg/turbojpeg). Enables displaying PDFs (first page, or `page N`).
   WebP remains stubbed.
-- **`st`** (default, `make`) — the full build: stb_image **and** libwebp **and**
-  poppler, so every format the DSL supports is decoded.
+- **`st`** (default, `make`) — the full build: stb_image, libwebp, poppler, and
+  the SQLite WebP cache, so every format the DSL supports is decoded.
 
 The per-target third-party libraries are passed to the linker via
 `-extldflags` (they are deliberately not in the cgo files' `#cgo LDFLAGS`), and
@@ -202,6 +202,22 @@ the stub objects live in `third_party_wrapper/dummy-{stb,webp,pdf}.c`. See
 ./st -t auto-gtex -e bash       # title/class/instance for WM tiling
 ./st vim notes.md               # gvim-like terminal Vim window
 ./st vim -c 'set number' notes.md
+```
+
+Decoded WebP images and animation frames are cached as PNG blobs in a private
+SQLite database at `/tmp/st-go-webp-cache-<uid>/cache.sqlite3`. Override the
+location, or disable the cache with an empty path, in JSON. `{uid}` in a
+configured path expands to the current numeric user ID. The cache directory
+must be owned by the current user and not writable by other users.
+PNG encoding and SQLite writes run on a bounded background worker so cache
+population does not block terminal rendering or input.
+Animated WebP metadata is read without rasterizing frames; frames are decoded
+and queued for caching individually only as playback requests them.
+
+```json
+{
+  "webp_cache_path": "/path/to/st-go-webp-cache.sqlite3"
+}
 ```
 
 `st vim [vim-options] <file>` treats the final argument as the file and passes

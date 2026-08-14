@@ -128,8 +128,17 @@ func (t *Terminal) ImageDecode(encoded []byte, opts term.ImageDecodeOptions) (co
 	if isPDF(encoded) {
 		return t.imageDecodePDF(encoded, opts)
 	}
-	w, h, rgba, err := decodeImage(encoded)
-	if err || w <= 0 || h <= 0 {
+	var w, h int
+	var rgba []byte
+	var decoded bool
+	if isWebP(encoded) {
+		w, h, rgba, decoded = t.decodeWebPImage(encoded)
+	} else {
+		var decodeErr bool
+		w, h, rgba, decodeErr = decodeImage(encoded)
+		decoded = !decodeErr
+	}
+	if !decoded || w <= 0 || h <= 0 {
 		return 0, 0, nil, false
 	}
 	cols, rows, glyphs = t.imageToGlyphs(w, h, rgba, opts)
@@ -141,7 +150,7 @@ func (t *Terminal) ImageDecode(encoded []byte, opts term.ImageDecodeOptions) (co
 // bitmaps are allocated here; frames are decoded on demand by
 // ImageDecodeAnimFrame as the animation plays.
 func (t *Terminal) ImageDecodeAnim(encoded []byte, opts term.ImageDecodeOptions) (durations []int, frameCount, cols, rows int, ok bool) {
-	durations, w, h, dOk := decodeWebPAnimInfo(encoded)
+	durations, w, h, dOk := t.decodeWebPAnimationInfo(encoded)
 	if !dOk || w <= 0 || h <= 0 || len(durations) == 0 {
 		return nil, 0, 0, 0, false
 	}
@@ -153,12 +162,38 @@ func (t *Terminal) ImageDecodeAnim(encoded []byte, opts term.ImageDecodeOptions)
 // WebP into atlas glyphs. Each call allocates a bounded bitmap (recycling the
 // most dated one), so a playing animation's memory stays bounded.
 func (t *Terminal) ImageDecodeAnimFrame(encoded []byte, frameIdx int, opts term.ImageDecodeOptions) (cols, rows int, glyphs []term.Glyph, ok bool) {
-	w, h, rgba, dOk := decodeWebPAnimFrame(encoded, frameIdx)
+	w, h, rgba, dOk := t.decodeWebPAnimationFrame(encoded, frameIdx)
 	if !dOk || w <= 0 || h <= 0 {
 		return 0, 0, nil, false
 	}
 	cols, rows, glyphs = t.imageToGlyphs(w, h, rgba, opts)
 	return cols, rows, glyphs, true
+}
+
+func (t *Terminal) decodeWebPImage(encoded []byte) (w, h int, rgba []byte, ok bool) {
+	if w, h, rgba, ok = t.webpCache.frame(encoded, staticWebPFrame); ok {
+		return w, h, rgba, true
+	}
+	w, h, rgba, ok = decodeWebP(encoded)
+	if ok {
+		t.webpCache.putFrameAsync(encoded, staticWebPFrame, w, h, rgba)
+	}
+	return w, h, rgba, ok
+}
+
+func (t *Terminal) decodeWebPAnimationInfo(encoded []byte) (durations []int, w, h int, ok bool) {
+	return decodeWebPAnimInfo(encoded)
+}
+
+func (t *Terminal) decodeWebPAnimationFrame(encoded []byte, frameIdx int) (w, h int, rgba []byte, ok bool) {
+	if w, h, rgba, ok = t.webpCache.frame(encoded, frameIdx); ok {
+		return w, h, rgba, true
+	}
+	w, h, rgba, ok = t.decodeWebPAnimFrameSequential(encoded, frameIdx)
+	if ok {
+		t.webpCache.putFrameAsync(encoded, frameIdx, w, h, rgba)
+	}
+	return w, h, rgba, ok
 }
 
 // imageToGlyphs breaks a decoded RGBA image into one glyph per terminal cell,

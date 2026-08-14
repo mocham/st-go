@@ -50,6 +50,7 @@ type Config struct {
 	BlinkTimeout     uint     `json:"blinktimeout"`
 	CursorThick      uint     `json:"cursorthickness"`
 	BellVolume       int      `json:"bellvolume"`
+	WebPCachePath    string   `json:"webp_cache_path"`
 
 	FileBrowser FileBrowserConfig `json:"file_browser"`
 

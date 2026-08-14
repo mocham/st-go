@@ -1882,6 +1882,33 @@ func TestWebPAnimDecode(t *testing.T) {
 	if data == nil {
 		t.Skip("ffmpeg not available")
 	}
+	durations, infoW, infoH, ok := decodeWebPAnimInfo(data)
+	if !ok {
+		t.Fatal("animated webp metadata decode failed")
+	}
+	if infoW != 64 || infoH != 64 || len(durations) < 5 {
+		t.Fatalf("metadata = %dx%d, %d frames", infoW, infoH, len(durations))
+	}
+	for i, duration := range durations {
+		if duration < 5 {
+			t.Fatalf("metadata frame %d duration = %dms", i, duration)
+		}
+	}
+	decoder, opened := openWebPAnimDecoder(data)
+	if !opened {
+		t.Fatal("sequential animated webp decoder failed to open")
+	}
+	defer decoder.close()
+	for i := 0; i < 3; i++ {
+		fw, fh, rgba, ok := decoder.frame(i)
+		if !ok || fw != 64 || fh != 64 || len(rgba) != fw*fh*4 {
+			t.Fatalf("sequential frame %d = %dx%d, %d bytes, ok=%v", i, fw, fh, len(rgba), ok)
+		}
+	}
+	if decoder.index != 2 {
+		t.Fatalf("sequential decoder index = %d, want 2", decoder.index)
+	}
+
 	w, h, frames, ok := decodeWebPAnim(data)
 	if !ok {
 		t.Fatal("animated webp decode failed")
@@ -1891,6 +1918,9 @@ func TestWebPAnimDecode(t *testing.T) {
 	}
 	if len(frames) < 5 {
 		t.Fatalf("frame count = %d, want >= 5", len(frames))
+	}
+	if len(frames) != len(durations) {
+		t.Fatalf("decoded frames = %d, metadata frames = %d", len(frames), len(durations))
 	}
 	for i, fr := range frames {
 		if len(fr.rgba) != w*h*4 {

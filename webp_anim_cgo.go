@@ -9,12 +9,14 @@ package main
 #include <stdint.h>
 #include <stddef.h>
 void *webp_anim_open(const uint8_t *data, size_t len, int *width, int *height, int *frame_count);
+int webp_anim_info(const uint8_t *data, size_t len, int *width, int *height, uint32_t **durations);
 int webp_anim_next(void *handle, uint32_t *timestamp_ms, uint8_t **buf);
 void webp_anim_delete(void *handle);
 */
 import "C"
 
 import (
+	"crypto/sha256"
 	"time"
 	"unsafe"
 )
@@ -24,6 +26,95 @@ import (
 type animFrame struct {
 	rgba     []byte
 	duration time.Duration
+}
+
+// webPAnimDecoder keeps libwebp's forward-only compositing state so sequential
+// playback decodes each frame once instead of replaying frames 0..N on every
+// tick. It owns both the C input copy and decoder handle.
+type webPAnimDecoder struct {
+	handle     unsafe.Pointer
+	data       unsafe.Pointer
+	sourceHash [sha256.Size]byte
+	w, h       int
+	frameCount int
+	index      int
+}
+
+func openWebPAnimDecoder(data []byte) (*webPAnimDecoder, bool) {
+	if len(data) == 0 {
+		return nil, false
+	}
+	cdata := C.CBytes(data)
+	var cw, ch, ccount C.int
+	handle := C.webp_anim_open((*C.uint8_t)(cdata), C.size_t(len(data)), &cw, &ch, &ccount)
+	if handle == nil || cw <= 0 || ch <= 0 || ccount <= 0 {
+		if handle != nil {
+			C.webp_anim_delete(handle)
+		}
+		C.free(cdata)
+		return nil, false
+	}
+	return &webPAnimDecoder{
+		handle:     handle,
+		data:       cdata,
+		sourceHash: sha256.Sum256(data),
+		w:          int(cw),
+		h:          int(ch),
+		frameCount: int(ccount),
+		index:      -1,
+	}, true
+}
+
+func (d *webPAnimDecoder) close() {
+	if d == nil {
+		return
+	}
+	if d.handle != nil {
+		C.webp_anim_delete(d.handle)
+		d.handle = nil
+	}
+	if d.data != nil {
+		C.free(d.data)
+		d.data = nil
+	}
+}
+
+func (d *webPAnimDecoder) frame(frameIdx int) (w, h int, rgba []byte, ok bool) {
+	if d == nil || d.handle == nil || frameIdx <= d.index || frameIdx >= d.frameCount {
+		return 0, 0, nil, false
+	}
+	for d.index < frameIdx {
+		var buf *C.uint8_t
+		if C.webp_anim_next(d.handle, nil, &buf) == 0 {
+			return 0, 0, nil, false
+		}
+		d.index++
+		if d.index == frameIdx {
+			rgba = C.GoBytes(unsafe.Pointer(buf), C.int(d.w*d.h*4))
+		}
+	}
+	return d.w, d.h, rgba, rgba != nil
+}
+
+func (t *Terminal) decodeWebPAnimFrameSequential(data []byte, frameIdx int) (w, h int, rgba []byte, ok bool) {
+	hash := sha256.Sum256(data)
+	if t.webpAnimDecoder == nil || t.webpAnimDecoder.sourceHash != hash || frameIdx <= t.webpAnimDecoder.index {
+		if t.webpAnimDecoder != nil {
+			t.webpAnimDecoder.close()
+		}
+		decoder, opened := openWebPAnimDecoder(data)
+		if !opened {
+			t.webpAnimDecoder = nil
+			return 0, 0, nil, false
+		}
+		t.webpAnimDecoder = decoder
+	}
+	w, h, rgba, ok = t.webpAnimDecoder.frame(frameIdx)
+	if !ok {
+		t.webpAnimDecoder.close()
+		t.webpAnimDecoder = nil
+	}
+	return w, h, rgba, ok
 }
 
 // decodeWebPAnim decodes an animated WebP into its frames (composited by
@@ -80,20 +171,30 @@ func decodeWebPAnim(data []byte) (w, h int, frames []animFrame, ok bool) {
 	return w, h, frames, true
 }
 
-// decodeWebPAnimInfo decodes an animated WebP for its metadata only (frame
-// durations, canvas size, frame count), discarding the pixel data. It is used
-// to set up playback timing without holding the frame bitmaps.
+// decodeWebPAnimInfo reads an animated WebP's durations and canvas size through
+// libwebpdemux without rasterizing any frames.
 func decodeWebPAnimInfo(data []byte) (durations []int, w, h int, ok bool) {
-	w, h, frames, ok := decodeWebPAnim(data)
-	if !ok {
+	if len(data) == 0 {
 		return nil, 0, 0, false
 	}
-	for _, f := range frames {
-		ms := int(f.duration / time.Millisecond)
+	var cw, ch C.int
+	var cdurations *C.uint32_t
+	count := C.webp_anim_info(
+		(*C.uint8_t)(unsafe.Pointer(&data[0])), C.size_t(len(data)), &cw, &ch, &cdurations,
+	)
+	if count <= 0 || cw <= 0 || ch <= 0 || cdurations == nil {
+		return nil, 0, 0, false
+	}
+	defer C.free(unsafe.Pointer(cdurations))
+	w, h = int(cw), int(ch)
+	values := unsafe.Slice(cdurations, int(count))
+	durations = make([]int, len(values))
+	for i, duration := range values {
+		ms := int(duration)
 		if ms < 5 {
 			ms = 5
 		}
-		durations = append(durations, ms)
+		durations[i] = ms
 	}
 	return durations, w, h, true
 }

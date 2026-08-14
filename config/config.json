@@ -41,6 +41,7 @@
   "blinktimeout": 800,
   "cursorthickness": 2,
   "bellvolume": 0,
+  "webp_cache_path": "/tmp/st-go-webp-cache-{uid}/cache.sqlite3",
   "file_browser": {
     "icons": {
       "parent": "↑",

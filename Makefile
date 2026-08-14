@@ -8,6 +8,7 @@
 #   - poppler     : PDF rendering (first page / page N via "open")
 #   - zlib        : poppler's stream decompression
 #   - libpng      : poppler's embedded-image support
+# SQLite comes from go-sqlite3's bundled amalgamation rather than third_party/.
 #
 # poppler is built MINIMAL: only the C++ API (page_renderer -> raw BGRA) is
 # linked, so cairo/glib/gobject/ffi/pixman/lcms/openjpeg/turbojpeg are NOT
@@ -40,6 +41,11 @@ BIN         = st
 CFG         = config/config.json
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
+
+# SQLite is only used by the full terminal. Omit it from reduced builds and
+# disable runtime extension loading so the static binary has no dlopen
+# dependency from SQLite.
+FULL_GO_TAGS = webpcache sqlite_omit_load_extension
 
 # The Go file-browser demo (demo-go/file-browser) is pure Go: it needs no
 # third-party libraries and links a normal dynamic binary.
@@ -300,7 +306,7 @@ GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
           $(wildcard third_party_wrapper/*.cpp) $(wildcard *.h)
 
 st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
-	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
+	go build -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
 	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
@@ -349,7 +355,7 @@ install: st
 TEST_EXTRA = $(FULL_EXTRA) $(ALSA_EXTRA)
 
 test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O)
-	go test ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
+	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"

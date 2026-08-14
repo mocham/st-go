@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -49,7 +50,9 @@ type Terminal struct {
 
 	colors []Color
 
-	cfg *config.Config
+	cfg             *config.Config
+	webpCache       *webPCache
+	webpAnimDecoder *webPAnimDecoder
 
 	title       string
 	iconTitle   string
@@ -312,6 +315,15 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 	// rewritten BAR_DATA with a desktop suffix; confirm it is still correct.
 	t.verifyBarData(instance, className)
 
+	if cfg.WebPCachePath != "" {
+		cachePath := strings.ReplaceAll(cfg.WebPCachePath, "{uid}", fmt.Sprint(os.Getuid()))
+		cache, err := openWebPCache(expandHome(cachePath))
+		if err != nil {
+			log.Printf("webp cache: %v", err)
+		} else {
+			t.webpCache = cache
+		}
+	}
 	return t, nil
 }
 
@@ -518,6 +530,12 @@ func (t *Terminal) Close() {
 	}
 	if t.done != nil {
 		close(t.done)
+	}
+	if t.webpCache != nil {
+		t.webpCache.close()
+	}
+	if t.webpAnimDecoder != nil {
+		t.webpAnimDecoder.close()
 	}
 	if t.pixmap != 0 {
 		xproto.FreePixmap(t.conn, t.pixmap)

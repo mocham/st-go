@@ -21,6 +21,57 @@ typedef struct webp_anim {
 	int has_next;
 } webp_anim_t;
 
+/* Reads canvas dimensions and per-frame durations without rasterizing any
+ * pixels. The caller owns *durations and frees it with free(). */
+int webp_anim_info(const uint8_t *data, size_t len, int *width, int *height,
+		   uint32_t **durations) {
+	WebPData wd;
+	WebPDemuxer *demux;
+	WebPIterator iter;
+	uint32_t *out;
+	int frame_count;
+	int i;
+
+	wd.bytes = data;
+	wd.size = len;
+	demux = WebPDemux(&wd);
+	if (demux == NULL)
+		return 0;
+
+	frame_count = (int)WebPDemuxGetI(demux, WEBP_FF_FRAME_COUNT);
+	if (frame_count <= 0 || !WebPDemuxGetFrame(demux, 1, &iter)) {
+		WebPDemuxDelete(demux);
+		return 0;
+	}
+	out = malloc((size_t)frame_count * sizeof(*out));
+	if (out == NULL) {
+		WebPDemuxReleaseIterator(&iter);
+		WebPDemuxDelete(demux);
+		return 0;
+	}
+
+	for (i = 0; i < frame_count; i++) {
+		out[i] = (uint32_t)iter.duration;
+		if (i + 1 < frame_count && !WebPDemuxNextFrame(&iter)) {
+			free(out);
+			WebPDemuxReleaseIterator(&iter);
+			WebPDemuxDelete(demux);
+			return 0;
+		}
+	}
+	if (width)
+		*width = (int)WebPDemuxGetI(demux, WEBP_FF_CANVAS_WIDTH);
+	if (height)
+		*height = (int)WebPDemuxGetI(demux, WEBP_FF_CANVAS_HEIGHT);
+	if (durations)
+		*durations = out;
+	else
+		free(out);
+	WebPDemuxReleaseIterator(&iter);
+	WebPDemuxDelete(demux);
+	return frame_count;
+}
+
 void *webp_anim_open(const uint8_t *data, size_t len,
 		     int *width, int *height, int *frame_count) {
 	WebPData wd;
