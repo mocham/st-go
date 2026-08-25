@@ -198,11 +198,19 @@ the stub objects live in `third_party_wrapper/dummy-{stb,webp,pdf}.c`. See
 ./st -f DejaVuSansMono.ttf      # override the embedded font
 ./st --ratio 1.3                # scale the glyph geometry by 1.3
 ./st -v                         # print version (st 0.9.2)
+./st -install-terminfo          # generate/install ~/.terminfo/s/st-256color
 ./st -config /path/config.json  # alternate config file
 ./st -t auto-gtex -e bash       # title/class/instance for WM tiling
 ./st vim notes.md               # gvim-like terminal Vim window
 ./st vim -c 'set number' notes.md
 ```
+
+`st-go` generates the compiled `st-256color` entry directly in Go; it does not
+require `tic` or a system terminfo development package. `make install` writes
+the entry and its `stterm-256color` alias beneath
+`$(PREFIX)/share/terminfo`. For a per-user install, run
+`./st -install-terminfo`; `$TERMINFO` overrides the default `~/.terminfo`
+destination.
 
 Decoded WebP images and animation frames are cached as PNG blobs in a private
 SQLite database at `/tmp/st-go-webp-cache-<uid>/cache.sqlite3`. Override the

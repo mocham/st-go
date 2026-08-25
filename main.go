@@ -15,6 +15,7 @@ import (
 	"st-go/config"
 	"st-go/ptyutil"
 	"st-go/term"
+	"st-go/terminfo"
 )
 
 // Version is reported by the -v flag. Tools such as fastfetch parse it.
@@ -50,6 +51,8 @@ func main() {
 	flag.BoolVar(&noAlt, "a", false, "disable the alternate screen buffer")
 	var fixed bool
 	flag.BoolVar(&fixed, "i", false, "keep the window at a fixed size")
+	var installTerminfo bool
+	flag.BoolVar(&installTerminfo, "install-terminfo", false, "generate and install st-256color, then exit")
 
 	// -e consumes ALL remaining arguments as the command + its args
 	// (st: `goto run; opt_cmd = argv`). Split the args at -e.
@@ -80,6 +83,14 @@ func main() {
 	if err != nil {
 		log.Printf("config: %v (using embedded)", err)
 		cfg = config.Default()
+	}
+	if installTerminfo {
+		path, err := terminfo.Install("", cfg.Cols, cfg.Rows, cfg.Tabspaces)
+		if err != nil {
+			log.Fatalf("terminfo: %v", err)
+		}
+		fmt.Println(path)
+		return
 	}
 	if token := newGeometryToken(); token != "" {
 		cfg.GeometryToken = token

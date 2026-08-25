@@ -41,6 +41,7 @@ BIN         = st
 CFG         = config/config.json
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
+TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 
 # SQLite is only used by the full terminal. Omit it from reduced builds and
 # disable runtime extension loading so the static binary has no dlopen
@@ -301,7 +302,7 @@ WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:lib
 GC_EXTRA   = -Wl,--gc-sections
 
 GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
-          $(wildcard config/*.json) $(wildcard ptyutil/*.go) \
+          $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard terminfo/*.go) \
           $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h) \
           $(wildcard third_party_wrapper/*.cpp) $(wildcard *.h)
 
@@ -348,6 +349,7 @@ install: st
 	install -d "$(DESTDIR)$(BINDIR)"
 	install -m 0755 st "$(DESTDIR)$(BINDIR)/st"
 	install -m 0644 "$(CFG)" "$(DESTDIR)$(BINDIR)/st.json"
+	TERMINFO="$(DESTDIR)$(TERMINFO_DIR)" ./st -install-terminfo >/dev/null
 
 # go test ./... needs the third-party libs linked too (they moved out of the
 # #cgo LDFLAGS into -extldflags); test against the full build. The ALSA items
@@ -359,6 +361,8 @@ test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) 
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
+	rm -f "$(DESTDIR)$(TERMINFO_DIR)/s/st-256color" \
+	      "$(DESTDIR)$(TERMINFO_DIR)/s/stterm-256color"
 
 clean:
 	rm -f st st-min st-stb st-pdf file-browser
