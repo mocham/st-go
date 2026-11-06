@@ -15,13 +15,15 @@ NAVIGATION
   contents (from /tmp); Backspace leaves the archive.
 
 PREVIEW
-  The left pane previews the selected entry: text, images, and PDFs.
+  The left pane previews the selected entry: text, images, PDFs, TeX, and
+  Markdown. TeX is rendered locally to a paginated vector PDF by latexpdf;
+  Markdown uses paginated images with mathjax-go for its formulas.
   Animated WebP files play once in the preview pane (progress shown in
   the rect); the terminal does all image/animation decoding.
   MP3 files are decoded in-browser and played through the ALSA
   device; their tags, duration, and sample rate are shown. Enter or
   o opens the mp3 viewer, q stops playback and closes it.
-  Wheel over a PDF preview changes pages; [ and ] do the same.
+  Wheel over a PDF, TeX, or Markdown preview changes pages; [ and ] do the same.
   A text preview stops at the last visible row and never scrolls.
 
 COMMAND PROMPT  (:)

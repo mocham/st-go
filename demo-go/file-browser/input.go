@@ -118,10 +118,10 @@ func (b *Browser) handleKey(k byte) {
 		b.openSelected(0)
 	case '[':
 		b.resetClick()
-		b.changePDFPage(-1)
+		b.changePreviewPage(-1)
 	case ']':
 		b.resetClick()
-		b.changePDFPage(1)
+		b.changePreviewPage(1)
 	case '\r', '\n':
 		b.resetClick()
 		b.enterSelected()
@@ -197,11 +197,11 @@ func (b *Browser) mouseEvent(cb, x, y int, final byte) {
 	}
 	if cb&64 != 0 { // wheel
 		b.resetClick()
-		if x < b.listX && b.idx >= 0 && b.isPDF(b.files[b.idx]) {
+		if x < b.listX && b.idx >= 0 && (b.isPDF(b.files[b.idx]) || isRenderedDocument(b.files[b.idx])) {
 			if button == 0 {
-				b.changePDFPage(-1)
+				b.changePreviewPage(-1)
 			} else if button == 1 {
-				b.changePDFPage(1)
+				b.changePreviewPage(1)
 			}
 		} else {
 			if button == 0 {

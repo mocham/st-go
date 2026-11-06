@@ -99,9 +99,18 @@ func applyTTY(cmd *exec.Cmd, slave *os.File, env []string) (*exec.Cmd, error) {
 
 // SetWinSize sets the terminal window size on the master.
 func SetWinSize(master *os.File, rows, cols int) error {
+	return SetWinSizePixels(master, rows, cols, 0, 0)
+}
+
+// SetWinSizePixels sets both the cell grid and its pixel dimensions. Keeping
+// SetWinSize as the zero-pixel wrapper preserves callers that only know rows
+// and columns while allowing graphical children to recover the cell aspect.
+func SetWinSizePixels(master *os.File, rows, cols, pixelWidth, pixelHeight int) error {
 	ws := &unix.Winsize{
-		Row: uint16(rows),
-		Col: uint16(cols),
+		Row:    uint16(rows),
+		Col:    uint16(cols),
+		Xpixel: uint16(pixelWidth),
+		Ypixel: uint16(pixelHeight),
 	}
 	return unix.IoctlSetWinsize(int(master.Fd()), syscall.TIOCSWINSZ, ws)
 }

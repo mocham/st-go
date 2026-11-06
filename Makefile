@@ -48,10 +48,14 @@ TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 # dependency from SQLite.
 FULL_GO_TAGS = webpcache sqlite_omit_load_extension
 
-# The Go file-browser demo (demo-go/file-browser) is pure Go: it needs no
-# third-party libraries and links a normal dynamic binary.
+# Sources that affect the Go file-browser demo, including the sibling
+# latexpdf module selected by go.mod. The target links the existing static
+# ALSA wrapper below.
 FILE_BROWSER = file-browser
-FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) $(wildcard demo-go/file-browser/*.conf)
+LATEXPDF_SRC = $(wildcard ../AA/lecture_server/latexpdf/*.go) \
+	       $(wildcard ../AA/lecture_server/latexpdf/pdf_assets/*)
+FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
+	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC)
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # A MINIMAL static poppler using only the C++ API (page_renderer -> raw BGRA),
@@ -320,9 +324,10 @@ st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
 
 # --- Go file-browser demo --------------------------------------------------
 # A Go clone of demo/file-browser.sh. It links the static ALSA library for the
-# mp3 viewer (embedded alsa.conf + go-mp3 decoded PCM playback). It performs no
-# graphics itself — image/animation decoding is entirely the terminal's job,
-# driven by the DCS display DSL. Run it inside the terminal:
+# mp3 viewer (embedded alsa.conf + go-mp3 decoded PCM playback). TeX previews
+# are vector PDFs rendered by latexpdf; Markdown previews remain paginated PNGs
+# composed with mathjax-go. The terminal displays them through the DCS DSL.
+# Run it inside the terminal:
 #   ./st -e ./file-browser /path/to/files
 file-browser: $(FB_GO_SRC) $(ALSA_LIB) $(SND_O)
 	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(ALSA_EXTRA)"' ./demo-go/file-browser

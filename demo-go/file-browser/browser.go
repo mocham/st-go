@@ -43,13 +43,13 @@ const pathPopupMax = 8
 // browser lists its entries virtually (metadata only) and extracts a file to
 // /tmp lazily, only when it is opened or previewed.
 type archiveCtx struct {
-	file   string // archive path (real)
-	rel    string // virtual directory inside the archive ("" = root)
-	isZip  bool   // zip-family (zip/cbz) vs rar-family (rar/cbr)
-	zip    *zip.ReadCloser
-	names  []string // full virtual entry names (dirs keep no trailing slash)
+	file      string // archive path (real)
+	rel       string // virtual directory inside the archive ("" = root)
+	isZip     bool   // zip-family (zip/cbz) vs rar-family (rar/cbr)
+	zip       *zip.ReadCloser
+	names     []string          // full virtual entry names (dirs keep no trailing slash)
 	extracted map[string]string // virtual entry -> materialized /tmp path
-	tmpDir string
+	tmpDir    string
 }
 
 // Browser is the file browser state machine. It mirrors file-browser.sh.
@@ -59,60 +59,64 @@ type Browser struct {
 	fd  int // stdin/stdout fd used for termios and window size
 
 	// layout (cells, ANSI one-based)
-	rows, cols           int
-	listW, listX         int
-	previewW             int
-	listTop, listBottom  int
-	visible              int
-	compact              bool
+	rows, cols          int
+	listW, listX        int
+	previewW            int
+	cellPixelW          float64
+	cellPixelH          float64
+	listTop, listBottom int
+	visible             int
+	compact             bool
 
 	// browsing state
-	dir      string
-	dirLabel string // path shown in the header (the archive while inside it)
-	files    []string
-	idx      int
-	viewTop  int
-	page     int
-	status   string
+	dir        string
+	dirLabel   string // path shown in the header (the archive while inside it)
+	files      []string
+	idx        int
+	viewTop    int
+	page       int
+	status     string
 	showHidden bool
-	openCmd  string
+	openCmd    string
 
 	// lazy archive browsing: archiveStack holds each open archive level;
 	// archiveReturn* records the real directory to return to when the stack
 	// empties.
-	archiveStack        []*archiveCtx
-	archiveReturnDir    string
-	archiveReturnEntry  string
+	archiveStack       []*archiveCtx
+	archiveReturnDir   string
+	archiveReturnEntry string
 
 	// preview state
 	previewWasGraphic bool
 	previewFullRedraw bool
 	atlasClean        bool
+	previewPageTotal  int
+	documentPreviewer *previewDocumentRenderer
 
 	// info pane
 	infoName, infoKind, infoSize, infoMode, infoTime string
 
 	// click state
-	lastClickIdx int
-	lastClickMs  int64
+	lastClickIdx  int
+	lastClickMs   int64
 	doubleClickMS int64
 
 	// modal prompt state
-	promptActive bool
-	promptAbort  bool
-	promptMode   string // "path" or "cmd"
-	promptBuffer []byte
-	promptCursor int
-	pathMatches  []string
-	pathMatchIdx int
-	pathMatchTop int
-	pathMessage  string
-	cmdMessage   string
-	cmdAffected  []int
-	cmdNewNames  []string
+	promptActive    bool
+	promptAbort     bool
+	promptMode      string // "path" or "cmd"
+	promptBuffer    []byte
+	promptCursor    int
+	pathMatches     []string
+	pathMatchIdx    int
+	pathMatchTop    int
+	pathMessage     string
+	cmdMessage      string
+	cmdAffected     []int
+	cmdNewNames     []string
 	cmdPrevAffected []int
-	cmdOld, cmdNew string
-	cmdGlobal    bool
+	cmdOld, cmdNew  string
+	cmdGlobal       bool
 
 	// manual state
 	manualActive bool
@@ -134,11 +138,11 @@ type Browser struct {
 	cleaned  bool
 
 	// resources
-	cacheDir     string
-	previewLink  string
-	geometryTag  string
+	cacheDir      string
+	previewLink   string
+	geometryTag   string
 	geometryToken string
-	icons        map[string]string
+	icons         map[string]string
 
 	sigCh chan os.Signal
 }
@@ -237,6 +241,7 @@ func (b *Browser) setup() {
 	b.idx = 0
 	b.viewTop = 0
 	b.page = 1
+	b.previewPageTotal = 0
 	b.status = "Ready"
 	b.atlasClean = true
 	b.lastClickIdx = -1
@@ -252,6 +257,7 @@ func (b *Browser) setup() {
 		b.cacheDir, _ = os.MkdirTemp("", "st-go-browser.")
 	}
 	b.previewLink = filepath.Join(b.cacheDir, "content")
+	b.documentPreviewer = newPreviewDocumentRenderer(b.cacheDir)
 	b.geometryTag = fmt.Sprintf("file-browser-%d", os.Getpid())
 }
 
@@ -305,6 +311,7 @@ func (b *Browser) cup(row, col int) { fmt.Fprintf(b.out, "\x1b[%d;%dH", row, col
 // terminalSize reads the live window size like `stty size`.
 func (b *Browser) terminalSize() {
 	rows, cols := 24, 80
+	pixelWidth, pixelHeight := 0, 0
 	if ws, err := unix.IoctlGetWinsize(b.fd, unix.TIOCGWINSZ); err == nil {
 		if ws.Row > 0 {
 			rows = int(ws.Row)
@@ -312,8 +319,16 @@ func (b *Browser) terminalSize() {
 		if ws.Col > 0 {
 			cols = int(ws.Col)
 		}
+		pixelWidth, pixelHeight = int(ws.Xpixel), int(ws.Ypixel)
 	}
 	b.rows, b.cols = rows, cols
+	b.cellPixelW, b.cellPixelH = 8, 16
+	if pixelWidth > 0 {
+		b.cellPixelW = float64(pixelWidth) / float64(cols)
+	}
+	if pixelHeight > 0 {
+		b.cellPixelH = float64(pixelHeight) / float64(rows)
+	}
 	b.compact = rows < 12 || cols < 44
 	if b.compact {
 		return
@@ -336,6 +351,30 @@ func (b *Browser) terminalSize() {
 	if b.visible < 1 {
 		b.visible = 1
 	}
+}
+
+func (b *Browser) previewPDFPageSize() (float64, float64) {
+	heightCells := b.rows - 3
+	if heightCells < 1 {
+		heightCells = 1
+	}
+	// Render preview PDFs at CSS's conventional 96 pixels per inch. If a very
+	// small pane would leave no room inside latexpdf's margins, enlarge both
+	// dimensions together so the page aspect still exactly matches the pane.
+	const millimetresPerPixel = 25.4 / 96.0
+	width := float64(b.previewW) * b.cellPixelW * millimetresPerPixel
+	height := float64(heightCells) * b.cellPixelH * millimetresPerPixel
+	if width <= 0 || height <= 0 {
+		return 0, 0
+	}
+	scale := 1.0
+	if width < 60 {
+		scale = 60 / width
+	}
+	if height*scale < 60 {
+		scale = 60 / height
+	}
+	return width * scale, height * scale
 }
 
 // buildList reads the current directory into files: parent first, then sorted
@@ -463,6 +502,12 @@ func (b *Browser) updateInfo() {
 		b.infoKind = "directory"
 	case b.isPDF(path):
 		b.infoKind = fmt.Sprintf("PDF document, page %d", b.page)
+	case isRenderedDocument(path):
+		if b.previewPageTotal > 0 {
+			b.infoKind = fmt.Sprintf("rendered document, page %d/%d", b.page, b.previewPageTotal)
+		} else {
+			b.infoKind = fmt.Sprintf("rendered document, page %d", b.page)
+		}
 	case isAnimatedWebp(path):
 		b.infoKind = "animated webp"
 	case b.isGraphic(path):
@@ -662,6 +707,7 @@ func (b *Browser) selectIndex(target int) {
 	oldTop := b.viewTop
 	b.idx = target
 	b.page = 1
+	b.previewPageTotal = 0
 	b.ensureVisible()
 	b.updateInfo()
 	b.renderPreview()
@@ -702,6 +748,7 @@ func (b *Browser) changeDirectory(next, wanted string) {
 	b.idx = 0
 	b.viewTop = 0
 	b.page = 1
+	b.previewPageTotal = 0
 	b.buildList()
 	if wanted != "" {
 		for i, f := range b.files {
@@ -769,6 +816,7 @@ func (b *Browser) resetArchiveView() {
 	b.idx = 0
 	b.viewTop = 0
 	b.page = 1
+	b.previewPageTotal = 0
 	b.buildList()
 }
 
@@ -959,6 +1007,8 @@ func (b *Browser) refreshList() {
 	}
 	b.buildList()
 	b.idx = 0
+	b.page = 1
+	b.previewPageTotal = 0
 	for i, f := range b.files {
 		if f == selected {
 			b.idx = i
@@ -980,17 +1030,30 @@ func (b *Browser) toggleHidden() {
 	b.refreshList()
 }
 
-func (b *Browser) changePDFPage(delta int) {
+func previewPageAfter(page, delta, total int) int {
+	page += delta
+	if page < 1 {
+		return 1
+	}
+	if total > 0 && page > total {
+		return total
+	}
+	return page
+}
+
+func (b *Browser) changePreviewPage(delta int) {
 	if b.idx < 0 {
 		return
 	}
-	if !b.isPDF(b.files[b.idx]) {
+	path := b.files[b.idx]
+	if !b.isPDF(path) && !isRenderedDocument(path) {
 		return
 	}
-	b.page += delta
-	if b.page < 1 {
-		b.page = 1
+	total := 0
+	if isRenderedDocument(path) {
+		total = b.previewPageTotal
 	}
+	b.page = previewPageAfter(b.page, delta, total)
 	b.updateInfo()
 	b.renderPreview()
 	b.drawInfo()
@@ -1085,6 +1148,56 @@ func (b *Browser) renderPreview() {
 			return
 		}
 		path = real
+	}
+	if isRenderedDocument(path) && isRegularFile(path) {
+		b.clearPreview()
+		if b.documentPreviewer == nil {
+			b.documentPreviewer = newPreviewDocumentRenderer(b.cacheDir)
+		}
+		pageWidth, pageHeight := 0.0, 0.0
+		if strings.EqualFold(filepath.Ext(path), ".tex") {
+			pageWidth, pageHeight = b.previewPDFPageSize()
+		}
+		document, err := b.documentPreviewer.renderSized(path, pageWidth, pageHeight)
+		if err != nil || document.pages() == 0 {
+			b.previewWasGraphic = false
+			b.previewPageTotal = 0
+			message := "Could not render the document."
+			if err != nil {
+				message = shorten(err.Error(), b.previewW-4)
+			}
+			b.drawPreviewMessage("RENDER ERROR", displayText(baseName(path)), message)
+			return
+		}
+		b.previewPageTotal = document.pages()
+		if b.page > b.previewPageTotal {
+			b.page = b.previewPageTotal
+		}
+		if b.page < 1 {
+			b.page = 1
+		}
+		b.infoKind = fmt.Sprintf("%s preview, page %d/%d", document.Kind, b.page, b.previewPageTotal)
+		title := fmt.Sprintf("%s  %d/%d  %s", strings.ToUpper(document.Kind), b.page, b.previewPageTotal, displayText(baseName(path)))
+		if document.MathErrors > 0 {
+			title += fmt.Sprintf("  (%d math errors)", document.MathErrors)
+		}
+		b.drawPreviewTitle(title)
+		h := b.rows - 3
+		if h < 1 {
+			h = 1
+		}
+		previewPath, pdf := document.pagePath(b.page)
+		b.setPreviewLink(previewPath)
+		fitOption := " fit-contain"
+		pageOption := ""
+		if pdf {
+			fitOption = ""
+			pageOption = fmt.Sprintf(" page %d", b.page)
+		}
+		b.dcs(fmt.Sprintf("open '%s' rect 1 3 %d %d%s%s", b.previewLink, b.previewW, h, fitOption, pageOption))
+		b.atlasClean = false
+		b.previewWasGraphic = true
+		return
 	}
 	if b.isGraphic(path) && isRegularFile(path) {
 		b.clearPreview()

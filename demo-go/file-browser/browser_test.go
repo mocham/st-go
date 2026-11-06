@@ -331,7 +331,7 @@ func TestDefaultTextOpenerUsesRunningSt(t *testing.T) {
 	if err := os.WriteFile(fakeSt, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
-	env := testEnv("ST_GO_EXECUTABLE=" + fakeSt, "MARKER=" + marker)
+	env := testEnv("ST_GO_EXECUTABLE="+fakeSt, "MARKER="+marker)
 	env = envWithout(env, "ST_FILE_BROWSER_OPEN")
 	f := startBrowser(t, env, dir)
 	f.send("\x1b[B") // select openme.md
@@ -388,8 +388,8 @@ func TestPathPromptAbort(t *testing.T) {
 	opener := `printf '%s' "$FILE" > "$MARKER"`
 	f := startBrowser(t, testEnv("MARKER="+marker), "--open", opener, dir)
 	for _, seq := range []string{
-		"/abc\x1b",      // ESC
-		"/abc\x03",      // Ctrl+C byte
+		"/abc\x1b",          // ESC
+		"/abc\x03",          // Ctrl+C byte
 		"/abc\x1b[<0;10;8M", // mouse report
 	} {
 		before := len(f.output())
@@ -673,6 +673,70 @@ func TestTextPreviewEmitsDCS(t *testing.T) {
 	waitContains(t, f, "TEXT  note.txt", "text preview title")
 	waitContains(t, f, "open '", "text preview dcs")
 	waitContains(t, f, "rect 2 3", "text rect placement")
+}
+
+func TestMarkdownMathPreviewEmitsFittedPage(t *testing.T) {
+	dir := t.TempDir()
+	source := "# Preview\n\n\\newcommand{\\RR}{\\mathbb{R}}\n\nA map $f:\\RR\\to\\RR$.\n"
+	if err := os.WriteFile(filepath.Join(dir, "note.md"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f := startBrowser(t, testEnv(), dir)
+	f.send("\x1b[B")
+	waitContains(t, f, "MARKDOWN  1/1", "rendered markdown page title")
+	waitContains(t, f, "fit-contain", "rendered markdown fit mode")
+	waitContains(t, f, "rect 1 3", "rendered markdown preview rectangle")
+}
+
+func TestTeXPreviewUsesLatexPDFPages(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Repeat("A paragraph long enough to produce a multipage vector document.\n\n", 120)
+	source := `\documentclass{article}
+\title{Vector preview}
+\begin{document}
+\maketitle
+\section{Pages}
+The formula $\int_0^1 x^2\,dx=\frac13$ is rendered as vector paths.
+
+` + body + `\end{document}`
+	if err := os.WriteFile(filepath.Join(dir, "lecture.tex"), []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f := startBrowser(t, testEnv(), dir)
+	f.send("\x1b[B")
+	waitContains(t, f, "TEX  1/", "latexpdf page title")
+	waitContains(t, f, " page 1", "latexpdf first PDF page")
+	if strings.Contains(f.output(), "fit-contain page 1") {
+		t.Fatal("latexpdf preview requested an avoidable second scaling pass")
+	}
+	f.send("]")
+	waitContains(t, f, "TEX  2/", "latexpdf second page title")
+	waitContains(t, f, " page 2", "latexpdf second PDF page")
+}
+
+func TestRenderedDocumentPageChangeKeys(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Repeat("A full paragraph for deterministic pagination in the rendered preview.\n\n", 110)
+	if err := os.WriteFile(filepath.Join(dir, "long.md"), []byte("# Long document\n\n"+body), 0644); err != nil {
+		t.Fatal(err)
+	}
+	f := startBrowser(t, testEnv(), dir)
+	f.send("\x1b[B")
+	waitContains(t, f, "MARKDOWN  1/", "rendered document page 1")
+	f.send("[")
+	waitFor(t, f, func() bool {
+		return strings.Count(f.output(), "MARKDOWN  1/") >= 2
+	}, "rendered document lower page bound")
+	f.send("]")
+	waitContains(t, f, "MARKDOWN  2/", "rendered document page 2")
+	f.send("[")
+	waitFor(t, f, func() bool {
+		return strings.Count(f.output(), "MARKDOWN  1/") >= 3
+	}, "rendered document returned to page 1")
+	f.send("\x1b[<65;2;9M")
+	waitFor(t, f, func() bool {
+		return strings.Count(f.output(), "MARKDOWN  2/") >= 2
+	}, "wheel changed rendered document page")
 }
 
 func TestBinaryPreviewMessage(t *testing.T) {

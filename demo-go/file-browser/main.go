@@ -21,12 +21,12 @@ CODE is evaluated by ` + "`bash -c`" + ` with FILE, NAME, and BROWSER_DIR export
 It may contain a complete shell command sequence or function definitions.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
-scroll, [ and ] change PDF pages, / enters a path, : runs a shell command
+scroll, [ and ] change PDF or rendered document pages, / enters a path, : runs a shell command
 (with $F = selected file and $D = current directory), :s/old/new/[g] renames
 matching entries, :help shows this manual, . toggles hidden files, r refreshes,
 q quits.
 Mouse: click selects, double-click opens/enters, wheel scrolls the list; over a
-PDF preview the wheel changes pages.
+PDF, TeX, or Markdown preview the wheel changes pages.
 `)
 }
 

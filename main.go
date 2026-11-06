@@ -222,7 +222,7 @@ func main() {
 	// then cresize(w,h) -> ttyresize) so the child's TIOCGWINSZ matches the
 	// real window (post-WM-tiling) rather than a stale config default.
 	rows, cols := t.actualRowsCols()
-	if err := ptyutil.SetWinSize(master, rows, cols); err != nil {
+	if err := ptyutil.SetWinSizePixels(master, rows, cols, cols*t.cw, rows*t.ch); err != nil {
 		log.Printf("pty: set size: %v", err)
 	}
 
@@ -262,7 +262,7 @@ func main() {
 		master.Write(b)
 	})
 	t.ttyResize = func(rows, cols int) {
-		ptyutil.SetWinSize(master, rows, cols)
+		ptyutil.SetWinSizePixels(master, rows, cols, cols*t.cw, rows*t.ch)
 	}
 
 	// The PTY reader owns terminal-output paint scheduling. Interactive bursts

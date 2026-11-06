@@ -3,7 +3,28 @@ package ptyutil
 import (
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
+
+func TestSetWinSizePixels(t *testing.T) {
+	master, slave, err := Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer master.Close()
+	defer slave.Close()
+	if err := SetWinSizePixels(master, 31, 97, 873, 620); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := unix.IoctlGetWinsize(int(slave.Fd()), unix.TIOCGWINSZ)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.Row != 31 || ws.Col != 97 || ws.Xpixel != 873 || ws.Ypixel != 620 {
+		t.Fatalf("winsize = %+v", ws)
+	}
+}
 
 func TestStartDir(t *testing.T) {
 	dir := t.TempDir()
