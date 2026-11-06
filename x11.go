@@ -14,6 +14,7 @@ import (
 	"github.com/BurntSushi/xgbutil"
 
 	"st-go/config"
+	"st-go/limits"
 	"st-go/term"
 )
 
@@ -40,6 +41,7 @@ type Terminal struct {
 	gc     xproto.Gcontext
 
 	cols, rows int
+	windowCols int // physical cell width; cols is the main region's PTY width
 	cw, ch     int
 	baseline   int
 	borderpx   int
@@ -71,6 +73,7 @@ type Terminal struct {
 
 	pasteTarget  xproto.Atom
 	incrActive   bool
+	incrDiscard  bool
 	incrData     []byte
 	incrProperty xproto.Atom
 
@@ -87,6 +90,8 @@ type Terminal struct {
 	// ttyResize is set by main to send TIOCSWINSZ to the pty master.
 	ttyResize func(rows, cols int)
 
+	displayRegions displayRegionState
+
 	keys       []keyDef
 	shortcuts  []shortcut
 	mshortcuts []mShortcut
@@ -95,6 +100,7 @@ type Terminal struct {
 	geometryTags          map[string]windowRect
 	restoreGeometryTag    string
 	suppressRestoreButton bool
+	regionButtons         uint // presses owned by the secondary region
 
 	mu       sync.Mutex
 	isClosed int32
@@ -209,8 +215,23 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 	if err != nil {
 		return nil, err
 	}
+	if !limits.Check("window border", int64(t.borderpx), 65535) {
+		return nil, fmt.Errorf("invalid window border")
+	}
 	w := t.borderpx*2 + t.cols*t.cw
 	h := t.borderpx*2 + t.rows*t.ch
+	if !limits.Grid(t.cols, t.rows) {
+		return nil, fmt.Errorf("terminal grid exceeds resource limit")
+	}
+	if _, ok := limits.Product("window cells", limits.PixelBytes, t.cols, t.rows, t.cw, t.ch, 4); !ok {
+		return nil, fmt.Errorf("window cells exceed resource limit")
+	}
+	if _, ok := limits.RGBA("window", w, h); !ok {
+		return nil, fmt.Errorf("window exceeds resource limit")
+	}
+	if !limits.Check("X window width", int64(w), 65535) || !limits.Check("X window height", int64(h), 65535) {
+		return nil, fmt.Errorf("window exceeds X dimensions")
+	}
 
 	// Negative geometry offsets are relative to the screen's right/bottom
 	// edge (st: xw.l += DisplayWidth - win.w - 2).
@@ -543,7 +564,9 @@ func (t *Terminal) Close() {
 	if t.win != 0 {
 		xproto.DestroyWindow(t.conn, t.win)
 	}
-	t.conn.Close()
+	if t.conn != nil {
+		t.conn.Close()
+	}
 }
 
 func xerror(err error, fatal bool) {

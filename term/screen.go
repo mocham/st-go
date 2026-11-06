@@ -2,6 +2,8 @@ package term
 
 import (
 	"unicode"
+
+	"st-go/limits"
 )
 
 // runeWidthTbl: wcwidth approximation.
@@ -221,7 +223,7 @@ func (t *Term) GetSel() string {
 			sb = append(sb, utf8encode(t.line[y][i].U)...)
 		}
 		if (y < t.sel.ne.y || lastx >= linelen) &&
-			(t.line[y][last].Mode&ATTRWrap == 0 || t.sel.typ == selRectangular) {
+			(t.sel.typ == selRectangular || last < 0 || t.line[y][last].Mode&ATTRWrap == 0) {
 			sb = append(sb, '\n')
 		}
 	}
@@ -315,7 +317,7 @@ func (t *Term) treset() {
 	for i := range t.tabs {
 		t.tabs[i] = false
 	}
-	for i := t.cfg.Tabspaces; i < uint(t.col); i += t.cfg.Tabspaces {
+	for i, step := t.tabspaces(), t.tabspaces(); i < t.col; i += step {
 		t.tabs[i] = true
 	}
 	t.top = 0
@@ -336,6 +338,9 @@ func (t *Term) treset() {
 
 // New initializes the screen. Called once at startup.
 func (t *Term) New(col, row int) {
+	if !limits.Grid(col, row) {
+		col, row = 80, 24
+	}
 	t.tresize(col, row)
 	t.treset()
 }
@@ -427,7 +432,7 @@ func (t *Term) tsetchar(u rune, attr *Glyph, x, y int) {
 			t.line[y][x+1].U = ' '
 			t.line[y][x+1].Mode &^= ATTRWdummy
 		}
-	} else if t.line[y][x].Mode&ATTRWdummy != 0 {
+	} else if t.line[y][x].Mode&ATTRWdummy != 0 && x > 0 {
 		t.line[y][x-1].U = ' '
 		t.line[y][x-1].Mode &^= ATTRWide
 	}
@@ -660,10 +665,10 @@ func (t *Term) Draw() Region {
 	cx := t.c.x
 	t.ocx = clamp(t.ocx, 0, t.col-1)
 	t.ocy = clamp(t.ocy, 0, t.row-1)
-	if t.line[t.ocy][t.ocx].Mode&ATTRWdummy != 0 {
+	if t.ocx > 0 && t.line[t.ocy][t.ocx].Mode&ATTRWdummy != 0 {
 		t.ocx--
 	}
-	if t.line[t.c.y][cx].Mode&ATTRWdummy != 0 {
+	if cx > 0 && t.line[t.c.y][cx].Mode&ATTRWdummy != 0 {
 		cx--
 	}
 	if !r.Empty() {

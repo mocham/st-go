@@ -21,6 +21,19 @@ typedef struct webp_anim {
 	int has_next;
 } webp_anim_t;
 
+/* Probe before WebPAnimDecoderNew allocates compositing canvases. */
+int webp_anim_probe(const uint8_t *data, size_t len,
+                    int *width, int *height, int *frame_count) {
+	WebPData wd = {data, len};
+	WebPDemuxer *demux = WebPDemux(&wd);
+	if (!demux) return 0;
+	*width = (int)WebPDemuxGetI(demux, WEBP_FF_CANVAS_WIDTH);
+	*height = (int)WebPDemuxGetI(demux, WEBP_FF_CANVAS_HEIGHT);
+	*frame_count = (int)WebPDemuxGetI(demux, WEBP_FF_FRAME_COUNT);
+	WebPDemuxDelete(demux);
+	return 1;
+}
+
 /* Reads canvas dimensions and per-frame durations without rasterizing any
  * pixels. The caller owns *durations and frees it with free(). */
 int webp_anim_info(const uint8_t *data, size_t len, int *width, int *height,

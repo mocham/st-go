@@ -18,12 +18,14 @@ import "C"
 
 import (
 	"unsafe"
+
+	"st-go/limits"
 )
 
 // decodeWebP decodes a WebP image held in memory into unpremultiplied RGBA.
 // Returns width, height and the RGBA pixels, or ok=false on failure.
 func decodeWebP(data []byte) (w, h int, rgba []byte, ok bool) {
-	if len(data) == 0 {
+	if len(data) == 0 || !limits.Check("encoded WebP", int64(len(data)), limits.FileBytes) {
 		return 0, 0, nil, false
 	}
 	cdata := C.CBytes(data)
@@ -37,12 +39,16 @@ func decodeWebP(data []byte) (w, h int, rgba []byte, ok bool) {
 		return 0, 0, nil, false
 	}
 	w, h = int(cw), int(ch)
+	size, valid := limits.RGBA("decoded WebP", w, h)
+	if !valid {
+		return 0, 0, nil, false
+	}
 
 	p := C.WebPDecodeRGBA((*C.uint8_t)(cdata), C.size_t(len(data)), &cw, &ch)
 	if p == nil {
 		return 0, 0, nil, false
 	}
 	defer C.WebPFree(unsafe.Pointer(p))
-	rgba = C.GoBytes(unsafe.Pointer(p), C.int(w*h*4))
+	rgba = C.GoBytes(unsafe.Pointer(p), C.int(size))
 	return w, h, rgba, true
 }

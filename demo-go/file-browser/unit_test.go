@@ -2,8 +2,11 @@ package main
 
 import (
 	"archive/zip"
+	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -57,6 +60,84 @@ func TestShorten(t *testing.T) {
 	}
 }
 
+func TestNavigationSidebarLayoutModes(t *testing.T) {
+	var output bytes.Buffer
+	browser := &Browser{
+		out:               bufio.NewWriter(&output),
+		cols:              80,
+		listX:             47,
+		navigationVisible: true,
+	}
+	browser.updatePreviewWidth()
+	if browser.previewW != 80 {
+		t.Fatalf("floating preview width = %d, want 80", browser.previewW)
+	}
+
+	browser.handleCSI('Z')
+	if !browser.navigationPinned || browser.previewW != 45 {
+		t.Fatalf("pinned navigation = %t, preview width = %d; want true, 45", browser.navigationPinned, browser.previewW)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("Shift+Tab repainted the current screen: %q", output.String())
+	}
+
+	browser.navigationVisible = false
+	browser.updatePreviewWidth()
+	if browser.previewW != 80 {
+		t.Fatalf("hidden navigation preview width = %d, want 80", browser.previewW)
+	}
+	browser.handleCSI('Z')
+	if browser.navigationPinned || browser.previewW != 80 {
+		t.Fatalf("floating hidden navigation = %t, preview width = %d; want false, 80", browser.navigationPinned, browser.previewW)
+	}
+}
+
+func TestTabRedrawsCompleteFrameWithNavigationVisibility(t *testing.T) {
+	var output bytes.Buffer
+	browser := &Browser{
+		out:               bufio.NewWriter(&output),
+		rows:              24,
+		cols:              80,
+		listW:             34,
+		listX:             47,
+		listTop:           8,
+		listBottom:        22,
+		visible:           15,
+		navigationVisible: true,
+	}
+	browser.updatePreviewWidth()
+	browser.handleKey('\t')
+	if browser.navigationVisible {
+		t.Fatal("Tab did not hide navigation")
+	}
+	if browser.previewW != 80 {
+		t.Fatalf("hidden preview width = %d, want 80", browser.previewW)
+	}
+	if !strings.Contains(output.String(), "\x1b[2J") {
+		t.Fatalf("hiding navigation did not redraw the complete frame: %q", output.String())
+	}
+	if strings.Contains(output.String(), " FILES") {
+		t.Fatalf("hidden frame still contains navigation: %q", output.String())
+	}
+
+	browser.toggleNavigationPin()
+	before := output.Len()
+	browser.handleKey('\t')
+	if !browser.navigationVisible {
+		t.Fatal("second Tab did not show navigation")
+	}
+	if browser.previewW != 45 {
+		t.Fatalf("shown pinned preview width = %d, want 45", browser.previewW)
+	}
+	paint := output.String()[before:]
+	if !strings.Contains(paint, " FILES") {
+		t.Fatalf("showing navigation did not paint the sidebar: %q", paint)
+	}
+	if !strings.Contains(paint, "\x1b[2J") {
+		t.Fatalf("showing navigation did not redraw the complete frame: %q", paint)
+	}
+}
+
 func TestHumanSize(t *testing.T) {
 	cases := []struct {
 		n    int64
@@ -83,10 +164,10 @@ func TestModeString(t *testing.T) {
 
 func TestParseSubst(t *testing.T) {
 	cases := []struct {
-		in          string
-		ok          bool
-		old, new    string
-		global      bool
+		in       string
+		ok       bool
+		old, new string
+		global   bool
 	}{
 		{":s/txt/md/", true, "txt", "md", false},
 		{":s/txt/md/g", true, "txt", "md", true},

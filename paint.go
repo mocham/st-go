@@ -49,15 +49,27 @@ func (t *Terminal) paint() {
 	if t.closed() || t.termCore == nil || t.termCore.IsPaintPaused() {
 		return
 	}
+	full := t.displayRegions.fullDirty
+	if full {
+		t.clearFramebuffer()
+		if t.displayRegions.secondary != nil {
+			t.displayRegions.secondary.dirty = true
+		}
+	}
 	region := t.termCore.Draw()
-	if region.Empty() {
+	secondary := t.paintSecondary()
+	if full {
+		t.displayRegions.fullDirty = false
+		t.putFramebufferRegion(0, 0, fbW, fbH)
 		return
 	}
-	px, py, w, h := t.pixelRegion(region)
-	if w < 1 || h < 1 {
-		return
+	if !region.Empty() {
+		px, py, w, h := t.pixelRegion(region)
+		t.putFramebufferRegion(px, py, w, h)
 	}
-	t.putFramebufferRegion(px, py, w, h)
+	if !secondary.Empty() {
+		t.putFramebufferRegion(secondary.Min.X, secondary.Min.Y, secondary.Dx(), secondary.Dy())
+	}
 }
 
 func (t *Terminal) pixelRegion(r term.Region) (px, py, w, h int) {
@@ -87,7 +99,7 @@ func (t *Terminal) pixelRegion(r term.Region) (px, py, w, h int) {
 // chunks. XGB copies each request before returning, so no retained snapshot is
 // needed while terminal mutation remains serialized by t.mu.
 func (t *Terminal) putFramebufferRegion(px, py, w, h int) {
-	if w < 1 || h < 1 || len(framebuf) == 0 {
+	if w < 1 || h < 1 || len(framebuf) == 0 || t.conn == nil {
 		return
 	}
 	rowsPer := (262144 - 28) / (w * 4)

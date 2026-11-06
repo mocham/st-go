@@ -14,27 +14,45 @@ import "C"
 
 import (
 	"unsafe"
+
+	"st-go/limits"
 )
 
 // renderPDFPage renders page `page` (0-based) of the PDF in `data` to a BGRA
 // buffer scaled to fit outW x outH. Returns the buffer and its row stride.
 func renderPDFPage(data []byte, page, outW, outH int) ([]byte, int, bool) {
-	if len(data) == 0 {
+	return renderPDFPageViewport(data, page, outW, outH, false)
+}
+
+func renderPDFPageViewport(data []byte, page, outW, outH int, fitWidth bool) ([]byte, int, bool) {
+	if len(data) == 0 || !limits.Check("encoded PDF", int64(len(data)), limits.FileBytes) {
+		return nil, 0, false
+	}
+	size, valid := limits.RGBA("PDF bitmap", outW, outH)
+	if !valid {
 		return nil, 0, false
 	}
 	cdata := C.CBytes(data)
 	defer C.free(cdata)
 
-	out := make([]byte, outW*outH*4)
-	ok := C.pdf_render_page(
+	out := make([]byte, size)
+	var fit C.int
+	if fitWidth {
+		fit = 1
+	}
+	result := C.pdf_render_page(
 		(*C.uchar)(cdata),
 		C.int(len(data)),
 		C.int(page),
 		C.int(outW),
 		C.int(outH),
 		(*C.uchar)(unsafe.Pointer(&out[0])),
-	) != 0
-	if !ok {
+		fit,
+	)
+	if result < 0 {
+		limits.Report("PDF", "native allocation/decoder exception while rendering")
+	}
+	if result <= 0 {
 		return nil, 0, false
 	}
 	return out, outW * 4, true
@@ -42,10 +60,15 @@ func renderPDFPage(data []byte, page, outW, outH int) ([]byte, int, bool) {
 
 // pdfPageCount returns the number of pages in a PDF, or 0 on failure.
 func pdfPageCount(data []byte) int {
-	if len(data) == 0 {
+	if len(data) == 0 || !limits.Check("encoded PDF", int64(len(data)), limits.FileBytes) {
 		return 0
 	}
 	cdata := C.CBytes(data)
 	defer C.free(cdata)
-	return int(C.pdf_page_count((*C.uchar)(cdata), C.int(len(data))))
+	count := int(C.pdf_page_count((*C.uchar)(cdata), C.int(len(data))))
+	if count < 0 {
+		limits.Report("PDF", "native allocation/decoder exception while reading pages")
+		return 0
+	}
+	return count
 }

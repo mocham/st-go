@@ -279,7 +279,9 @@ func main() {
 			maxLatency = minLatency
 		}
 		for {
-			n, err := unix.Read(fd, buf)
+			// os.File.Read retries EINTR (including runtime/signal interruptions).
+			// A raw read error used to close the window even with a live shell.
+			n, err := master.Read(buf)
 			if err != nil || n == 0 {
 				os.Exit(0)
 			}
@@ -311,6 +313,9 @@ func main() {
 					timeout = time.Until(deadline)
 				}
 				np, perr := unix.Poll(fds, pollMilliseconds(timeout))
+				if perr == unix.EINTR {
+					continue
+				}
 				if perr != nil {
 					break
 				}
@@ -320,10 +325,9 @@ func main() {
 					}
 					break
 				}
-				if fds[0].Revents&unix.POLLHUP != 0 {
-					os.Exit(0)
-				}
-				m, rerr := unix.Read(fd, buf)
+				// POLLHUP may accompany unread output; let Read drain it and
+				// detect EOF/EIO rather than treating the poll flag as an error.
+				m, rerr := master.Read(buf)
 				if rerr != nil || m == 0 {
 					os.Exit(0)
 				}

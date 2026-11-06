@@ -52,10 +52,13 @@ FULL_GO_TAGS = webpcache sqlite_omit_load_extension
 # latexpdf module selected by go.mod. The target links the existing static
 # ALSA wrapper below.
 FILE_BROWSER = file-browser
-LATEXPDF_SRC = $(wildcard ../AA/lecture_server/latexpdf/*.go) \
-	       $(wildcard ../AA/lecture_server/latexpdf/pdf_assets/*)
+LATEXPDF_SRC = $(wildcard latexpdf/*.go) \
+	       $(wildcard latexpdf/pdf_assets/*)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC)
+GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC)
+VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
+	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # A MINIMAL static poppler using only the C++ API (page_renderer -> raw BGRA),
@@ -306,21 +309,26 @@ WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:lib
 GC_EXTRA   = -Wl,--gc-sections
 
 GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
+	  $(wildcard limits/*.go) \
           $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard terminfo/*.go) \
           $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h) \
           $(wildcard third_party_wrapper/*.cpp) $(wildcard *.h)
 
+# Rebuild when build flags change; trim source and module-cache paths from all
+# distributable Go binaries, including their stack-trace/debug metadata.
+st st-pdf st-stb st-min $(FILE_BROWSER) gols vimtex: Makefile
+
 st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
-	go build -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
+	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
-	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
+	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
 
 st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
+	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
 
 st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
+	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
 
 # --- Go file-browser demo --------------------------------------------------
 # A Go clone of demo/file-browser.sh. It links the static ALSA library for the
@@ -330,7 +338,19 @@ st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
 # Run it inside the terminal:
 #   ./st -e ./file-browser /path/to/files
 file-browser: $(FB_GO_SRC) $(ALSA_LIB) $(SND_O)
-	go build -o $@ -ldflags '-linkmode external -extldflags "-static $(ALSA_EXTRA)"' ./demo-go/file-browser
+	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(ALSA_EXTRA)"' ./demo-go/file-browser
+
+# --- GoLS static-corpus browser -------------------------------------------
+# Read-only terminal UI over one or more lecture-server corpus databases.
+# It shares latexpdf with lecture-server and asks st-go to display generated
+# vector PDFs through the existing DCS open protocol; no HTTP server is used.
+gols: $(GOLS_GO_SRC)
+	go build -trimpath -tags 'sqlite_omit_load_extension' -o $@ \
+		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' ./demo-go/gols
+
+# Real Vim on a pane-sized PTY, with save-triggered LaTeX PDF previews.
+vimtex: $(VIMTEX_GO_SRC)
+	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/vimtex
 
 # --- dummy objects (no-op stubs for dropped libraries) --------------------
 $(DUMMY_DIR)/dummy-stb.o: third_party_wrapper/dummy-stb.c
@@ -370,9 +390,9 @@ uninstall:
 	      "$(DESTDIR)$(TERMINFO_DIR)/s/stterm-256color"
 
 clean:
-	rm -f st st-min st-stb st-pdf file-browser
+	rm -f st st-min st-stb st-pdf file-browser gols vimtex
 
 distclean:
-	rm -rf third_party st st-min st-stb st-pdf file-browser
+	rm -rf third_party st st-min st-stb st-pdf file-browser gols vimtex
 
 .PHONY: all install uninstall clean distclean test

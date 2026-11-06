@@ -96,8 +96,8 @@ func (b *Browser) handleKey(k byte) {
 	case 'q', 'Q':
 		b.running = false
 	case '/':
-		if len(b.archiveStack) > 0 {
-			b.status = "Path entry is unavailable inside an archive"
+		if len(b.archiveStack) > 0 || b.isSQLiteMode() {
+			b.status = "Path entry is unavailable inside a virtual view"
 			b.drawStatus()
 			b.flush()
 			return
@@ -107,6 +107,9 @@ func (b *Browser) handleKey(k byte) {
 	case ':':
 		b.resetClick()
 		b.commandPrompt()
+	case '\t':
+		b.resetClick()
+		b.toggleNavigationSidebar()
 	case '.':
 		b.resetClick()
 		b.toggleHidden()
@@ -148,6 +151,9 @@ func (b *Browser) handleKey(k byte) {
 
 func (b *Browser) handleCSI(first byte) {
 	switch first {
+	case 'Z':
+		b.resetClick()
+		b.toggleNavigationPin()
 	case 'A':
 		b.resetClick()
 		b.moveSelection(-1)
@@ -176,6 +182,8 @@ func (b *Browser) handleCSI(first byte) {
 			b.resetClick()
 			rest := b.readNumericCSI(first)
 			switch rest {
+			case "1;2Z":
+				b.toggleNavigationPin()
 			case "1~", "7~":
 				b.selectIndex(0)
 			case "4~", "8~":
@@ -197,7 +205,8 @@ func (b *Browser) mouseEvent(cb, x, y int, final byte) {
 	}
 	if cb&64 != 0 { // wheel
 		b.resetClick()
-		if x < b.listX && b.idx >= 0 && (b.isPDF(b.files[b.idx]) || isRenderedDocument(b.files[b.idx])) {
+		previewArea := !b.navigationVisible || x < b.listX
+		if previewArea && b.idx >= 0 && (b.isPDF(b.files[b.idx]) || isRenderedDocument(b.files[b.idx])) {
 			if button == 0 {
 				b.changePreviewPage(-1)
 			} else if button == 1 {
@@ -220,7 +229,7 @@ func (b *Browser) mouseEvent(cb, x, y int, final byte) {
 		b.goParent()
 		return
 	}
-	if !(button == 0 && x >= b.listX && y >= b.listTop && y <= b.listBottom) {
+	if !(b.navigationVisible && button == 0 && x >= b.listX && y >= b.listTop && y <= b.listBottom) {
 		return
 	}
 	index := b.viewTop + y - b.listTop

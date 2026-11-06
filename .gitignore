@@ -5,6 +5,8 @@
 /st-pdf
 /st-go
 /file-browser
+/gols
+/vimtex
 
 # Editor swap files
 .*.swp

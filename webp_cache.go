@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"sync"
 
+	"st-go/limits"
+
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/sys/unix"
 )
@@ -31,6 +33,7 @@ type webPCache struct {
 	writes        chan webPCacheWrite
 	stop          chan struct{}
 	pendingFrames map[webPFrameKey]pendingWebPFrame
+	pendingBytes  int
 }
 
 type webPFrameKey struct {
@@ -139,6 +142,7 @@ func (c *webPCache) close() {
 	c.closed = true
 	close(c.stop)
 	c.pendingFrames = nil
+	c.pendingBytes = 0
 	c.mu.Unlock()
 	c.db.Close()
 }
@@ -161,10 +165,15 @@ func (c *webPCache) frame(data []byte, frameIdx int) (w, h int, rgba []byte, ok 
 	c.mu.RUnlock()
 
 	var encoded []byte
+	var encodedSize int64
 	if err := c.db.QueryRow(
-		`SELECT png FROM webp_frames WHERE source_hash = ? AND frame_index = ?`,
-		hash[:], frameIdx,
-	).Scan(&encoded); err != nil {
+		`SELECT CASE WHEN length(png) <= ? THEN png END, length(png)
+		 FROM webp_frames WHERE source_hash = ? AND frame_index = ?`,
+		limits.FileBytes, hash[:], frameIdx,
+	).Scan(&encoded, &encodedSize); err != nil {
+		return 0, 0, nil, false
+	}
+	if !limits.Check("cached PNG", encodedSize, limits.FileBytes) {
 		return 0, 0, nil, false
 	}
 	w, h, rgba, ok = decodeCachedPNG(encoded)
@@ -206,11 +215,16 @@ func (c *webPCache) putFrameAsync(data []byte, frameIdx, w, h int, rgba []byte) 
 	if _, found := c.pendingFrames[key]; found {
 		return
 	}
+	if !limits.Check("WebP cache pending pixels", int64(c.pendingBytes)+int64(len(rgba)), limits.MaxBytes) {
+		return
+	}
 	c.pendingFrames[key] = pendingWebPFrame{w: w, h: h, rgba: rgba}
+	c.pendingBytes += len(rgba)
 	select {
 	case c.writes <- job:
 	default:
 		delete(c.pendingFrames, key)
+		c.pendingBytes -= len(rgba)
 	}
 }
 
@@ -232,7 +246,11 @@ func (c *webPCache) runWriter() {
 			}
 			c.putFrameHash(job.hash, job.frameIndex, job.w, job.h, job.rgba)
 			c.mu.Lock()
-			delete(c.pendingFrames, webPFrameKey{hash: job.hash, index: job.frameIndex})
+			key := webPFrameKey{hash: job.hash, index: job.frameIndex}
+			if frame, found := c.pendingFrames[key]; found {
+				c.pendingBytes -= len(frame.rgba)
+				delete(c.pendingFrames, key)
+			}
 			c.mu.Unlock()
 		}
 	}
@@ -247,7 +265,7 @@ func encodeCachedPNG(w, h int, rgba []byte) ([]byte, bool) {
 		Stride: w * 4,
 		Rect:   image.Rect(0, 0, w, h),
 	}
-	var buf bytes.Buffer
+	buf := limits.Buffer{Scope: "encoded cache PNG"}
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, false
 	}
@@ -255,6 +273,17 @@ func encodeCachedPNG(w, h int, rgba []byte) ([]byte, bool) {
 }
 
 func decodeCachedPNG(encoded []byte) (w, h int, rgba []byte, ok bool) {
+	if !limits.Check("cached PNG", int64(len(encoded)), limits.FileBytes) {
+		return 0, 0, nil, false
+	}
+	cfg, err := png.DecodeConfig(bytes.NewReader(encoded))
+	if err != nil {
+		return 0, 0, nil, false
+	}
+	// PNG may decode to 16-bit channels before conversion to RGBA8.
+	if _, valid := limits.Product("cached PNG pixels", limits.PixelBytes, cfg.Width, cfg.Height, 8); !valid {
+		return 0, 0, nil, false
+	}
 	img, err := png.Decode(bytes.NewReader(encoded))
 	if err != nil {
 		return 0, 0, nil, false
@@ -270,10 +299,11 @@ func decodeCachedPNG(encoded []byte) (w, h int, rgba []byte, ok bool) {
 }
 
 func rgbaSize(w, h int) int {
-	if w <= 0 || h <= 0 || w > int(^uint(0)>>1)/h/4 {
+	size, ok := limits.RGBA("cached pixels", w, h)
+	if !ok {
 		return 0
 	}
-	return w * h * 4
+	return size
 }
 
 func validRGBA(w, h int, rgba []byte) bool {

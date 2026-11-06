@@ -6,10 +6,12 @@ extern "C" {
 #endif
 
 /* Renders page `page` (0-based) of a PDF given as raw bytes into a BGRA
- * buffer scaled to fit outW x outH. Returns 1 on success, 0 on failure. */
+ * buffer scaled to fit outW x outH. Returns 1 on success, 0 on failure,
+ * or -1 on a caught native exception. fit_width scales to outW and clips
+ * vertically rather than shrinking to fit the full page. */
 int pdf_render_page(const unsigned char *pdf_data, int pdf_len,
                     int page, int outW, int outH,
-                    unsigned char *out_bgra);
+                    unsigned char *out_bgra, int fit_width);
 
 /* Returns the number of pages in the PDF, or 0 on failure. */
 int pdf_page_count(const unsigned char *pdf_data, int pdf_len);

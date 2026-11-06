@@ -97,6 +97,9 @@ func (b *Browser) drawHeader() {
 }
 
 func (b *Browser) drawInfo() {
+	if !b.navigationVisible {
+		return
+	}
 	b.drawText(2, b.listX, b.listW, infoStyle, " SELECTED")
 	b.drawText(3, b.listX, b.listW, selectedStyle, " "+b.infoName)
 	b.drawText(4, b.listX, b.listW, resetStyle, " type  "+b.infoKind)
@@ -115,6 +118,9 @@ func (b *Browser) drawInfo() {
 }
 
 func (b *Browser) drawListRow(slot int) {
+	if !b.navigationVisible {
+		return
+	}
 	row := b.listTop + slot
 	index := b.viewTop + slot
 	if row > b.listBottom {
@@ -137,12 +143,18 @@ func (b *Browser) drawListRow(slot int) {
 }
 
 func (b *Browser) drawList() {
+	if !b.navigationVisible {
+		return
+	}
 	for slot := 0; slot < b.visible; slot++ {
 		b.drawListRow(slot)
 	}
 }
 
 func (b *Browser) drawDivider() {
+	if !b.navigationVisible {
+		return
+	}
 	col := b.listX - 1
 	for row := 2; row < b.rows; row++ {
 		b.cup(row, col)
@@ -151,10 +163,10 @@ func (b *Browser) drawDivider() {
 }
 
 func (b *Browser) drawStatus() {
-	help := "  arrows  Enter open  / path  : cmd  . hidden  r ref  q quit"
+	help := "  arrows  Enter  Tab nav  S-Tab pin  / path  : cmd  q quit"
 	fmt.Fprintf(b.out, "\x1b[%d;1H%s%*s\x1b[%d;2H", b.rows, statusStyle, b.cols, "", b.rows)
 	fmt.Fprint(b.out, shorten(b.status, b.cols-len(help)-3))
-	if b.cols >= 76 {
+	if b.cols >= len(help)+2 {
 		fmt.Fprintf(b.out, "\x1b[%d;%dH%s", b.rows, b.cols-len(help)+1, help)
 	}
 	fmt.Fprint(b.out, resetStyle)
@@ -163,10 +175,29 @@ func (b *Browser) drawStatus() {
 
 func (b *Browser) drawOverlay() {
 	b.drawHeader()
+	b.drawNavigationSidebar()
+	b.drawStatus()
+}
+
+func (b *Browser) drawNavigationSidebar() {
+	if !b.navigationVisible {
+		return
+	}
 	b.drawInfo()
 	b.drawList()
 	b.drawDivider()
-	b.drawStatus()
+}
+
+// toggleNavigationSidebar changes the UI model and redraws the complete frame.
+// In floating mode renderAll paints the full preview first and the navigation
+// sidebar second, which gives the sidebar its overlay behavior without asking
+// the terminal to retain hidden cells.
+func (b *Browser) toggleNavigationSidebar() {
+	if b.compact {
+		return
+	}
+	b.navigationVisible = !b.navigationVisible
+	b.renderAll()
 }
 
 func (b *Browser) clearPathPopup() {

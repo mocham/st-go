@@ -7,6 +7,7 @@ import (
 	"github.com/BurntSushi/xgb"
 	"github.com/BurntSushi/xgb/xproto"
 
+	"st-go/limits"
 	"st-go/term"
 )
 
@@ -99,6 +100,7 @@ func (t *Terminal) handleEvent(ev xgb.Event) {
 				// framebuffer without draining the staged terminal model.
 				t.putFramebufferRegion(0, 0, fbW, fbH)
 			} else {
+				t.displayRegions.fullDirty = true
 				t.termCore.Redraw()
 			}
 		}
@@ -161,16 +163,11 @@ func (t *Terminal) resize(w, h int) {
 	if newRows < 1 {
 		newRows = 1
 	}
-	if newCols == t.cols && newRows == t.rows && w == fbW && h == fbH {
+	if newCols == t.physicalCols() && newRows == t.rows && w == fbW && h == fbH {
 		return
 	}
-	t.cols, t.rows = newCols, newRows
-	ensureFramebuffer(w, h)
-	t.clearFramebuffer() // st's xresize -> xclear: fill the new buffer with bg
-	t.termCore.Tresize(newCols, newRows)
-	// propagate the new size to the pty so the app (vim, etc.) sees it
-	if t.ttyResize != nil {
-		t.ttyResize(newRows, newCols)
+	if !limits.Grid(newCols, newRows) || !ensureFramebuffer(w, h) {
+		return
 	}
-	t.termCore.Redraw()
+	t.applyDisplayLayout(newCols, newRows)
 }

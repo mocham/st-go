@@ -177,7 +177,7 @@ modes are only gated in the term core; the frontend hooks must mirror them.
 
 ### 3.1 Static linking
 
-Fully static build: `go build -ldflags '-linkmode external -extldflags
+Fully static build: `go build -trimpath -ldflags '-linkmode external -extldflags
 "-static -lstdc++"'` (needs `-lstdc++` for the C++ poppler bridge). glibc emits
 harmless NSS warnings (`getaddrinfo`, `getpwnam_r`) under `-static` — cosmetic.
 

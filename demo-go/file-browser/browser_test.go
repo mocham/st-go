@@ -675,6 +675,55 @@ func TestTextPreviewEmitsDCS(t *testing.T) {
 	waitContains(t, f, "rect 2 3", "text rect placement")
 }
 
+func TestNavigationSidebarFloatingHiddenAndPinnedPreviewWidths(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, "a.txt", "b.txt")
+	f := startBrowser(t, testEnv(), dir)
+
+	// Navigation floats by default, so the first preview uses all 80 columns
+	// (with the text preview's existing two-cell inset).
+	f.send("\x1b[B")
+	waitContains(t, f, "TEXT  a.txt", "floating preview selection")
+	const fullRect = "rect 2 3 77 21"
+	waitContains(t, f, fullRect, "full-width floating preview")
+	out := f.output()
+	if strings.LastIndex(out, " FILES") < strings.LastIndex(out, fullRect) {
+		t.Fatal("floating navigation was not painted after the full-width preview")
+	}
+
+	// Shift+Tab changes only the mode. It must not issue another preview open.
+	opens := strings.Count(f.output(), "open '")
+	f.send("\x1b[Z")
+	time.Sleep(120 * time.Millisecond)
+	if got := strings.Count(f.output(), "open '"); got != opens {
+		t.Fatalf("Shift+Tab repainted the current preview: open count %d -> %d", opens, got)
+	}
+
+	// The next selection uses the right-pinned width: listX=47, previewW=45,
+	// and text keeps its three-cell horizontal inset.
+	f.send("\x1b[B")
+	waitContains(t, f, "TEXT  b.txt", "pinned preview selection")
+	const pinnedRect = "rect 2 3 42 21"
+	waitContains(t, f, pinnedRect, "right-pinned preview")
+
+	// Tab redraws the complete frame from the UI model. Hiding gives the current
+	// preview the full width; showing in pinned mode immediately reserves the
+	// right-hand navigation columns again.
+	opens = strings.Count(f.output(), "open '")
+	fullBefore := strings.Count(f.output(), fullRect)
+	f.send("\t")
+	waitFor(t, f, func() bool {
+		return strings.Count(f.output(), "open '") > opens && strings.Count(f.output(), fullRect) > fullBefore
+	}, "hidden full-width repaint")
+
+	opens = strings.Count(f.output(), "open '")
+	pinnedBefore := strings.Count(f.output(), pinnedRect)
+	f.send("\t")
+	waitFor(t, f, func() bool {
+		return strings.Count(f.output(), "open '") > opens && strings.Count(f.output(), pinnedRect) > pinnedBefore
+	}, "reshown pinned frame")
+}
+
 func TestMarkdownMathPreviewEmitsFittedPage(t *testing.T) {
 	dir := t.TempDir()
 	source := "# Preview\n\n\\newcommand{\\RR}{\\mathbb{R}}\n\nA map $f:\\RR\\to\\RR$.\n"
@@ -684,7 +733,10 @@ func TestMarkdownMathPreviewEmitsFittedPage(t *testing.T) {
 	f := startBrowser(t, testEnv(), dir)
 	f.send("\x1b[B")
 	waitContains(t, f, "MARKDOWN  1/1", "rendered markdown page title")
-	waitContains(t, f, "fit-contain", "rendered markdown fit mode")
+	waitContains(t, f, " page 1", "Markdown latexpdf page")
+	if strings.Contains(f.output(), "fit-contain page 1") {
+		t.Fatal("Markdown latexpdf preview requested an avoidable raster scaling pass")
+	}
 	waitContains(t, f, "rect 1 3", "rendered markdown preview rectangle")
 }
 

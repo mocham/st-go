@@ -23,10 +23,13 @@ It may contain a complete shell command sequence or function definitions.
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
 scroll, [ and ] change PDF or rendered document pages, / enters a path, : runs a shell command
 (with $F = selected file and $D = current directory), :s/old/new/[g] renames
-matching entries, :help shows this manual, . toggles hidden files, r refreshes,
-q quits.
+matching entries, :help shows this manual, Tab shows/hides the navigation
+sidebar, Shift+Tab toggles floating/pinned navigation, . toggles hidden files,
+r refreshes, q quits.
 Mouse: click selects, double-click opens/enters, wheel scrolls the list; over a
 PDF, TeX, or Markdown preview the wheel changes pages.
+SQLite .sqlite3, .sqlite, .db, .db3, and .s3db files open as read-only virtual
+directories: tables contain paginated record entries.
 `)
 }
 

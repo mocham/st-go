@@ -8,6 +8,12 @@
  */
 #include <stdlib.h>
 
+int stb_image_info(const unsigned char *data, int len, int *width, int *height)
+{
+	(void)data; (void)len; (void)width; (void)height;
+	return 0;
+}
+
 /* stb_image's decode helper (see img_cgo.go). Always fail: no image. */
 unsigned char *
 stb_decode_rgba(const unsigned char *data, int len, int *width, int *height)

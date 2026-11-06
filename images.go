@@ -12,6 +12,7 @@ package main
 import (
 	"sort"
 
+	"st-go/limits"
 	"st-go/term"
 )
 
@@ -49,7 +50,14 @@ type imageSlot struct {
 // is recycled (dated bitmaps too small for the image are discarded), and if
 // nothing fits the cache is reset and starts fresh.
 func (t *Terminal) allocImageCells(need int) int {
+	cellBytes, valid := limits.RGBA("image cell", t.cw, t.ch)
+	if !valid {
+		return -1
+	}
 	maxCells := t.rows * t.cols * imageCacheScreens
+	if maxCells > limits.MaxBytes/cellBytes {
+		maxCells = limits.MaxBytes / cellBytes
+	}
 	if maxCells < 1 {
 		maxCells = 1
 	}
@@ -62,6 +70,9 @@ func (t *Terminal) allocImageCells(need int) int {
 	}
 	if need > full {
 		need = full // each bitmap must not exceed one terminal screen
+	}
+	if !limits.Check("image atlas cells", int64(need), maxCells) {
+		return -1
 	}
 	imageStampSeq++
 	now := imageStampSeq
@@ -124,6 +135,9 @@ func imageSlotTotalCells() int {
 // the draw loop truncating the width and scrolling vertically like text.
 // The glyphs are returned in row-major order (rows*cols entries).
 func (t *Terminal) ImageDecode(encoded []byte, opts term.ImageDecodeOptions) (cols, rows int, glyphs []term.Glyph, ok bool) {
+	if !limits.Check("encoded image", int64(len(encoded)), limits.FileBytes) {
+		return 0, 0, nil, false
+	}
 	// PDF: render the requested page (default first) to a bitmap via poppler.
 	if isPDF(encoded) {
 		return t.imageDecodePDF(encoded, opts)
@@ -142,7 +156,7 @@ func (t *Terminal) ImageDecode(encoded []byte, opts term.ImageDecodeOptions) (co
 		return 0, 0, nil, false
 	}
 	cols, rows, glyphs = t.imageToGlyphs(w, h, rgba, opts)
-	return cols, rows, glyphs, true
+	return cols, rows, glyphs, cols > 0 && rows > 0
 }
 
 // ImageDecodeAnim decodes an animated WebP's metadata for the open DSL `anim`
@@ -167,7 +181,7 @@ func (t *Terminal) ImageDecodeAnimFrame(encoded []byte, frameIdx int, opts term.
 		return 0, 0, nil, false
 	}
 	cols, rows, glyphs = t.imageToGlyphs(w, h, rgba, opts)
-	return cols, rows, glyphs, true
+	return cols, rows, glyphs, cols > 0 && rows > 0
 }
 
 func (t *Terminal) decodeWebPImage(encoded []byte) (w, h int, rgba []byte, ok bool) {
@@ -200,10 +214,20 @@ func (t *Terminal) decodeWebPAnimationFrame(encoded []byte, frameIdx int) (w, h 
 // allocating a bounded atlas bitmap and writing each cell's pixel block into
 // it. Returns the grid size and the glyphs in row-major order.
 func (t *Terminal) imageToGlyphs(w, h int, rgba []byte, opts term.ImageDecodeOptions) (cols, rows int, glyphs []term.Glyph) {
+	size, valid := limits.RGBA("image pixels", w, h)
+	if !valid || len(rgba) != size {
+		return 0, 0, nil
+	}
 	logicalCols, logicalRows, cols, rows := t.imageGrid(w, h, opts)
 	scaled := opts.FitWidth || opts.FitHeight || opts.FitContain
 
+	if _, valid := limits.Product("image glyphs", limits.MaxBytes, cols, rows, 16); !valid {
+		return 0, 0, nil
+	}
 	base := t.allocImageCells(cols * rows)
+	if base < 0 {
+		return 0, 0, nil
+	}
 	glyphs = make([]term.Glyph, 0, cols*rows)
 	for gy := 0; gy < rows; gy++ {
 		for gx := 0; gx < cols; gx++ {
@@ -216,11 +240,14 @@ func (t *Terminal) imageToGlyphs(w, h int, rgba []byte, opts term.ImageDecodeOpt
 }
 
 func (t *Terminal) imageGrid(w, h int, opts term.ImageDecodeOptions) (logicalCols, logicalRows, cols, rows int) {
+	if w <= 0 || h <= 0 || t.cw <= 0 || t.ch <= 0 || t.cols <= 0 || t.rows <= 0 {
+		return 0, 0, 0, 0
+	}
 	targetCols, targetRows := t.cols, t.rows
-	if opts.ViewCols > 0 {
+	if opts.ViewCols > 0 && opts.ViewCols < targetCols {
 		targetCols = opts.ViewCols
 	}
-	if opts.ViewRows > 0 {
+	if opts.ViewRows > 0 && opts.ViewRows < targetRows {
 		targetRows = opts.ViewRows
 	}
 	if targetCols < 1 {
@@ -258,7 +285,9 @@ func (t *Terminal) imageGrid(w, h int, opts term.ImageDecodeOptions) (logicalCol
 	if cols > targetCols {
 		cols = targetCols
 	}
-	if opts.ViewRows > 0 && rows > targetRows {
+	// Every atlas allocation is limited to one screen. Keep the write grid
+	// within that allocation even for native/fit-width images without rect.
+	if rows > targetRows {
 		rows = targetRows
 	}
 	return logicalCols, logicalRows, cols, rows
@@ -328,8 +357,14 @@ func (t *Terminal) imageDecodePDF(encoded []byte, opts term.ImageDecodeOptions) 
 		rgba[i] = 0xFF000000 | uint32(r)<<16 | uint32(g)<<8 | uint32(b)
 	}
 
-	glyphs = make([]term.Glyph, 0, cols*rows)
+	if _, valid := limits.Product("PDF glyphs", limits.MaxBytes, cols, rows, 16); !valid {
+		return 0, 0, nil, false
+	}
 	base := t.allocImageCells(cols * rows)
+	if base < 0 {
+		return 0, 0, nil, false
+	}
+	glyphs = make([]term.Glyph, 0, cols*rows)
 	for gy := 0; gy < rows; gy++ {
 		for gx := 0; gx < cols; gx++ {
 			offset := base + (gy*cols+gx)*t.cw*t.ch
@@ -469,14 +504,7 @@ func (t *Terminal) drawImageCell(g term.Glyph, x, y int) {
 	}
 	px := t.borderpx + x*t.cw
 	py := t.borderpx + y*t.ch
-	for yy := 0; yy < t.ch; yy++ {
-		dst := (py+yy)*fbW + px
-		if dst+t.cw > len(framebuf) {
-			break
-		}
-		src := offset + yy*t.cw
-		copy(framebuf[dst:dst+t.cw], imageAtlas[src:src+t.cw])
-	}
+	t.blitTerminalPixels(px, py, t.cw, t.ch, imageAtlas[offset:offset+t.cw*t.ch])
 }
 
 // ImageClearAll clears the image glyph atlas (terminal reset / clear).

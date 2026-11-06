@@ -10,57 +10,56 @@
 #include <vector>
 #include <cstring>
 #include <cstdio>
+#include <cmath>
+#include <memory>
+#include <algorithm>
 
 int pdf_render_page(const unsigned char *pdf_data, int pdf_len,
                     int page, int outW, int outH,
-                    unsigned char *out_bgra)
-{
+                    unsigned char *out_bgra, int fit_width)
+try {
     if (!pdf_data || pdf_len <= 0 || !out_bgra || outW <= 0 || outH <= 0)
         return 0;
 
     poppler::byte_array data(pdf_data, pdf_data + pdf_len);
-    poppler::document *doc = poppler::document::load_from_data(&data);
+    std::unique_ptr<poppler::document> doc(poppler::document::load_from_data(&data));
     if (!doc)
         return 0;
 
     int pages = doc->pages();
     if (page < 0 || page >= pages) {
-        delete doc;
         return 0;
     }
 
-    poppler::page *pg = doc->create_page(page);
+    std::unique_ptr<poppler::page> pg(doc->create_page(page));
     if (!pg) {
-        delete doc;
         return 0;
     }
 
     // page size in points (1/72 inch)
     double pw = pg->page_rect().width();
     double ph = pg->page_rect().height();
-    if (pw < 1.0 || ph < 1.0) {
-        delete pg;
-        delete doc;
+    if (!std::isfinite(pw) || !std::isfinite(ph) || pw < 1.0 || ph < 1.0) {
         return 0;
     }
 
     // scale to fit outW x outH preserving aspect ratio
-    double scale = outH / ph;
+    double scale = fit_width ? outW / pw : outH / ph;
     double sw = pw * scale;
     if (sw > outW) {
         scale = outW / pw;
     }
-    int res = (int)(scale * 72.0);
-    if (res < 1)
-        res = 1;
+    // Fractional DPI and an explicit viewport keep even enormous PDF page
+    // boxes within the Go caller's already-budgeted output dimensions.
+    double res = scale * 72.0;
+    int renderW = (int)std::max(1.0, std::min((double)outW, std::ceil(pw * scale)));
+    int renderH = (int)std::max(1.0, std::min((double)outH, std::ceil(ph * scale)));
 
     poppler::page_renderer r;
     r.set_render_hint(poppler::page_renderer::antialiasing, true);
     r.set_render_hint(poppler::page_renderer::text_antialiasing, true);
-    poppler::image img = r.render_page(pg, res, res);
+    poppler::image img = r.render_page(pg.get(), res, res, 0, 0, renderW, renderH);
     if (!img.is_valid()) {
-        delete pg;
-        delete doc;
         return 0;
     }
 
@@ -72,7 +71,7 @@ int pdf_render_page(const unsigned char *pdf_data, int pdf_len,
 
     // blit scaled/centered into out_bgra (row-major BGRA, outW*outH*4)
     int dx0 = (outW - iw) / 2;
-    int dy0 = (outH - ih) / 2;
+    int dy0 = fit_width ? 0 : (outH - ih) / 2;
     if (dx0 < 0)
         dx0 = 0;
     if (dy0 < 0)
@@ -88,21 +87,22 @@ int pdf_render_page(const unsigned char *pdf_data, int pdf_len,
         std::memcpy(drow, srow, (size_t)cw * 4);
     }
 
-    delete pg;
-    delete doc;
     return 1;
+} catch (...) {
+    return -1; // never unwind a C++ allocation/decoder exception through cgo
 }
 
 /* Returns the number of pages in the PDF, or 0 on failure. */
 int pdf_page_count(const unsigned char *pdf_data, int pdf_len)
-{
+try {
     if (!pdf_data || pdf_len <= 0)
         return 0;
     poppler::byte_array data(pdf_data, pdf_data + pdf_len);
-    poppler::document *doc = poppler::document::load_from_data(&data);
+    std::unique_ptr<poppler::document> doc(poppler::document::load_from_data(&data));
     if (!doc)
         return 0;
     int n = doc->pages();
-    delete doc;
     return n;
+} catch (...) {
+    return -1;
 }

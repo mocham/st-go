@@ -14,6 +14,12 @@
 
 #include <stdlib.h>
 
+int stb_image_info(const unsigned char *data, int len, int *width, int *height)
+{
+	int comp;
+	return stbi_info_from_memory(data, len, width, height, &comp);
+}
+
 /* Decode an image held in memory into RGBA. Returns a malloc'd buffer of
  * width*height*4 bytes (or NULL on failure). The caller must free() it. */
 unsigned char *

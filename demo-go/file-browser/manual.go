@@ -13,11 +13,16 @@ NAVIGATION
   Middle click          go to parent directory
   Enter on a zip, rar, cbz, or cbr archive browses its extracted
   contents (from /tmp); Backspace leaves the archive.
+  Enter on a SQLite database browses its tables and records read-only.
+  Record lists are loaded in pages of 100; Enter follows next/previous pages.
 
 PREVIEW
-  The left pane previews the selected entry: text, images, PDFs, TeX, and
-  Markdown. TeX is rendered locally to a paginated vector PDF by latexpdf;
-  Markdown uses paginated images with mathjax-go for its formulas.
+  The preview displays the selected entry: text, images, PDFs, TeX, and
+  Markdown. The navigation sidebar floats over the full-width preview by
+  default. Tab shows or hides it; Shift+Tab toggles floating and pinned-right
+  modes for newly painted previews. TeX and Markdown are rendered locally to
+  paginated vector PDFs by latexpdf; Markdown supports inline and display
+  LaTeX math through the same pipeline.
   Animated WebP files play once in the preview pane (progress shown in
   the rect); the terminal does all image/animation decoding.
   MP3 files are decoded in-browser and played through the ALSA
@@ -59,6 +64,8 @@ PATH PROMPT  (/)
   Backspace removes the leading / to type relative paths.
 
 OTHER KEYS
+  Tab              show/hide the navigation sidebar
+  Shift+Tab        toggle floating/pinned-right navigation
   .                toggle hidden files
   r                refresh the listing
   q                quit

@@ -43,6 +43,13 @@ WebPFree(void *ptr)
 }
 
 /* animated WebP: WebPAnimDecoder stubs (no animation in reduced builds) */
+int webp_anim_probe(const uint8_t *data, size_t len,
+                    int *width, int *height, int *frame_count)
+{
+	(void)data; (void)len; (void)width; (void)height; (void)frame_count;
+	return 0;
+}
+
 int
 webp_anim_info(const uint8_t *data, size_t len, int *width, int *height,
                uint32_t **durations)

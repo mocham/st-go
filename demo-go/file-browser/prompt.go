@@ -460,8 +460,8 @@ func (b *Browser) paintAffectedRows() {
 }
 
 func (b *Browser) runSubstitution() {
-	if b.isArchiveMode() {
-		b.status = "Renaming inside an archive is not supported"
+	if b.isArchiveMode() || b.isSQLiteMode() {
+		b.status = "Renaming inside a virtual view is not supported"
 		b.renderAll()
 		return
 	}
@@ -648,6 +648,7 @@ func (b *Browser) drawManual(page int) {
 		}
 		b.drawText(row, 3, b.previewW-4, resetStyle, line)
 	}
+	b.drawNavigationSidebar()
 	b.status = fmt.Sprintf("Manual  %d/%d   ] next  [ prev  wheel  q close", page, total)
 	b.drawStatus()
 	b.paintResume()

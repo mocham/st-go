@@ -108,3 +108,12 @@ func TestOpenWebPCacheEmptyPathDisablesCache(t *testing.T) {
 		t.Fatalf("openWebPCache empty path = %#v, %v; want nil, nil", cache, err)
 	}
 }
+
+func TestCachedPNGResourceLimit(t *testing.T) {
+	if _, _, _, ok := decodeCachedPNG(oversizedPNG(t)); ok {
+		t.Fatal("decoded oversized cached PNG")
+	}
+	if _, _, _, ok := decodeCachedPNG(makeTestPNG(t)); !ok {
+		t.Fatal("small cached PNG failed after rejection")
+	}
+}

@@ -2,6 +2,8 @@ package main
 
 import (
 	"github.com/BurntSushi/xgb/xproto"
+
+	"st-go/limits"
 )
 
 // selrequest answers requests for our PRIMARY selection from other clients.
@@ -82,6 +84,7 @@ func (t *Terminal) clipcopy() {
 
 // clippaste requests the CLIPBOARD content.
 func (t *Terminal) clippaste() {
+	t.incrActive, t.incrDiscard, t.incrData = false, false, nil
 	t.pasteTarget = t.atoms["CLIPBOARD"]
 	xproto.ConvertSelection(t.conn, t.win, t.atoms["CLIPBOARD"],
 		t.atoms["UTF8_STRING"], t.atoms["CLIPBOARD"], xproto.TimeCurrentTime)
@@ -89,47 +92,69 @@ func (t *Terminal) clippaste() {
 
 // selnotify handles the response to our ConvertSelection request.
 func (t *Terminal) selnotify(e xproto.SelectionNotifyEvent) {
-	if e.Property == 0 {
+	if e.Property == 0 || e.Requestor != t.win {
 		return
 	}
 	// read the property
 	rep, err := xproto.GetProperty(t.conn, false, e.Requestor,
-		e.Property, 0, 0, 0x7FFFFFFF).Reply()
-	if err != nil {
+		e.Property, 0, 0, limits.ClipboardBytes/4).Reply()
+	if err != nil || rep == nil {
 		return
 	}
+	defer xproto.DeleteProperty(t.conn, e.Requestor, e.Property)
 	if rep.Type == t.atoms["INCR"] {
 		// incremental transfer; start reading chunks
 		t.incrActive = true
+		t.incrDiscard = false
 		t.incrData = nil
 		t.incrProperty = e.Property
-		xproto.DeleteProperty(t.conn, e.Requestor, e.Property)
+		if len(rep.Value) >= 4 {
+			size := uint32(rep.Value[0]) | uint32(rep.Value[1])<<8 | uint32(rep.Value[2])<<16 | uint32(rep.Value[3])<<24
+			t.incrDiscard = !limits.Check("clipboard INCR", int64(size), limits.ClipboardBytes)
+		}
+		return
+	}
+	if !limits.Check("clipboard", int64(len(rep.Value))+int64(rep.BytesAfter), limits.ClipboardBytes) {
 		return
 	}
 	text := string(rep.Value)
 	t.pasteToTTY(replaceNewlines(text))
-	xproto.DeleteProperty(t.conn, e.Requestor, e.Property)
 }
 
 // propnotify handles INCR chunk data arriving on the property.
 func (t *Terminal) propnotify(e xproto.PropertyNotifyEvent) {
-	if !t.incrActive || e.State != xproto.PropertyNewValue {
+	if !t.incrActive || e.State != xproto.PropertyNewValue || e.Window != t.win || e.Atom != t.incrProperty {
 		return
+	}
+	remaining := limits.ClipboardBytes - len(t.incrData)
+	if t.incrDiscard {
+		remaining = 0 // acknowledge subsequent chunks without downloading them
 	}
 	rep, err := xproto.GetProperty(t.conn, false, e.Window,
-		e.Atom, 0, 0, 0x7FFFFFFF).Reply()
-	if err != nil {
+		e.Atom, 0, 0, uint32((remaining+3)/4)).Reply()
+	if err != nil || rep == nil {
 		return
 	}
-	if rep.Type == t.atoms["INCR"] {
-		// transfer complete
+	defer xproto.DeleteProperty(t.conn, e.Window, e.Atom)
+	if len(rep.Value) == 0 && rep.BytesAfter == 0 {
+		// ICCCM INCR ends with an empty property of the target type.
 		t.incrActive = false
-		t.pasteToTTY(replaceNewlines(string(t.incrData)))
-		xproto.DeleteProperty(t.conn, e.Window, e.Atom)
+		if !t.incrDiscard {
+			t.pasteToTTY(replaceNewlines(string(t.incrData)))
+		}
+		t.incrData = nil
+		t.incrDiscard = false
+		return
+	}
+	if t.incrDiscard {
+		return
+	}
+	if !limits.Check("clipboard INCR", int64(len(t.incrData))+int64(len(rep.Value))+int64(rep.BytesAfter), limits.ClipboardBytes) {
+		t.incrDiscard = true
+		t.incrData = nil
 		return
 	}
 	t.incrData = append(t.incrData, rep.Value...)
-	xproto.DeleteProperty(t.conn, e.Window, e.Atom)
 }
 
 func replaceNewlines(s string) string {

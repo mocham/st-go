@@ -8,6 +8,7 @@ package main
 #include <stdlib.h>
 #include <stdint.h>
 #include <stddef.h>
+int webp_anim_probe(const uint8_t *data, size_t len, int *width, int *height, int *frame_count);
 void *webp_anim_open(const uint8_t *data, size_t len, int *width, int *height, int *frame_count);
 int webp_anim_info(const uint8_t *data, size_t len, int *width, int *height, uint32_t **durations);
 int webp_anim_next(void *handle, uint32_t *timestamp_ms, uint8_t **buf);
@@ -19,6 +20,8 @@ import (
 	"crypto/sha256"
 	"time"
 	"unsafe"
+
+	"st-go/limits"
 )
 
 // animFrame is one composited animated-WebP frame (full canvas RGBA) plus how
@@ -41,7 +44,7 @@ type webPAnimDecoder struct {
 }
 
 func openWebPAnimDecoder(data []byte) (*webPAnimDecoder, bool) {
-	if len(data) == 0 {
+	if _, _, _, ok := webPAnimDimensions(data); !ok {
 		return nil, false
 	}
 	cdata := C.CBytes(data)
@@ -122,7 +125,12 @@ func (t *Terminal) decodeWebPAnimFrameSequential(data []byte, frameIdx int) (w, 
 // derived from the frame timestamps. Returns ok=false for static or non-WebP
 // data.
 func decodeWebPAnim(data []byte) (w, h int, frames []animFrame, ok bool) {
-	if len(data) == 0 {
+	w, h, count, valid := webPAnimDimensions(data)
+	if !valid {
+		return 0, 0, nil, false
+	}
+	// This helper retains every frame, unlike the streaming playback path.
+	if _, valid := limits.Product("WebP all frames", limits.MaxBytes, w, h, 4, count); !valid {
 		return 0, 0, nil, false
 	}
 	cdata := C.CBytes(data)
@@ -174,7 +182,7 @@ func decodeWebPAnim(data []byte) (w, h int, frames []animFrame, ok bool) {
 // decodeWebPAnimInfo reads an animated WebP's durations and canvas size through
 // libwebpdemux without rasterizing any frames.
 func decodeWebPAnimInfo(data []byte) (durations []int, w, h int, ok bool) {
-	if len(data) == 0 {
+	if _, _, _, valid := webPAnimDimensions(data); !valid {
 		return nil, 0, 0, false
 	}
 	var cw, ch C.int
@@ -204,7 +212,8 @@ func decodeWebPAnimInfo(data []byte) (durations []int, w, h int, ok bool) {
 // only, so frames 0..frameIdx are decoded and earlier ones discarded; this
 // keeps a playing animation's memory bounded to one frame at a time.
 func decodeWebPAnimFrame(data []byte, frameIdx int) (w, h int, rgba []byte, ok bool) {
-	if len(data) == 0 || frameIdx < 0 {
+	_, _, count, valid := webPAnimDimensions(data)
+	if !valid || frameIdx < 0 || frameIdx >= count {
 		return 0, 0, nil, false
 	}
 	cdata := C.CBytes(data)
@@ -231,4 +240,20 @@ func decodeWebPAnimFrame(data []byte, frameIdx int) (w, h int, rgba []byte, ok b
 		}
 	}
 	return w, h, rgba, rgba != nil
+}
+
+func webPAnimDimensions(data []byte) (w, h, count int, ok bool) {
+	if len(data) == 0 || !limits.Check("encoded WebP animation", int64(len(data)), limits.FileBytes) {
+		return 0, 0, 0, false
+	}
+	var cw, ch, cc C.int
+	if C.webp_anim_probe((*C.uint8_t)(unsafe.Pointer(&data[0])), C.size_t(len(data)), &cw, &ch, &cc) == 0 {
+		return 0, 0, 0, false
+	}
+	w, h, count = int(cw), int(ch), int(cc)
+	_, valid := limits.RGBA("WebP animation canvas", w, h)
+	if !valid || count <= 0 || !limits.Check("WebP animation frames", int64(count), limits.AnimationFrames) {
+		return 0, 0, 0, false
+	}
+	return w, h, count, true
 }

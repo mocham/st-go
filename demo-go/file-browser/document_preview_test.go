@@ -2,49 +2,11 @@ package main
 
 import (
 	"bytes"
-	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func TestPreviewMathMacrosExpand(t *testing.T) {
-	source := `
-\newcommand{\RR}{\mathbb{R}}
-\newcommand{\pair}[2]{\left(#1,#2\right)}
-\def\sq#1{#1^2}
-`
-	macros := extractPreviewMathMacros(source)
-	got := expandPreviewMathMacros(`\pair{\RR}{\sq{x}}`, macros)
-	for _, unexpanded := range []string{`\pair`, `\RR`, `\sq`} {
-		if strings.Contains(got, unexpanded) {
-			t.Fatalf("macro %s was not expanded: %s", unexpanded, got)
-		}
-	}
-	if !strings.Contains(got, `\mathbb{R}`) || !strings.Contains(got, `^2`) {
-		t.Fatalf("expanded expression lost macro bodies: %s", got)
-	}
-}
-
-func TestPreviewFormulaRasterizes(t *testing.T) {
-	renderer := newPreviewDocumentRenderer(t.TempDir())
-	for _, expression := range []string{`f:\mathbb{R}\to\mathbb{R}`, `\int_0^1 x^2\,dx=\frac13`} {
-		formula, err := renderer.formulaExpanded(expression, true, 230, 1000)
-		if err != nil {
-			t.Fatalf("rasterize %q: %v", expression, err)
-		}
-		nonTransparent := 0
-		for offset := 3; offset < len(formula.Pix); offset += 4 {
-			if formula.Pix[offset] != 0 {
-				nonTransparent++
-			}
-		}
-		if nonTransparent == 0 {
-			t.Fatalf("rasterize %q produced a blank image", expression)
-		}
-	}
-}
 
 func TestPreviewPageAfterClampsBounds(t *testing.T) {
 	for _, test := range []struct {
@@ -76,7 +38,7 @@ func TestPreviewPDFPageSizeMatchesPanePixels(t *testing.T) {
 	}
 }
 
-func TestMarkdownDocumentPreviewRendersMathJaxPage(t *testing.T) {
+func TestMarkdownDocumentPreviewUsesLatexPDF(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "notes.md")
 	source := `# Macro preview
@@ -97,20 +59,18 @@ $$
 	if err != nil {
 		t.Fatal(err)
 	}
-	if document.Kind != "Markdown" || len(document.Pages) != 1 || document.MathErrors != 0 {
+	if document.Kind != "Markdown" || document.PDFPath == "" || len(document.Pages) != 0 || document.PageCount < 1 || document.MathErrors != 0 {
 		t.Fatalf("unexpected document result: %#v", document)
 	}
-	file, err := os.Open(document.Pages[0])
+	pdf, err := os.ReadFile(document.PDFPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
-	page, err := png.Decode(file)
-	if err != nil {
-		t.Fatal(err)
+	if !bytes.HasPrefix(pdf, []byte("%PDF-")) || bytes.Contains(pdf, []byte("/Subtype /Image")) {
+		t.Fatalf("Markdown preview is not a native vector PDF (%d bytes)", len(pdf))
 	}
-	if page.Bounds().Dx() != documentPreviewWidth || page.Bounds().Dy() != documentPreviewHeight {
-		t.Fatalf("page bounds = %v, want %dx%d", page.Bounds(), documentPreviewWidth, documentPreviewHeight)
+	if pagePath, isPDF := document.pagePath(1); !isPDF || pagePath != document.PDFPath {
+		t.Fatalf("Markdown pagePath = %q, %t; want PDF %q", pagePath, isPDF, document.PDFPath)
 	}
 }
 

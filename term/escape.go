@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"st-go/limits"
 )
 
 func (t *Term) tdefcolor(attr []int, npar int, l int) (int32, int) {
@@ -418,6 +420,9 @@ func (t *Term) oscColorResponse(num, index int, isOsc4 bool) {
 
 func (t *Term) strhandle() {
 	t.esc &^= escStrEnd | escSTR
+	if t.strescseq.discard {
+		return
+	}
 	t.strparse()
 	par := 0
 	if t.strescseq.narg > 0 {
@@ -564,7 +569,7 @@ func (t *Term) dcs() {
 	stmt := string(t.strescseq.buf)
 	// split into statements on ';'
 	for len(stmt) > 0 {
-		i := indexByteStr(stmt, ';')
+		i := dslStatementEnd(stmt)
 		var one string
 		if i < 0 {
 			one = stmt
@@ -592,6 +597,10 @@ func (t *Term) dcs() {
 			t.dslDelete(args[1:])
 		case "window":
 			t.dslWindow(args[1:])
+		case "region":
+			if err := t.dslRegion(args[1:]); err != nil {
+				log.Printf("dsl: region: %v", err)
+			}
 		default:
 			log.Printf("dsl: unknown command %q\n", args[0])
 		}
@@ -721,7 +730,7 @@ func (t *Term) dslOpen(args []string) {
 		opts.ViewCols, opts.ViewRows = rw, rh
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := limits.ReadFile(path)
 	if err != nil {
 		log.Printf("dsl: open %q: %v\n", path, err)
 		return
@@ -963,7 +972,11 @@ done:
 
 // tabspaces returns the configured tab width (>=1).
 func (t *Term) tabspaces() int {
-	if t.cfg == nil || t.cfg.Tabspaces < 1 {
+	if t.cfg == nil {
+		return 8
+	}
+	if t.cfg.Tabspaces < 1 || t.cfg.Tabspaces > limits.MaxBytes {
+		limits.Report("tab spacing", "invalid value %d; using 8", t.cfg.Tabspaces)
 		return 8
 	}
 	return int(t.cfg.Tabspaces)
@@ -1091,6 +1104,24 @@ func validGeometryAnchor(s string) bool {
 // imageCellGlyph returns a plain image-cell glyph whose Fg packs the address
 // of the cell's pixel block in the frontend atlas.
 
+// dslStatementEnd finds the next separator outside quoted arguments.
+func dslStatementEnd(s string) int {
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		switch {
+		case quote != 0:
+			if s[i] == quote {
+				quote = 0
+			}
+		case s[i] == '\'' || s[i] == '"':
+			quote = s[i]
+		case s[i] == ';':
+			return i
+		}
+	}
+	return -1
+}
+
 // dslTokenize splits a statement into arguments, honoring single- and
 // double-quoted strings and skipping runs of whitespace.
 func dslTokenize(s string) []string {
@@ -1151,6 +1182,7 @@ func (t *Term) strdump() {
 }
 
 func (t *Term) strreset() {
+	t.strescseq.discard = false
 	if t.strescseq.buf == nil {
 		t.strescseq.siz = strBufSiz
 		t.strescseq.buf = make([]byte, 0, strBufSiz)
@@ -1295,11 +1327,15 @@ func (t *Term) tputc(u rune) {
 			t.esc |= escStrEnd
 			goto checkControlCode
 		}
-		if t.strescseq.len+len_ >= t.strescseq.siz {
-			if t.strescseq.siz > (1<<30)/2 {
-				return
-			}
-			t.strescseq.siz *= 2
+		if t.strescseq.discard {
+			return
+		}
+		if !limits.Check("control string", int64(len(t.strescseq.buf)+len_), limits.ControlBytes) {
+			t.strescseq.discard = true
+			t.strescseq.buf = nil
+			t.strescseq.args = nil
+			t.strescseq.len = 0
+			return
 		}
 		t.strescseq.buf = append(t.strescseq.buf, c...)
 		t.strescseq.len += len_

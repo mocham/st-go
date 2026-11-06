@@ -49,6 +49,9 @@ func (t *Terminal) bpress(e xproto.ButtonPressEvent) {
 		return
 	}
 	btn := byte(e.Detail)
+	if t.regionMousePress(btn, int(e.EventX)) {
+		return
+	}
 	x := t.evcol(int(e.EventX))
 	y := t.evrow(int(e.EventY))
 
@@ -85,6 +88,9 @@ func (t *Terminal) bmotion(e xproto.MotionNotifyEvent) {
 	if t.suppressRestoreButton {
 		return
 	}
+	if t.regionButtons != 0 || (buttons == 0 && t.overSecondary(int(e.EventX))) {
+		return
+	}
 	x := t.evcol(int(e.EventX))
 	y := t.evrow(int(e.EventY))
 
@@ -108,6 +114,13 @@ func (t *Terminal) brelease(e xproto.ButtonReleaseEvent) {
 	btn := byte(e.Detail)
 	if btn == 1 && t.suppressRestoreButton {
 		t.suppressRestoreButton = false
+		return
+	}
+	if t.regionButtons&buttonmask(btn) != 0 {
+		t.regionButtons &^= buttonmask(btn)
+		return
+	}
+	if buttons == 0 && t.overSecondary(int(e.EventX)) {
 		return
 	}
 	x := t.evcol(int(e.EventX))

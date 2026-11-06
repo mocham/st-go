@@ -35,6 +35,32 @@ parser and screen model, and the X11 frontend is built on the pure-Go
 - PDF display via a minimal static poppler (C++ API, first page or `page N`)
 - JSON configuration (`config.json`)
 
+## Resource limits and error logs
+
+Resource budgets are centralized in [`limits/limits.go`](limits/limits.go).
+`MaxBytes` defaults to **64 MiB** per input/buffer; smaller budgets are derived
+from it:
+
+| Resource | Limit |
+| --- | --- |
+| Preview file / encoded image or PDF | 64 MiB |
+| Decoded bitmap, framebuffer, image atlas, pending WebP cache pixels | 64 MiB each |
+| Terminal screen grids (both buffers plus bookkeeping) | 64 MiB |
+| Glyph cache | 32 MiB / 16,384 entries |
+| Clipboard transfer | 8 MiB |
+| OSC/DCS control string | 1 MiB |
+| Animation frame count | 65,536 |
+
+Oversized inputs are rejected before file loading or pixel decoding. Oversized
+control strings are discarded through their terminator; oversized clipboard
+transfers are drained without pasting partial content. A rejected runtime resize
+retains the previous framebuffer/grid. Atlas reuse remains latency-oriented.
+
+The first rejection creates `/tmp/st-go-<pid>-errors-<random>.log` and prints its
+exact path to stderr. The private log is capped at **1 MiB** and wraps in place,
+keeping recent diagnostics. These are per-resource limits; native decoder
+working memory and overall process RSS are separate from the budgets.
+
 ## Inline images via the DCS display DSL
 
 st-go can display images inside the terminal. A small, extensible DSL is
@@ -107,6 +133,82 @@ child. Child-emitted window commands use `window auth TOKEN ...`; commands
 without the matching token are ignored. The file browser adds this prefix
 automatically.
 
+### Independent display regions
+
+st-go can reserve a **full-height right-hand preview** beside the main terminal.
+The main terminal grid and PTY both shrink to the left region's width. Clears,
+scrolling, Vim's alternate screen, and cursor drawing stay inside that region;
+the preview has its own retained pixels. Ordinary terminal updates do not
+repaint the preview.
+
+For example, run this inside st-go:
+
+```sh
+printf '\033P%s\033\\' 'region split 45%; region secondary open "/path/to/document.pdf"'
+vim /path/to/document.tex
+printf '\033P%s\033\\' 'region reset'
+```
+
+This displays an existing PDF; a live LaTeX editor demo can regenerate its PDF
+and issue another `region secondary open` after each update. Decode work runs
+on one background worker with one replaceable pending request. The previous
+preview stays visible until its replacement succeeds; stale results are
+discarded. Input/bitmap limits apply, and failures are logged under `/tmp/`.
+
+| Command | Meaning |
+| --- | --- |
+| `region split 45%` | Reserve 45% of columns for the right preview |
+| `region split 40` | Reserve 40 columns initially |
+| `region layout main X Y W H secondary X Y W H` | Atomically set explicit cell rectangles |
+| `region secondary open '<path>' [page N\|current] [fit-contain\|fit-width\|fit-height\|native]` | Replace the preview with a static image or PDF page |
+| `region secondary clear` | Clear the preview, retaining the split |
+| `region secondary scroll report\|pages` | Report navigation to the application, or use default PDF-page scrolling |
+| `region secondary scroll N` / `region secondary seek N` | Emit a navigation event to an application that enabled reporting |
+| `region query` | Reply on terminal input with `DCS region layout … ST` |
+| `region reset` | Release the preview and restore the full-width PTY |
+
+Rectangle X/Y coordinates and PDF page numbers are **one-based**. An explicit
+layout must cover the entire cell grid: `main` at the left edge, `secondary`
+immediately adjoining it at the right, both full-height. A single full-window
+`main` rectangle is also accepted. Unsupported IDs, gaps, overlaps, and other
+layouts are rejected without changing the active layout. For a 120×40 window:
+
+```sh
+printf '\033P%s\033\\' 'region layout main 1 1 70 40 secondary 71 1 50 40'
+```
+
+Window resizing preserves the requested width ratio, resizing the main PTY and
+re-rendering the preview. At a one-column window, the preview is temporarily
+hidden and returns when space is available. `fit-contain` is the default for
+region images/PDFs; PDF `fit-width` fills the width and clips vertical overflow.
+By default the mouse wheel over the
+preview changes PDF pages (wrapping at either end); preview clicks are consumed
+locally. Keyboard input stays with the main terminal. The split persists across
+terminal resets and alternate-screen changes until `region reset`; applications
+should send that command during cleanup.
+
+The optional Go interface is `term.RegionHooks` in
+[`term/display_regions.go`](term/display_regions.go): stable `RegionID`s,
+`DisplayRegion` rectangles (zero-based in Go), `SetRegions`, `Regions`,
+`OpenRegion`, and `ClearRegion`. The first backend accepts only the two-region
+side-by-side layout, while the interface leaves room for future layouts.
+
+### Vim + live LaTeX demo
+
+[`demo-go/vimtex`](demo-go/vimtex/README.md) launches real Vim after checking
+that the source exists, watches saved changes (including local TeX includes),
+and renders a fit-width source window with a minimum 2.1-second redraw gap:
+
+```sh
+make st vimtex
+./st -e ./vimtex /path/to/document.tex
+```
+
+The mouse wheel over the right pane moves an independent virtual cursor through
+source blocks. Nearby content is rendered around it, without precise PDF
+pagination. `:VimtexPreview [line]` and `:VimtexScroll count` expose the same
+navigation to Vimscript; ordinary keyboard input stays with Vim.
+
 ## Requirements
 
 - Go toolchain (with cgo)
@@ -124,6 +226,9 @@ make install  # installs to $(BINDIR), default /usr/local/bin
 make clean    # removes all built binaries
 make distclean  # removes binaries and third_party/
 ```
+
+All binary targets use Go's `-trimpath` to omit local source and module-cache
+paths from Go debug information and stack traces.
 
 Result:
 
@@ -346,6 +451,49 @@ a mapped bottom-left strip; clicking that strip restores the saved geometry.
 > for its own protocol and does not forward from a pane to the outer terminal.
 > `image-viewer.sh` therefore does not display images inside tmux (a tmux
 > limitation, not a st-go bug).
+
+### Go file browser
+
+`demo-go/file-browser` is the native Go variant. Build and run it with:
+
+```sh
+make file-browser
+./st -e ./file-browser /some/path
+```
+
+Its navigation sidebar is visible and floating by default, so previews use the
+full terminal width and the sidebar is painted on top. Tab shows or hides the
+sidebar. Shift+Tab toggles floating and pinned-right mode without repainting the
+current preview; the next selected file or page uses the new geometry. TeX and
+Markdown previews share the native `latexpdf` vector-PDF pipeline. Markdown
+supports inline `$...$`/`\(...\)` and display `$$...$$`/`\[...\]` math.
+
+### Go corpus browser
+
+`demo-go/gols` combines the Go file browser's terminal UI with the immutable
+SQLite archive and native LaTeX rendering used by GoLS. It opens corpus
+databases directly in read-only, immutable mode—there is no HTTP server—and
+navigates **database → corpus → documents → PDF/TeX/Markdown contents**.
+Opening a TeX document expands archived `\input`/`\include` records. Markdown
+documents, including inline and display LaTeX math, use the same shared
+`latexpdf` vector-PDF pipeline; other archived text is displayed as source. The
+final level is an outline whose entries jump to their exact rendered PDF pages.
+
+```sh
+make gols
+./st -e ./gols /path/to/lectures.sqlite3
+./st -e ./gols /path/to/corpus-directory   # recursively finds corpus DBs
+```
+
+The navigation pane is focused and visible at startup. Arrow keys and Enter
+move down the hierarchy, and Backspace or Left moves up. Opening a document
+automatically hides the pane for a full-width preview; Tab shows/focuses it and
+Tab again hides it. `/` searches document paths/titles/content,
+`[` and `]` change rendered document pages, and `q` exits. PDFs are generated only
+when a document is opened. The selected page-size variant remains pinned while
+the window is resized; reopening at another size creates or reuses that cached
+variant. `GOLS_DATABASES` supplies a colon-separated default database list when
+no command-line path is given.
 
 ## License
 

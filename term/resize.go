@@ -1,12 +1,21 @@
 package term
 
+import "st-go/limits"
+
 // Tresize resizes the terminal screen, ported from st.c.
 func (t *Term) Tresize(col, row int) { t.tresize(col, row) }
 
 func (t *Term) tresize(col, row int) {
-	if col < 1 || row < 1 {
+	if !limits.Grid(col, row) {
 		logf("tresize: error resizing to %dx%d\n", col, row)
 		return
+	}
+	if col != t.col || row != t.row {
+		// Selections and animations retain cell coordinates in the old grid.
+		// Invalidate them before rows are moved or removed; a later mouse
+		// release or animation tick must not index the discarded cells.
+		t.selclear()
+		t.CancelAnims()
 	}
 	// snapshot old size before we mutate it
 	minrow := min(row, t.row)
@@ -68,7 +77,8 @@ func (t *Term) tresize(col, row int) {
 				last = k
 			}
 		}
-		for k := last + int(t.cfg.Tabspaces); k < col; k += int(t.cfg.Tabspaces) {
+		step := t.tabspaces()
+		for k := last + step; k < col; k += step {
 			t.tabs[k] = true
 		}
 	}

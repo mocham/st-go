@@ -67,6 +67,8 @@ type Browser struct {
 	listTop, listBottom int
 	visible             int
 	compact             bool
+	navigationVisible   bool
+	navigationPinned    bool
 
 	// browsing state
 	dir        string
@@ -85,6 +87,7 @@ type Browser struct {
 	archiveStack       []*archiveCtx
 	archiveReturnDir   string
 	archiveReturnEntry string
+	sqlite             *sqliteCtx
 
 	// preview state
 	previewWasGraphic bool
@@ -155,6 +158,7 @@ var iconDefaults = map[string]string{
 	"PDF":        "▤",
 	"TEXT":       "≡",
 	"ARCHIVE":    "▦",
+	"DATABASE":   "▥",
 	"AUDIO":      "♪",
 	"VIDEO":      "▶",
 	"CODE":       "λ",
@@ -230,6 +234,7 @@ func (b *Browser) setup() {
 		"pdf":        iconValue("PDF"),
 		"text":       iconValue("TEXT"),
 		"archive":    iconValue("ARCHIVE"),
+		"database":   iconValue("DATABASE"),
 		"audio":      iconValue("AUDIO"),
 		"video":      iconValue("VIDEO"),
 		"code":       iconValue("CODE"),
@@ -243,6 +248,8 @@ func (b *Browser) setup() {
 	b.page = 1
 	b.previewPageTotal = 0
 	b.status = "Ready"
+	b.navigationVisible = true
+	b.navigationPinned = false
 	b.atlasClean = true
 	b.lastClickIdx = -1
 	b.doubleClickMS = parseDoubleClickMS()
@@ -280,6 +287,9 @@ func (b *Browser) cleanup() {
 		if ctx.zip != nil {
 			ctx.zip.Close()
 		}
+	}
+	if b.sqlite != nil {
+		b.sqlite.close()
 	}
 	b.windowDCS("forget " + b.geometryTag)
 	fmt.Fprint(b.out, "\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[0m\x1b[?1049l")
@@ -345,12 +355,33 @@ func (b *Browser) terminalSize() {
 	}
 	b.listW = listW
 	b.listX = cols - listW + 1
-	b.previewW = b.listX - 2
+	b.updatePreviewWidth()
 	b.listBottom = rows - 2
 	b.visible = b.listBottom - b.listTop + 1
 	if b.visible < 1 {
 		b.visible = 1
 	}
+}
+
+// updatePreviewWidth changes the rectangle used by the next preview paint.
+// A floating or hidden navigation sidebar leaves the full terminal width to
+// the preview; a pinned visible sidebar reserves its right-hand columns.
+func (b *Browser) updatePreviewWidth() {
+	b.previewW = b.cols
+	if b.navigationVisible && b.navigationPinned {
+		b.previewW = b.listX - 2
+	}
+	if b.previewW < 1 {
+		b.previewW = 1
+	}
+}
+
+// toggleNavigationPin changes only future preview geometry. The current
+// preview and sidebar are intentionally left untouched until another file or
+// page is painted.
+func (b *Browser) toggleNavigationPin() {
+	b.navigationPinned = !b.navigationPinned
+	b.updatePreviewWidth()
 }
 
 func (b *Browser) previewPDFPageSize() (float64, float64) {
@@ -381,6 +412,10 @@ func (b *Browser) previewPDFPageSize() (float64, float64) {
 // directories, then sorted regular files (mirrors the shell glob ordering).
 // Inside an archive it lists the archive's virtual entries instead.
 func (b *Browser) buildList() {
+	if b.isSQLiteMode() {
+		b.buildSQLiteList()
+		return
+	}
 	if len(b.archiveStack) > 0 {
 		b.buildArchiveList(b.currentArchive())
 		return
@@ -494,6 +529,10 @@ func (b *Browser) updateInfo() {
 		return
 	}
 	path := b.files[b.idx]
+	if b.isSQLiteMode() {
+		b.updateSQLiteInfo(path)
+		return
+	}
 	b.infoName = displayText(baseName(path))
 	switch {
 	case b.isParentEntry(path):
@@ -514,6 +553,8 @@ func (b *Browser) updateInfo() {
 		b.infoKind = "image"
 	case b.isArchive(path):
 		b.infoKind = "archive"
+	case isSQLitePath(path):
+		b.infoKind = "SQLite database"
 	case b.isMp3(path):
 		b.infoKind = "mp3 audio"
 	default:
@@ -569,6 +610,13 @@ func (b *Browser) fileType(path string) string {
 	if b.isParentEntry(path) {
 		return "parent"
 	}
+	if b.isSQLiteMode() {
+		entry, ok := b.sqliteEntry(path)
+		if ok && (entry.kind == sqliteEntryTable || entry.kind == sqliteEntryPrevious || entry.kind == sqliteEntryNext) {
+			return "database"
+		}
+		return "default"
+	}
 	if isSymlink(path) {
 		return "symlink"
 	}
@@ -583,6 +631,8 @@ func (b *Browser) fileType(path string) string {
 		return "image"
 	case hasSuffixAny(ext, ".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar", ".cbz", ".cbr"):
 		return "archive"
+	case hasSQLiteExtension(path):
+		return "database"
 	case hasSuffixAny(ext, ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"):
 		return "audio"
 	case hasSuffixAny(ext, ".mp4", ".mkv", ".webm", ".avi", ".mov", ".mpeg", ".mpg"):
@@ -656,6 +706,10 @@ func (b *Browser) currentArchive() *archiveCtx {
 
 // isParentEntry reports whether entry is the ".." entry of the current view.
 func (b *Browser) isParentEntry(entry string) bool {
+	if b.isSQLiteMode() {
+		item, ok := b.sqliteEntry(entry)
+		return ok && item.kind == sqliteEntryParent
+	}
 	if b.isArchiveMode() {
 		return entry == ".."
 	}
@@ -664,6 +718,10 @@ func (b *Browser) isParentEntry(entry string) bool {
 
 // isDirLike reports whether entry is a directory (real filesystem or archive).
 func (b *Browser) isDirLike(entry string) bool {
+	if b.isSQLiteMode() {
+		item, ok := b.sqliteEntry(entry)
+		return ok && (item.kind == sqliteEntryTable || item.kind == sqliteEntryPrevious || item.kind == sqliteEntryNext)
+	}
 	if b.isArchiveMode() {
 		return strings.HasSuffix(entry, "/")
 	}
@@ -671,6 +729,11 @@ func (b *Browser) isDirLike(entry string) bool {
 }
 
 func (b *Browser) entryLabel(path string) string {
+	if b.isSQLiteMode() {
+		if entry, ok := b.sqliteEntry(path); ok {
+			return b.icons[b.fileType(path)] + "  " + entry.label
+		}
+	}
 	name := baseName(path)
 	icon := b.icons[b.fileType(path)]
 	return icon + "  " + displayText(name)
@@ -763,6 +826,10 @@ func (b *Browser) changeDirectory(next, wanted string) {
 }
 
 func (b *Browser) goParent() {
+	if b.isSQLiteMode() {
+		b.goSQLiteParent()
+		return
+	}
 	if len(b.archiveStack) > 0 {
 		ctx := b.currentArchive()
 		if ctx.rel != "" {
@@ -919,6 +986,10 @@ func (b *Browser) enterSelected() {
 		return
 	}
 	path := b.files[b.idx]
+	if b.isSQLiteMode() {
+		b.enterSQLiteEntry(path)
+		return
+	}
 	switch {
 	case b.isParentEntry(path):
 		b.goParent()
@@ -940,6 +1011,21 @@ func (b *Browser) enterSelected() {
 			path = real
 		}
 		b.enterArchive(path)
+	case isSQLitePath(path):
+		label := path
+		if b.isArchiveMode() {
+			real, err := b.materializeEntry(b.currentArchive(), path)
+			if err != nil {
+				b.status = "Cannot extract " + baseName(path)
+				b.drawStatus()
+				b.flush()
+				return
+			}
+			label = b.archiveLabel() + "/" + path
+			b.enterSQLite(real, label, path)
+		} else {
+			b.enterSQLite(path, label, path)
+		}
 	default:
 		b.openSelected(0)
 	}
@@ -978,7 +1064,15 @@ func (b *Browser) openSelected(minimize int) {
 		return
 	}
 	path := b.files[b.idx]
+	if b.isSQLiteMode() {
+		b.enterSelected()
+		return
+	}
 	if b.isDirLike(path) || b.isArchive(path) {
+		b.enterSelected()
+		return
+	}
+	if isSQLitePath(path) {
 		b.enterSelected()
 		return
 	}
@@ -993,7 +1087,7 @@ func (b *Browser) doubleClickSelected() {
 	if b.idx < 0 {
 		return
 	}
-	if b.isDirLike(b.files[b.idx]) || b.isArchive(b.files[b.idx]) {
+	if b.isSQLiteMode() || b.isDirLike(b.files[b.idx]) || b.isArchive(b.files[b.idx]) || isSQLitePath(b.files[b.idx]) {
 		b.enterSelected()
 	} else {
 		b.openSelected(1)
@@ -1004,6 +1098,13 @@ func (b *Browser) refreshList() {
 	b.resetClick()
 	if b.idx >= 0 {
 		selected = b.files[b.idx]
+	}
+	if b.isSQLiteMode() {
+		if err := b.refreshSQLite(); err != nil {
+			b.status = "Cannot refresh SQLite database: " + safeSQLiteText(err.Error())
+			b.renderAll()
+			return
+		}
 	}
 	b.buildList()
 	b.idx = 0
@@ -1056,8 +1157,12 @@ func (b *Browser) changePreviewPage(delta int) {
 	b.page = previewPageAfter(b.page, delta, total)
 	b.updateInfo()
 	b.renderPreview()
-	b.drawInfo()
-	b.drawStatus()
+	if b.previewFullRedraw {
+		b.drawOverlay()
+	} else {
+		b.drawInfo()
+		b.drawStatus()
+	}
 	b.flush()
 }
 
@@ -1076,7 +1181,10 @@ func (b *Browser) runShellCommand(code string) {
 	}
 	f := ""
 	name := ""
-	if b.idx >= 0 && b.idx < len(b.files) {
+	if b.isSQLiteMode() {
+		f = b.sqlite.file
+		name = baseName(b.sqlite.label)
+	} else if b.idx >= 0 && b.idx < len(b.files) {
 		f = b.files[b.idx]
 		name = baseName(f)
 		if b.isArchiveMode() && !b.isParentEntry(f) && !b.isDirLike(f) {
@@ -1122,13 +1230,19 @@ func (b *Browser) renderAll() {
 }
 
 func (b *Browser) renderPreview() {
-	b.previewFullRedraw = false
+	// A full-width floating preview overwrites the sidebar's cells. Redraw the
+	// complete sidebar after the preview so it remains visually on top.
+	b.previewFullRedraw = b.navigationVisible && !b.navigationPinned
 	if b.idx < 0 || b.idx >= len(b.files) {
 		b.clearPreview()
 		b.drawPreviewMessage("EMPTY DIRECTORY", "No entries to preview.", "")
 		return
 	}
 	path := b.files[b.idx]
+	if b.isSQLiteMode() {
+		b.drawSQLitePreview(path)
+		return
+	}
 	if b.isArchiveMode() {
 		if b.isParentEntry(path) || b.isDirLike(path) {
 			b.previewWasGraphic = false
@@ -1155,7 +1269,7 @@ func (b *Browser) renderPreview() {
 			b.documentPreviewer = newPreviewDocumentRenderer(b.cacheDir)
 		}
 		pageWidth, pageHeight := 0.0, 0.0
-		if strings.EqualFold(filepath.Ext(path), ".tex") {
+		if isRenderedDocument(path) {
 			pageWidth, pageHeight = b.previewPDFPageSize()
 		}
 		document, err := b.documentPreviewer.renderSized(path, pageWidth, pageHeight)
@@ -1227,6 +1341,8 @@ func (b *Browser) renderPreview() {
 	title := displayText(baseName(path))
 	if b.isArchive(path) {
 		b.drawPreviewMessage("ARCHIVE", title, "Enter or double-click to browse the contents.")
+	} else if isSQLitePath(path) {
+		b.drawPreviewMessage("SQLITE DATABASE", title, "Enter or double-click to browse tables and records.")
 	} else if isDir(path) {
 		b.drawPreviewMessage("DIRECTORY", title, "Double-click or press Enter to browse.")
 	} else if !isReadable(path) {
@@ -1305,6 +1421,7 @@ func (b *Browser) drawMp3Preview(path string) {
 func (b *Browser) drawMp3View(path string) {
 	b.paintStop()
 	b.drawMp3Preview(path)
+	b.drawNavigationSidebar()
 	switch {
 	case b.playback != nil:
 		b.status = "Playing  q stop"

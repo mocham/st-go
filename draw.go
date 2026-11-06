@@ -1,8 +1,10 @@
 package main
 
 import (
+	"image"
 	"sync"
 
+	"st-go/limits"
 	"st-go/term"
 )
 
@@ -12,12 +14,17 @@ var (
 	framebuf []uint32
 )
 
-func ensureFramebuffer(w, h int) {
-	if len(framebuf) >= w*h && fbW == w && fbH == h {
-		return
+func ensureFramebuffer(w, h int) bool {
+	size, valid := limits.RGBA("framebuffer", w, h)
+	if !valid {
+		return false
 	}
-	framebuf = make([]uint32, w*h)
+	if len(framebuf) >= w*h && fbW == w && fbH == h {
+		return true
+	}
+	framebuf = make([]uint32, size/4)
 	fbW, fbH = w, h
+	return true
 }
 
 func (t *Terminal) clearFramebuffer() {
@@ -39,17 +46,22 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// glyphCache keyed by (rune, fg, bg, wide)
+// Include raster dimensions so a cached cell cannot be reused at another size.
 type glyphKey struct {
-	u    rune
-	fg   uint32
-	bg   uint32
-	wide bool
+	u              rune
+	fg, bg         uint32
+	w, h, baseline int
 }
 
+// True-color output can produce a new key on every cell. Bound both pixel
+// storage and map overhead instead of retaining every color seen forever.
+const maxGlyphCacheBytes = limits.GlyphCacheBytes
+const maxGlyphCacheEntries = limits.GlyphCacheEntries
+
 var (
-	glyphCache = make(map[glyphKey][]uint32)
-	glyphMu    sync.RWMutex
+	glyphCache      = make(map[glyphKey][]uint32)
+	glyphCacheBytes int
+	glyphMu         sync.RWMutex
 )
 
 // drawGlyphAt renders rune u with fg/bg colors into the framebuffer at cell (x,y).
@@ -57,43 +69,45 @@ func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
 	if fbW < 1 || fbH < 1 {
 		return
 	}
-	key := glyphKey{u, fg, bg, wide}
+	w := t.cw
+	if wide {
+		w *= 2
+	}
+	key := glyphKey{u: u, fg: fg, bg: bg, w: w, h: t.ch, baseline: t.baseline}
 	glyphMu.RLock()
 	img, ok := glyphCache[key]
 	glyphMu.RUnlock()
 	if !ok {
-		w := t.cw
-		if wide {
-			w *= 2
-		}
 		_, img = makeGlyph(u, fg, bg, w, t.ch, t.baseline)
+		if len(img) == 0 {
+			return
+		}
 		glyphMu.Lock()
-		glyphCache[key] = img
+		if size := len(img) * 4; size <= maxGlyphCacheBytes {
+			if _, exists := glyphCache[key]; !exists {
+				if glyphCacheBytes+size > maxGlyphCacheBytes || len(glyphCache) >= maxGlyphCacheEntries {
+					clear(glyphCache)
+					glyphCacheBytes = 0
+				}
+				glyphCache[key] = img
+				glyphCacheBytes += size
+			}
+		}
 		glyphMu.Unlock()
 	}
 	// blit into framebuffer
 	px := t.borderpx + x*t.cw
 	py := t.borderpx + y*t.ch
-	w := t.cw
-	if wide {
-		w *= 2
-	}
-	if py < 0 || py >= fbH {
-		return
-	}
-	if px < 0 || px >= fbW {
-		return
-	}
-	if px+w > fbW {
-		w = fbW - px
-	}
-	if py+t.ch > fbH {
-		return
-	}
-	for yy := 0; yy < t.ch; yy++ {
-		dst := (py+yy)*fbW + px
-		src := yy * w
-		copy(framebuf[dst:dst+w], img[src:src+w])
+	t.blitTerminalPixels(px, py, w, t.ch, img)
+}
+
+// Clip at the final pixel write as well as at the logical terminal grid. In
+// particular, a wide glyph/cursor at the divider must not touch the preview.
+func (t *Terminal) blitTerminalPixels(px, py, w, h int, pixels []uint32) {
+	r := image.Rect(px, py, px+w, py+h).Intersect(t.terminalClip())
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		src := (y-py)*w + r.Min.X - px
+		copy(framebuf[y*fbW+r.Min.X:y*fbW+r.Max.X], pixels[src:src+r.Dx()])
 	}
 }
 
@@ -102,16 +116,12 @@ func (t *Terminal) fillRect(argb uint32, px, py, w, h int) {
 	if fbW < 1 || fbH < 1 {
 		return
 	}
-	px = clampInt(px, 0, fbW-1)
-	py = clampInt(py, 0, fbH-1)
-	if px+w > fbW {
-		w = fbW - px
+	if w <= 0 || h <= 0 {
+		return
 	}
-	if py+h > fbH {
-		h = fbH - py
-	}
-	for yy := 0; yy < h; yy++ {
-		dst := framebuf[(py+yy)*fbW+px : (py+yy)*fbW+px+w]
+	r := image.Rect(px, py, px+w, py+h).Intersect(t.terminalClip())
+	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
+		dst := framebuf[yy*fbW+r.Min.X : yy*fbW+r.Max.X]
 		for i := range dst {
 			dst[i] = argb
 		}

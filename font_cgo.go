@@ -13,6 +13,8 @@ import (
 	_ "embed"
 	"log"
 	"unsafe"
+
+	"st-go/limits"
 )
 
 //go:embed Monaco_Linux.ttf
@@ -29,6 +31,9 @@ var ft ft2
 // font file is used (the -f command-line override). Fallback slots are
 // resolved by the C plugin as before.
 func loadFonts(fontName string, pixsize int) bool {
+	if _, valid := limits.RGBA("font size", pixsize, pixsize); !valid {
+		return false
+	}
 	if fontName == "" {
 		// register the embedded font on slot 0 (must outlive the library;
 		// embeddedFont is a package global, so it does).
@@ -53,7 +58,11 @@ func makeGlyph(r rune, fg, bg uint32, outW, outH, baseline int) (int, []uint32) 
 	if outW < 1 || outH < 1 {
 		return outW, nil
 	}
-	dst := make([]uint32, outW*outH)
+	size, valid := limits.RGBA("glyph", outW, outH)
+	if !valid {
+		return outW, nil
+	}
+	dst := make([]uint32, size/4)
 	if r < 0x20 || r == 0x7f || r == 0 {
 		// control characters have no glyph; fill with background
 		for i := range dst {

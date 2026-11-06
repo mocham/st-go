@@ -170,12 +170,13 @@ type CSIEscape struct {
 }
 
 type STREscape struct {
-	typ  byte
-	buf  []byte
-	siz  int
-	len  int
-	args []string
-	narg int
+	typ     byte
+	buf     []byte
+	discard bool // oversized string: ignore everything through its terminator
+	siz     int
+	len     int
+	args    []string
+	narg    int
 }
 
 type Term struct {
@@ -692,6 +693,11 @@ func (t *Term) TakeRegions() []Region {
 	t.regions = nil
 	return regs
 }
+
+// Invalidate queues cells for repaint without changing their contents. A
+// frontend can use this to schedule retained-surface work through the same
+// synchronized-output/latency dispatcher, then call PaintDirty.
+func (t *Term) Invalidate(r Region) { t.markDirty(r.X1, r.Y1, r.X2, r.Y2) }
 
 // HasPendingPaint reports whether regions await repaint.
 func (t *Term) HasPendingPaint() bool { return len(t.regions) > 0 }

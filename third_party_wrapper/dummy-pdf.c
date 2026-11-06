@@ -10,7 +10,7 @@
 int
 pdf_render_page(const unsigned char *pdf_data, int pdf_len,
                 int page, int outW, int outH,
-                unsigned char *out_bgra)
+                unsigned char *out_bgra, int fit_width)
 {
 	(void)pdf_data;
 	(void)pdf_len;
@@ -18,6 +18,7 @@ pdf_render_page(const unsigned char *pdf_data, int pdf_len,
 	(void)outW;
 	(void)outH;
 	(void)out_bgra;
+	(void)fit_width;
 	return 0; /* failure: no PDF support */
 }
 
