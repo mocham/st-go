@@ -34,6 +34,9 @@ type RegionImage struct {
 	KeepPage bool
 	// Continuous displays PDF pages as one locally scrollable, fit-width view.
 	Continuous bool
+	// Background is an opaque 0xAARRGGBB paper/canvas color for continuous
+	// PDF views. Zero keeps the default white background.
+	Background uint32
 }
 
 // RegionHooks is an optional frontend capability. Keeping rectangle-based
@@ -169,6 +172,16 @@ func (t *Term) dslRegion(args []string) error {
 		req := RegionImage{Path: t.resolveImagePath(args[2]), Options: ImageDecodeOptions{FitContain: true}}
 		for i := 3; i < len(args); i++ {
 			switch args[i] {
+			case "background":
+				if i+1 >= len(args) || len(args[i+1]) != 7 || args[i+1][0] != '#' {
+					return fmt.Errorf("region background requires a #RRGGBB color")
+				}
+				value, err := strconv.ParseUint(args[i+1][1:], 16, 24)
+				if err != nil {
+					return fmt.Errorf("invalid region background color %q", args[i+1])
+				}
+				req.Background = 0xff000000 | uint32(value)
+				i++
 			case "continuous":
 				req.Continuous = true
 			case "fit-contain", "fit-width", "fit-height", "native":
@@ -194,6 +207,9 @@ func (t *Term) dslRegion(args []string) error {
 			default:
 				return fmt.Errorf("unsupported region open option %q", args[i])
 			}
+		}
+		if req.Background != 0 && !req.Continuous {
+			return fmt.Errorf("region background requires a continuous PDF view")
 		}
 		return hooks.OpenRegion(id, req)
 	default:

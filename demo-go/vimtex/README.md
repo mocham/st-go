@@ -25,6 +25,15 @@ for 60% Vim and 40% preview. Ratios are rounded to whole percentages, with
 1–99% available for the preview. `-width PERCENT` remains available as an
 alternative; use one of these options at a time.
 
+The preview background defaults to a **soft warm off-white (`#f7f5ef`)**.
+Use `-preview-bg '#RRGGBB'` (or its short alias `-bg`) before the filename to
+choose the PDF paper and surrounding canvas color. For example:
+
+```sh
+./vimtex -preview-bg '#eef4f8' document.tex  # pale blue
+./vimtex -bg '#ffffff' document.tex         # white
+```
+
 ## Updating and navigation
 
 - The first preview renders immediately in a background worker.
@@ -89,7 +98,7 @@ when Vim output arrives in fragments. The main terminal's narrowed window size
 is propagated to the child on `SIGWINCH`.
 
 The saved-document PDF is atomically replaced at one private session path.
-Updates use `region secondary open PATH fit-width continuous`. st-go retains the
+Updates use `region secondary open PATH background '#RRGGBB' fit-width continuous`. st-go retains the
 decoded PDF on its worker and prefetches a bounded strip around the visible area;
 scroll frames copy those pixels at roughly 60 Hz. Save-time LaTeX renderer caches
 are released per revision. Source/PDF/strip budgets use `st-go/limits`, and

@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	documentPreviewVersion = "latexpdf-document-v9-red-unknown-commands"
+	documentPreviewVersion = "latexpdf-document-v10-table-rows-eqnarray-dynkin"
 	maxPreviewDocumentSize = 12 << 20
 )
 

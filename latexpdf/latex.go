@@ -163,6 +163,8 @@ func rewriteLatexDiffCommands(source string) string {
 }
 
 func preprocessKnownConditionals(source string) string {
+	source = selectTeXConditional(source, `\iffalse`, false)
+	source = selectTeXConditional(source, `\iftrue`, true)
 	source = selectDefinedTeXConditionals(source)
 	showSolutions := strings.Contains(source, `\showsolutionstrue`) && !strings.Contains(source, `\showsolutionsfalse`)
 	source = regexp.MustCompile(`\\newif\s*\\ifshowsolutions`).ReplaceAllString(source, "")
@@ -491,7 +493,7 @@ func (context *latexRenderContext) renderEnvironment(environment, options, conte
 		return context.renderBibliography(content, contentOffset)
 	case "equation", "displaymath":
 		return context.renderNumberedMath(content, environmentOffset)
-	case "align", "alignat", "flalign", "split":
+	case "align", "alignat", "flalign", "split", "eqnarray":
 		mathContent := stripMathTags(stripAlignatArgument(content))
 		return context.wrapNumberedMath(context.renderMath(`\begin{aligned}`+mathContent+`\end{aligned}`, true), environmentOffset, content)
 	case "gather", "multline":
@@ -1132,15 +1134,34 @@ func (context *latexRenderContext) renderInline(source string) string {
 					source = source[end:]
 					continue
 				}
+				if command == "bfseries" {
+					output.WriteString("<strong>" + context.renderInline(source[commandEnd:]) + "</strong>")
+					return output.String()
+				}
 			case "emph", "textit", "textsl":
 				if argument, end, ok := parseBraced(source, position); ok {
 					output.WriteString("<em>" + context.renderInline(argument) + "</em>")
 					source = source[end:]
 					continue
 				}
+			case "it", "itshape", "sl", "slshape":
+				output.WriteString("<em>" + context.renderInline(source[commandEnd:]) + "</em>")
+				return output.String()
 			case "texttt":
 				if argument, end, ok := parseBraced(source, position); ok {
 					output.WriteString("<code>" + template.HTMLEscapeString(texLiteralText(argument)) + "</code>")
+					source = source[end:]
+					continue
+				}
+			case "tt", "ttfamily":
+				output.WriteString("<code>" + template.HTMLEscapeString(texLiteralText(source[commandEnd:])) + "</code>")
+				return output.String()
+			case "rm", "rmfamily", "normalfont":
+				source = source[commandEnd:]
+				continue
+			case "dynkin":
+				if rendered, end, ok := context.renderDynkinCommand(source, commandEnd); ok {
+					output.WriteString(rendered)
 					source = source[end:]
 					continue
 				}
@@ -1462,6 +1483,12 @@ func consumeNonRenderingTeXCommand(source, command string, commandEnd int) (int,
 		}
 		return cursor, true
 	case "definecolor", "providecolor", "DeclarePairedDelimiterX":
+		cursor = consumeOptional(cursor)
+		if end, ok := consumeBraced(cursor, 3); ok {
+			return end, true
+		}
+		return cursor, true
+	case "addcontentsline":
 		cursor = consumeOptional(cursor)
 		if end, ok := consumeBraced(cursor, 3); ok {
 			return end, true
@@ -2611,6 +2638,15 @@ func extractPrimitiveMacroNames(source string) map[string]bool {
 func normalizeMathControlSpaces(source string) string {
 	var output strings.Builder
 	for position := 0; position < len(source); {
+		// A TeX table row terminator followed by source whitespace is `\\` plus
+		// whitespace, not a one-character command-space. Examining its second
+		// backslash in isolation would turn `\\\n` into `\\,` and visibly add a
+		// comma at the beginning of the next matrix/alignment row.
+		if strings.HasPrefix(source[position:], `\\`) {
+			output.WriteString(`\\`)
+			position += 2
+			continue
+		}
 		if source[position] != '\\' || position+1 >= len(source) || !unicode.IsSpace(rune(source[position+1])) {
 			_, size := utf8.DecodeRuneInString(source[position:])
 			if size <= 0 {

@@ -250,7 +250,7 @@ func run(o options, in *os.File, out io.Writer) error {
 			if err := publishPDF(previewPath, pending.pdf); err != nil {
 				limits.Report("vimtex publish", "%v", err)
 			} else {
-				if err := dcs(out, "region secondary open "+quoteDSL(previewPath)+" fit-width continuous"); err != nil {
+				if err := dcs(out, "region secondary open "+quoteDSL(previewPath)+" background "+quoteDSL(o.previewBG)+" fit-width continuous"); err != nil {
 					return err
 				}
 				clock.lastPublished = time.Now()

@@ -16,12 +16,14 @@ import (
 )
 
 const minimumGap = 2 * time.Second
+const defaultPreviewBG = "#f7f5ef"
 
 type options struct {
 	file         string
 	vim          string
 	vimArgs      []string
 	previewWidth int
+	previewBG    string
 	gap          time.Duration
 }
 
@@ -33,6 +35,8 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	flags.StringVar(&o.vim, "vim", "vim", "Vim executable")
 	flags.StringVar(&split, "split", "4:6", "Vim:preview width ratio (positive integers)")
 	flags.IntVar(&o.previewWidth, "width", 60, "right preview width, percent (1–99; alternative to -split)")
+	flags.StringVar(&o.previewBG, "preview-bg", defaultPreviewBG, "preview background color (#RRGGBB)")
+	flags.StringVar(&o.previewBG, "bg", defaultPreviewBG, "alias for -preview-bg")
 	flags.DurationVar(&o.gap, "gap", 2100*time.Millisecond, "minimum file-refresh gap (must be greater than 2s)")
 	flags.Usage = func() {
 		fmt.Fprintln(output, "Usage: vimtex [options] existing.tex [vim-options...]\n\nRun inside st-go. Save to refresh; wheel scrolls the preview smoothly.\n:VimtexPreview [line] and :VimtexScroll count navigate explicitly from Vim.")
@@ -73,6 +77,13 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	if o.previewWidth < 1 || o.previewWidth > 99 {
 		return o, fmt.Errorf("-width must be between 1 and 99")
 	}
+	if len(o.previewBG) != 7 || o.previewBG[0] != '#' {
+		return o, fmt.Errorf("-preview-bg must be a color in #RRGGBB format")
+	}
+	if _, err := strconv.ParseUint(o.previewBG[1:], 16, 24); err != nil {
+		return o, fmt.Errorf("-preview-bg must be a color in #RRGGBB format")
+	}
+	o.previewBG = strings.ToLower(o.previewBG)
 	path, err := filepath.Abs(flags.Arg(0))
 	if err != nil {
 		return o, err

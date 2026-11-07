@@ -14,8 +14,9 @@ mathematics; `\underline` and `\uline` are native PDF decorations as well.
 Standalone Xy-pic `\xymatrix` and `tikzcd` grids are laid out as native vector
 diagrams, including labeled, equality, dashed, hooked, diagonal, and multi-cell
 arrows, path offsets, and curved bypass arrows. Numbered equations containing a
-`tikzcd` use the same renderer. The native TikZ subset covers positioned and
-relative nodes, named styles, boxes, lines and arrowheads, dashed paths,
+`tikzcd` use the same renderer. Labelled A/B/C/D `\dynkin` diagrams are also
+native vectors. The native TikZ subset covers positioned and relative nodes,
+named styles, boxes, lines and arrowheads, dashed paths,
 rectangles, circles, Bézier curves, grids, circular arcs with centered text
 decorations, scoped shifts, numeric plots, and simple `\foreach` lists and
 integer ranges. TikZ
@@ -25,7 +26,8 @@ being represented as supported.
 
 Common package-level math constructs are normalized before MathJax rendering,
 including declared math alphabets, `\mathlarger`, graphicx scaling/rotation
-wrappers, `\llbracket`, `\rrbracket`, `\dag`, and math-mode footnotes. TeX
+wrappers, `\llbracket`, `\rrbracket`, `\dag`, math-mode footnotes, and legacy
+`eqnarray` displays. TeX
 primitive definitions remain deliberately unsupported and are not mistaken for
 their standard command names. Unrecognized commands remain diagnostics but are
 shown explicitly as red `\Command` literals in prose and vector mathematics;

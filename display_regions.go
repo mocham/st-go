@@ -38,6 +38,7 @@ type regionBitmap struct {
 	width, height      int
 	page               int // resolved zero-based page, including modulo wrapping
 	top, contentHeight int // cached strip origin and full continuous height
+	background         uint32
 }
 
 type regionJob struct {
@@ -177,6 +178,9 @@ func (t *Terminal) OpenRegion(id term.RegionID, request term.RegionImage) error 
 	if !limits.Check("region path", int64(len(request.Path)), limits.ControlBytes) {
 		return fmt.Errorf("region path exceeds resource limit")
 	}
+	if request.Background != 0 && (!request.Continuous || request.Background>>24 != 255) {
+		return fmt.Errorf("region background requires an opaque color and a continuous PDF view")
+	}
 	if request.KeepPage && surface.request != nil {
 		request.Options.Page = surface.request.Options.Page
 	}
@@ -187,6 +191,10 @@ func (t *Terminal) OpenRegion(id term.RegionID, request term.RegionImage) error 
 	}
 	surface.request = &request
 	t.queueRegionImage()
+	if len(surface.bitmap.pixels) == 0 {
+		surface.dirty = true
+		t.requestRegionPaint()
+	}
 	return nil
 }
 
@@ -228,7 +236,17 @@ func (t *Terminal) queueRegionImage() {
 	surface.viewWidth = r.Dx()
 	surface.scrollFailed = false
 	t.enqueueRegionJob(regionJob{generation: s.generation, request: *surface.request,
-		width: r.Dx(), height: r.Dy(), background: t.colorAt(ColDefaultBg), position: int(surface.scrollY)})
+		width: r.Dx(), height: r.Dy(), background: surface.background(t.colorAt(ColDefaultBg)), position: int(surface.scrollY)})
+}
+
+func (s *regionSurface) background(fallback uint32) uint32 {
+	if s.request != nil && s.request.Continuous {
+		if s.request.Background != 0 {
+			return s.request.Background
+		}
+		return 0xffffffff
+	}
+	return fallback
 }
 
 func (t *Terminal) cancelRegionDecode() {
@@ -293,7 +311,7 @@ func (t *Terminal) regionDecoder(jobs <-chan regionJob, done <-chan struct{}) {
 					}
 				}
 				if err == nil {
-					bitmap, err = document.render(job.width, job.height, job.position)
+					bitmap, err = document.render(job.width, job.height, job.position, job.background)
 				}
 			} else {
 				document.close()
@@ -495,7 +513,7 @@ func (t *Terminal) queueRegionScroll() {
 		return
 	}
 	t.enqueueRegionJob(regionJob{generation: t.displayRegions.generation, request: *s.request,
-		width: r.Dx(), height: r.Dy(), position: position, background: t.colorAt(ColDefaultBg)})
+		width: r.Dx(), height: r.Dy(), position: position, background: s.background(t.colorAt(ColDefaultBg))})
 }
 
 // paintSecondary touches only the secondary rectangle. Pixels are owned by
@@ -509,7 +527,12 @@ func (t *Terminal) paintSecondary() image.Rectangle {
 	r := t.secondaryPixels()
 	pane := t.secondaryPanePixels()
 	bitmap := surface.bitmap
-	bg := t.colorAt(ColDefaultBg)
+	bg := surface.background(t.colorAt(ColDefaultBg))
+	if bitmap.contentHeight > 0 && bitmap.background != 0 {
+		// Keep the displayed revision's paper and canvas colors together until
+		// its asynchronous replacement succeeds.
+		bg = bitmap.background
+	}
 	// Divider occupies preview pixels, never the Vim grid or its erase area.
 	for y := pane.Min.Y; y < pane.Max.Y; y++ {
 		for x := pane.Min.X; x < r.Min.X; x++ {
@@ -524,7 +547,7 @@ func (t *Terminal) paintSecondary() image.Rectangle {
 				continue
 			}
 			for x := r.Min.X; x < r.Max.X; x++ {
-				pixel := uint32(0xffffffff)
+				pixel := bg
 				if sy >= 0 && sy < bitmap.height {
 					sx := (x - r.Min.X) * bitmap.width / max(1, r.Dx())
 					pixel = bitmap.pixels[sy*bitmap.width+sx]

@@ -992,7 +992,7 @@ func isNumberedEquationEnvironment(environment string) bool {
 		return false
 	}
 	switch environment {
-	case "equation", "align", "alignat", "flalign", "gather", "multline":
+	case "equation", "align", "alignat", "flalign", "gather", "multline", "eqnarray":
 		return true
 	default:
 		return false
@@ -1006,7 +1006,7 @@ func environmentLabels(content string, theorems map[string]latexTheoremDeclarati
 			cutoff = nested
 		}
 	}
-	for _, environment := range []string{"equation", "align", "alignat", "flalign", "gather", "multline", "enumerate"} {
+	for _, environment := range []string{"equation", "align", "alignat", "flalign", "gather", "multline", "eqnarray", "enumerate"} {
 		if nested := strings.Index(content, `\begin{`+environment+`}`); nested >= 0 && nested < cutoff {
 			cutoff = nested
 		}

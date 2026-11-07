@@ -15,8 +15,8 @@ import (
 
 func continuousTestPDF(cropBox string) []byte {
 	streams := []string{
-		"0 1 0 rg 0 0 100 400 re f 1 0 0 rg 0 300 100 100 re f\n",
-		"0 0 1 rg 0 0 100 200 re f\n",
+		"0 1 0 rg 10 0 90 400 re f 1 0 0 rg 10 300 90 100 re f\n",
+		"0 0 1 rg 10 0 90 200 re f\n",
 	}
 	objects := []string{"<</Type/Catalog/Pages 2 0 R>>", "<</Type/Pages/Kids[3 0 R 5 0 R]/Count 2>>"}
 	for i, height := range []int{400, 200} {
@@ -56,7 +56,7 @@ func TestContinuousPDFStripAcrossPages(t *testing.T) {
 		{0, 50, 0xffff0000}, {0, 150, 0xff00ff00},
 		{360, 350, 0xff00ff00}, {360, 450, 0xff0000ff}, {999, 590, 0xff0000ff},
 	} {
-		bitmap, err := pdf.render(100, 80, tc.position)
+		bitmap, err := pdf.render(100, 80, tc.position, 0xfff7f5ef)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,10 +66,16 @@ func TestContinuousPDFStripAcrossPages(t *testing.T) {
 		if got := bitmap.pixels[(tc.y-bitmap.top)*bitmap.width+50]; got != tc.color {
 			t.Fatalf("document pixel at y=%d: %#x, want %#x (strip top %d)", tc.y, got, tc.color, bitmap.top)
 		}
+		if got := bitmap.pixels[(tc.y-bitmap.top)*bitmap.width]; got != 0xfff7f5ef {
+			t.Fatalf("paper color at y=%d: %#x, want warm off-white", tc.y, got)
+		}
 	}
-	resized, err := pdf.render(200, 80, 820)
+	resized, err := pdf.render(200, 80, 820, 0xffeaf2f8)
 	if err != nil || resized.contentHeight != 1200 {
 		t.Fatalf("fit-width resize failed: height=%d, err=%v", resized.contentHeight, err)
+	}
+	if resized.pixels[0] != 0xffeaf2f8 {
+		t.Fatal("resized strip lost its custom paper color")
 	}
 }
 
@@ -79,7 +85,7 @@ func TestContinuousPDFCropBoxKeepsContentAndJoinsPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pdf.close()
-	bitmap, err := pdf.render(100, 150, 0)
+	bitmap, err := pdf.render(100, 150, 0, 0xffffffff)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +168,7 @@ func TestContinuousRegionWorkerCachesDocumentAndPreservesPosition(t *testing.T) 
 		t.Fatal(err)
 	}
 	trm.mu.Lock()
-	err := trm.OpenRegion(term.SecondaryRegion, term.RegionImage{Path: path, Continuous: true})
+	err := trm.OpenRegion(term.SecondaryRegion, term.RegionImage{Path: path, Continuous: true, Background: 0xfff7f5ef})
 	trm.mu.Unlock()
 	if err != nil {
 		t.Fatal(err)
@@ -198,9 +204,12 @@ func TestContinuousRegionWorkerCachesDocumentAndPreservesPosition(t *testing.T) 
 	})
 	trm.mu.Lock()
 	r := trm.secondaryPixels()
-	if pixel := framebuf[(r.Max.Y-2)*fbW+r.Min.X+1]; pixel != 0xff0000ff {
+	if pixel := framebuf[(r.Max.Y-2)*fbW+r.Min.X+r.Dx()/2]; pixel != 0xff0000ff {
 		trm.mu.Unlock()
 		t.Fatalf("scroll-to-end did not paint second page: %#x", pixel)
+	}
+	if framebuf[(r.Max.Y-2)*fbW+r.Min.X] != 0xfff7f5ef {
+		t.Error("scroll prefetch lost the paper color")
 	}
 	position := trm.displayRegions.secondary.scrollY
 	trm.mu.Unlock()
@@ -208,10 +217,26 @@ func TestContinuousRegionWorkerCachesDocumentAndPreservesPosition(t *testing.T) 
 		t.Fatal(err)
 	}
 	trm.mu.Lock()
-	_ = trm.OpenRegion(term.SecondaryRegion, term.RegionImage{Path: path, Continuous: true})
+	_ = trm.OpenRegion(term.SecondaryRegion, term.RegionImage{Path: path, Continuous: true, Background: 0xfff7f5ef})
 	trm.mu.Unlock()
 	await(func(s *regionSurface) bool { return !s.loading && s.scrollY == position })
+	// A very narrow fit-width view makes this document shorter than the pane.
+	// The canvas below it must have exactly the same color as the PDF paper.
 	trm.mu.Lock()
+	err = trm.SetRegions([]term.DisplayRegion{
+		{ID: term.MainRegion, Bounds: term.CellRect{Width: 19, Height: 5}},
+		{ID: term.SecondaryRegion, Bounds: term.CellRect{X: 19, Width: 1, Height: 5}},
+	})
+	trm.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	await(func(s *regionSurface) bool { return !s.loading && s.bitmap.width == 1 })
+	trm.mu.Lock()
+	r = trm.secondaryPixels()
+	if framebuf[(r.Max.Y-1)*fbW+r.Min.X] != 0xfff7f5ef {
+		t.Error("canvas below the document lost the paper color")
+	}
 	_ = trm.ClearRegion(term.SecondaryRegion)
 	if trm.displayRegions.secondary.bitmap.contentHeight != 0 {
 		t.Error("clear retained continuous content")

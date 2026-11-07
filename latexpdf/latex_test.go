@@ -479,6 +479,34 @@ question
 	if got := preprocessKnownConditionals(malformed); got != malformed {
 		t.Fatalf("malformed conditional changed from %q to %q", malformed, got)
 	}
+	plain := `before\iffalse hidden \iftrue nested\fi\else visible\fi after`
+	if got := preprocessKnownConditionals(plain); got != "before visible after" {
+		t.Fatalf("plain true/false conditional = %q", got)
+	}
+}
+
+func TestEqnarrayRendersAsNumberedVectorMath(t *testing.T) {
+	source := `\newcommand{\gr}{\operatorname{gr}}
+\begin{document}
+\begin{eqnarray}
+\label{eq:graded}\gr^0 V&=&Z\\
+\gr^1 V&=&W
+\end{eqnarray}
+See \eqref{eq:graded}.
+\end{document}`
+	rendered := newLatexRenderer().render(source, "eqnarray-vector-math")
+	body := string(rendered.Body)
+	if rendered.MathErrors != 0 || strings.Contains(body, `class="unknown-command"`) || strings.Contains(body, `data-mml-node="merror"`) {
+		t.Fatalf("eqnarray render = errors %d, body %s", rendered.MathErrors, body)
+	}
+	if strings.Contains(body, `data-c="2C"`) {
+		t.Fatalf("row-ending source whitespace became a visible comma: %s", body)
+	}
+	for _, wanted := range []string{`class="math-display"`, `\gr^0 V`, `href="#ref-eq-graded"`, `class="equation-numbers"`} {
+		if !strings.Contains(body, wanted) {
+			t.Errorf("eqnarray output is missing %q: %s", wanted, body)
+		}
+	}
 }
 
 func TestMathJaxCompatibilityRewrites(t *testing.T) {

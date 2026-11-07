@@ -31,6 +31,11 @@ type previewFrame struct {
 	at      time.Time
 }
 
+func (f previewFrame) path() string {
+	path, _, _ := strings.Cut(strings.TrimPrefix(f.command, "region secondary open '"), "' background ")
+	return path
+}
+
 type vimtexPTY struct {
 	master *os.File
 	cmd    *exec.Cmd
@@ -178,7 +183,10 @@ func TestVimtexPTYSaveRefreshResizeAndCleanup(t *testing.T) {
 		t.Fatalf("Vim did not receive pane width: %q, %v", data, err)
 	}
 	first := f.previews()[0]
-	path := strings.TrimSuffix(strings.TrimPrefix(first.command, "region secondary open '"), "' fit-width continuous")
+	path := first.path()
+	if !strings.Contains(first.command, "background '"+defaultPreviewBG+"'") {
+		t.Fatal("initial preview omitted its background color")
+	}
 	pdf, err := os.ReadFile(path)
 	if err != nil || !bytes.HasPrefix(pdf, []byte("%PDF-")) {
 		t.Fatalf("missing first PDF: %s, %v", path, err)
@@ -190,6 +198,9 @@ func TestVimtexPTYSaveRefreshResizeAndCleanup(t *testing.T) {
 	f.master.Write([]byte(":call setline(3, 'Latest saved version.')\r:w\r"))
 	awaitPTY(t, f, func() bool { return len(f.previews()) >= 2 }, "saved preview")
 	second := f.previews()[1]
+	if !strings.Contains(second.command, "background '"+defaultPreviewBG+"'") {
+		t.Fatal("save refresh omitted its background color")
+	}
 	if second.at.Sub(first.at) <= 2*time.Second || !strings.HasSuffix(second.command, "fit-width continuous") {
 		t.Fatalf("bad redraw interval/continuous mode: %v, %q", second.at.Sub(first.at), second.command)
 	}
@@ -281,7 +292,7 @@ func TestVimtexPTYVimscriptAndWheelNavigation(t *testing.T) {
 	writeSource(t, source, document.String())
 	f := startVimtexPTY(t, source, ready)
 	awaitPTY(t, f, func() bool { return len(f.previews()) == 1 }, "initial source viewport")
-	path := strings.TrimSuffix(strings.TrimPrefix(f.previews()[0].command, "region secondary open '"), "' fit-width continuous")
+	path := f.previews()[0].path()
 	first, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

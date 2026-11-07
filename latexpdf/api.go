@@ -17,7 +17,7 @@ const (
 	// DefaultRenderPageBytes is the default source-size target used by
 	// PreparePages when paginating HTML views.
 	DefaultRenderPageBytes = defaultRenderPageBytes
-	pdfFormatVersion       = "latexpdf-native-v13-red-unknown-commands"
+	pdfFormatVersion       = "latexpdf-native-v14-table-rows-eqnarray-dynkin"
 )
 
 // Document contains an expanded LaTeX source document and its PDF metadata.

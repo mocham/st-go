@@ -161,7 +161,7 @@ discarded. Input/bitmap limits apply, and failures are logged under `/tmp/`.
 | `region split 40` | Reserve 40 columns initially |
 | `region layout main X Y W H secondary X Y W H` | Atomically set explicit cell rectangles |
 | `region secondary open '<path>' [page N\|current] [fit-contain\|fit-width\|fit-height\|native]` | Replace the preview with a static image or PDF page |
-| `region secondary open '<path>' fit-width continuous` | Display a continuous PDF with locally animated pixel scrolling |
+| `region secondary open '<path>' fit-width continuous [background '#RRGGBB']` | Display a continuous PDF with locally animated pixel scrolling and optional paper/canvas color |
 | `region secondary clear` | Clear the preview, retaining the split |
 | `region secondary scroll report\|pages` | Report navigation to the application, or use default PDF-page scrolling |
 | `region secondary scroll N` / `region secondary seek N` | Scroll locally in continuous mode, or emit an application navigation event |
@@ -217,6 +217,8 @@ pixels without waiting for a LaTeX render. Preview padding is trimmed and unused
 page-bottom whitespace is cropped. `:VimtexPreview [line]` provides an approximate
 source-line jump; `:VimtexScroll count` scrolls by wheel steps from Vimscript.
 Ordinary keyboard input stays with Vim.
+The preview uses a soft warm off-white (`#f7f5ef`) background by default. Set
+`-preview-bg '#RRGGBB'` (alias `-bg`) before the filename to choose another color.
 
 ## Requirements
 

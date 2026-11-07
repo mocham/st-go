@@ -54,8 +54,8 @@ func TestDisplayRegionProtocol(t *testing.T) {
 	if len(h.images) != 2 || !h.images[1].KeepPage {
 		t.Fatal("page current was not passed to the frontend")
 	}
-	core.Twrite([]byte("\x1bPregion secondary open '/tmp/flow.pdf' fit-width continuous\x1b\\"), false)
-	if len(h.images) != 3 || !h.images[2].Continuous || !h.images[2].Options.FitWidth {
+	core.Twrite([]byte("\x1bPregion secondary open '/tmp/flow.pdf' background '#f7f5ef' fit-width continuous\x1b\\"), false)
+	if len(h.images) != 3 || !h.images[2].Continuous || !h.images[2].Options.FitWidth || h.images[2].Background != 0xfff7f5ef {
 		t.Fatal("continuous fit-width view was not passed to the frontend")
 	}
 	core.Twrite([]byte("\x1bPregion secondary clear; region reset\x1b\\"), false)
@@ -72,6 +72,8 @@ func TestDisplayRegionParserRejectsMalformedCommands(t *testing.T) {
 		"layout main 1 1 999999999999999999999999 24", "split 100%", "split 0", "split 80",
 		"secondary open", "secondary open a.pdf page", "secondary open a.pdf page 0",
 		"secondary open a.webp anim", "secondary open a.png unknown", "secondary clear extra", "reset extra",
+		"secondary open a.pdf continuous background", "secondary open a.pdf continuous background '#xyz123'",
+		"secondary open a.pdf continuous background '#fff'", "secondary open a.pdf background '#ffffff'",
 	} {
 		before := append([]DisplayRegion(nil), h.regions...)
 		if err := core.dslRegion(dslTokenize(command)); err == nil {

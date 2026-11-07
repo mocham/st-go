@@ -76,6 +76,37 @@ Y\ar[r,equals] & Z
 	}
 }
 
+func TestDynkinDiagramsRenderAsNativeVectors(t *testing.T) {
+	source := `\begin{document}
+\dynkin[labels={\alpha_1,\alpha_2,\dots,\alpha_r},scale=2]{C}{}
+\dynkin{D}{5}
+\end{document}`
+	rendered := newLatexRenderer().render(source, "native-dynkin-test")
+	if rendered.MathErrors != 0 {
+		t.Fatalf("Dynkin diagrams produced %d MathJax errors: %#v", rendered.MathErrors, rendered.MathErrorExpressions)
+	}
+	body := string(rendered.Body)
+	if got := strings.Count(body, `data-diagram="dynkin"`); got != 2 {
+		t.Fatalf("native Dynkin diagram count = %d, want 2: %s", got, body)
+	}
+	for _, wanted := range []string{`\alpha_1`, `stroke="currentColor"`, `fill="#ffffff"`} {
+		if !strings.Contains(body, wanted) {
+			t.Errorf("native Dynkin output is missing %q: %s", wanted, body)
+		}
+	}
+	if strings.Contains(body, `class="unknown-command"`) {
+		t.Fatalf("Dynkin command fell through to an unknown literal: %s", body)
+	}
+
+	pdf, err := NewRenderer().RenderPDF(Document{Source: source, Title: "Dynkin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(pdf, []byte("/Subtype /Image")) {
+		t.Fatal("Dynkin PDF used an image fallback")
+	}
+}
+
 func TestTikZPictureRendersNodesPathsCurvesAndCJK(t *testing.T) {
 	source := `\begin{document}\begin{tikzpicture}[node distance=10mm,>=Stealth]
 \node[draw,minimum width=12mm] (a) {$A$};

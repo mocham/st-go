@@ -22,7 +22,7 @@ void *pdf_scroll_open(const unsigned char *data, int len, int max_pages);
 void pdf_scroll_close(void *view);
 int pdf_scroll_height(void *view, int width, int max_height);
 int pdf_scroll_render(void *view, int width, int top, int height,
-                      unsigned char *out_bgra);
+                      unsigned char *out_bgra, unsigned int background_argb);
 
 #ifdef __cplusplus
 }

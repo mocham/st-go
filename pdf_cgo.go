@@ -42,7 +42,7 @@ func (p *scrollPDF) close() {
 	}
 }
 
-func (p *scrollPDF) render(width, height, position int) (regionBitmap, error) {
+func (p *scrollPDF) render(width, height, position int, background uint32) (regionBitmap, error) {
 	if _, ok := limits.RGBA("continuous PDF viewport", width, height); !ok {
 		return regionBitmap{}, fmt.Errorf("continuous PDF viewport exceeds bitmap budget")
 	}
@@ -63,10 +63,10 @@ func (p *scrollPDF) render(width, height, position int) (regionBitmap, error) {
 	}
 	// C writes native BGRA, which is the framebuffer's uint32 representation.
 	pixels := make([]uint32, size/4)
-	if C.pdf_scroll_render(p.handle, C.int(width), C.int(top), C.int(rows), (*C.uchar)(unsafe.Pointer(&pixels[0]))) != 1 {
+	if C.pdf_scroll_render(p.handle, C.int(width), C.int(top), C.int(rows), (*C.uchar)(unsafe.Pointer(&pixels[0])), C.uint(background)) != 1 {
 		return regionBitmap{}, fmt.Errorf("cannot render continuous PDF strip")
 	}
-	return regionBitmap{pixels: pixels, width: width, height: rows, top: top, contentHeight: total}, nil
+	return regionBitmap{pixels: pixels, width: width, height: rows, top: top, contentHeight: total, background: background}, nil
 }
 
 // renderPDFPage renders page `page` (0-based) of the PDF in `data` to a BGRA

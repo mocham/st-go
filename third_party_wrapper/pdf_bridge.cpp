@@ -156,15 +156,21 @@ try {
     return view->tops.back();
 } catch (...) { return 0; }
 
-int pdf_scroll_render(void *handle, int width, int top, int height, unsigned char *out)
+int pdf_scroll_render(void *handle, int width, int top, int height, unsigned char *out, unsigned int background)
 try {
     auto *view = static_cast<scroll_pdf *>(handle);
     if (!view || !out || view->width != width || view->tops.empty() ||
         top < 0 || top >= view->tops.back() || height <= 0 ||
         height > view->tops.back() - top) return 0;
-    std::memset(out, 255, (size_t)width * height * 4);
+    for (size_t i = 0; i < (size_t)width * height * 4; i += 4) {
+        out[i] = background & 255;
+        out[i + 1] = (background >> 8) & 255;
+        out[i + 2] = (background >> 16) & 255;
+        out[i + 3] = 255;
+    }
     int index = (int)(std::upper_bound(view->tops.begin(), view->tops.end(), top) - view->tops.begin()) - 1;
     poppler::page_renderer renderer;
+    renderer.set_paper_color(background);
     renderer.set_render_hint(poppler::page_renderer::antialiasing, true);
     renderer.set_render_hint(poppler::page_renderer::text_antialiasing, true);
     for (; index < (int)view->pages.size() && view->tops[index] < top + height; ++index) {
