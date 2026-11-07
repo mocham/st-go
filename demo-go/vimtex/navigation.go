@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,21 +10,39 @@ import (
 	"st-go/limits"
 )
 
-type previewCursor struct {
-	block, line, step int
+type previewNavigation struct {
+	line, step int
 }
 
-func (c previewCursor) key(source *sourceSnapshot) [sha256.Size]byte {
-	return sha256.Sum256([]byte(fmt.Sprintf("%x/%d/%d/%d", source.hash, c.block, c.line, c.step)))
-}
-
-func (c *previewCursor) navigate(kind string, value int) {
+func (c *previewNavigation) navigate(kind string, value int) {
 	switch kind {
 	case "seek":
 		c.line, c.step = value, 0
 	case "scroll":
 		c.step = max(-limits.MaxBytes, min(c.step+value, limits.MaxBytes))
 	}
+}
+
+// Explicit Vimscript seeks remain approximate source positions. Scrolling is
+// local to st-go and never changes the saved-source render key.
+func (c previewNavigation) command(source *sourceSnapshot) string {
+	var commands []string
+	if c.line > 0 {
+		first, last := 1, 1+strings.Count(source.text, "\n")
+		if begin := strings.Index(source.text, `\begin{document}`); begin >= 0 {
+			first = 1 + strings.Count(source.text[:begin], "\n")
+		}
+		if end := strings.LastIndex(source.text, `\end{document}`); end >= 0 {
+			last = 1 + strings.Count(source.text[:end], "\n")
+		}
+		line := max(first, min(source.expandedLine(c.line), last))
+		position := int(int64(line-first) * 1000000 / int64(max(1, last-first)))
+		commands = append(commands, fmt.Sprintf("region secondary position %d", position))
+	}
+	if c.step != 0 {
+		commands = append(commands, fmt.Sprintf("region secondary scroll %d", c.step))
+	}
+	return strings.Join(commands, "; ")
 }
 
 // Region event frames are removed before relaying input to Vim. All other

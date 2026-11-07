@@ -23,6 +23,9 @@ const (
 	ClipboardBytes    = MaxBytes / 8
 	GlyphCacheBytes   = MaxBytes / 2
 	GlyphCacheEntries = MaxBytes / 4096
+	PreviewCacheBytes = MaxBytes / 2
+	PreviewPages      = MaxBytes / 4096
+	PreviewHeight     = MaxBytes // total continuous-document height in pixels
 	AnimationFrames   = MaxBytes / 1024
 	LogBytes          = MaxBytes / 64
 )

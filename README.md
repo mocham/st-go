@@ -161,9 +161,11 @@ discarded. Input/bitmap limits apply, and failures are logged under `/tmp/`.
 | `region split 40` | Reserve 40 columns initially |
 | `region layout main X Y W H secondary X Y W H` | Atomically set explicit cell rectangles |
 | `region secondary open '<path>' [page N\|current] [fit-contain\|fit-width\|fit-height\|native]` | Replace the preview with a static image or PDF page |
+| `region secondary open '<path>' fit-width continuous` | Display a continuous PDF with locally animated pixel scrolling |
 | `region secondary clear` | Clear the preview, retaining the split |
 | `region secondary scroll report\|pages` | Report navigation to the application, or use default PDF-page scrolling |
-| `region secondary scroll N` / `region secondary seek N` | Emit a navigation event to an application that enabled reporting |
+| `region secondary scroll N` / `region secondary seek N` | Scroll locally in continuous mode, or emit an application navigation event |
+| `region secondary position N` | Set a continuous view's position in millionths of its scroll range (0–1000000) |
 | `region query` | Reply on terminal input with `DCS region layout … ST` |
 | `region reset` | Release the preview and restore the full-width PTY |
 
@@ -181,6 +183,9 @@ Window resizing preserves the requested width ratio, resizing the main PTY and
 re-rendering the preview. At a one-column window, the preview is temporarily
 hidden and returns when space is available. `fit-contain` is the default for
 region images/PDFs; PDF `fit-width` fills the width and clips vertical overflow.
+Adding `continuous` stacks all PDF pages and scrolls cached strips immediately,
+independently of application refresh timing. A three-pixel divider occupies the
+left edge of the preview pane.
 By default the mouse wheel over the
 preview changes PDF pages (wrapping at either end); preview clicks are consumed
 locally. Keyboard input stays with the main terminal. The split persists across
@@ -197,17 +202,21 @@ side-by-side layout, while the interface leaves room for future layouts.
 
 [`demo-go/vimtex`](demo-go/vimtex/README.md) launches real Vim after checking
 that the source exists, watches saved changes (including local TeX includes),
-and renders a fit-width source window with a minimum 2.1-second redraw gap:
+and renders a continuous fit-width preview with a minimum 2.1-second save-refresh gap:
 
 ```sh
 make st vimtex
 ./st -e ./vimtex /path/to/document.tex
 ```
 
-The mouse wheel over the right pane moves an independent virtual cursor through
-source blocks. Nearby content is rendered around it, without precise PDF
-pagination. `:VimtexPreview [line]` and `:VimtexScroll count` expose the same
-navigation to Vimscript; ordinary keyboard input stays with Vim.
+The default Vim:preview width ratio is **4:6**. Set `-split VIM:PREVIEW`, for
+example `./vimtex -split 1:1 document.tex`, to customize it.
+
+The mouse wheel over the right pane scrolls smoothly through cached document
+pixels without waiting for a LaTeX render. Preview padding is trimmed and unused
+page-bottom whitespace is cropped. `:VimtexPreview [line]` provides an approximate
+source-line jump; `:VimtexScroll count` scrolls by wheel steps from Vimscript.
+Ordinary keyboard input stays with Vim.
 
 ## Requirements
 
@@ -466,7 +475,11 @@ full terminal width and the sidebar is painted on top. Tab shows or hides the
 sidebar. Shift+Tab toggles floating and pinned-right mode without repainting the
 current preview; the next selected file or page uses the new geometry. TeX and
 Markdown previews share the native `latexpdf` vector-PDF pipeline. Markdown
-supports inline `$...$`/`\(...\)` and display `$$...$$`/`\[...\]` math.
+supports inline `$...$`/`\(...\)` and display `$$...$$`/`\[...\]` math. HTML,
+XHTML, and EPUB previews pass sanitized semantic markup to the separate native
+`semhtml` PDF renderer; EPUB files first resolve their package spine. This path
+preserves headings, paragraphs, lists, inline emphasis, code, links, table text,
+and image alt text while deliberately ignoring CSS and publication fonts.
 
 ### Go corpus browser
 

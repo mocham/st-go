@@ -54,6 +54,10 @@ func TestDisplayRegionProtocol(t *testing.T) {
 	if len(h.images) != 2 || !h.images[1].KeepPage {
 		t.Fatal("page current was not passed to the frontend")
 	}
+	core.Twrite([]byte("\x1bPregion secondary open '/tmp/flow.pdf' fit-width continuous\x1b\\"), false)
+	if len(h.images) != 3 || !h.images[2].Continuous || !h.images[2].Options.FitWidth {
+		t.Fatal("continuous fit-width view was not passed to the frontend")
+	}
 	core.Twrite([]byte("\x1bPregion secondary clear; region reset\x1b\\"), false)
 	if h.cleared != SecondaryRegion || h.regions != nil {
 		t.Fatal("clear/reset was not dispatched")

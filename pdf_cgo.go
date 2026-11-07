@@ -13,10 +13,61 @@ package main
 import "C"
 
 import (
+	"fmt"
 	"unsafe"
 
 	"st-go/limits"
 )
+
+// scrollPDF's native document is confined to the region decoder goroutine.
+type scrollPDF struct{ handle unsafe.Pointer }
+
+func openScrollPDF(data []byte) (*scrollPDF, error) {
+	if len(data) == 0 || !limits.Check("continuous PDF", int64(len(data)), limits.FileBytes) {
+		return nil, fmt.Errorf("continuous PDF exceeds input limit or is empty")
+	}
+	input := C.CBytes(data)
+	defer C.free(input)
+	handle := C.pdf_scroll_open((*C.uchar)(input), C.int(len(data)), C.int(limits.PreviewPages))
+	if handle == nil {
+		return nil, fmt.Errorf("cannot open continuous PDF (page limit %d)", limits.PreviewPages)
+	}
+	return &scrollPDF{handle}, nil
+}
+
+func (p *scrollPDF) close() {
+	if p != nil && p.handle != nil {
+		C.pdf_scroll_close(p.handle)
+		p.handle = nil
+	}
+}
+
+func (p *scrollPDF) render(width, height, position int) (regionBitmap, error) {
+	if _, ok := limits.RGBA("continuous PDF viewport", width, height); !ok {
+		return regionBitmap{}, fmt.Errorf("continuous PDF viewport exceeds bitmap budget")
+	}
+	total := int(C.pdf_scroll_height(p.handle, C.int(width), C.int(limits.PreviewHeight)))
+	if total < 1 {
+		return regionBitmap{}, fmt.Errorf("continuous PDF dimensions exceed limits")
+	}
+	// Retain several screenfuls so ordinary wheel motion only copies cached
+	// pixels. The cache size is independent of document length.
+	rows := min(total, 3*height, limits.PreviewCacheBytes/4/max(1, width))
+	if rows < min(total, height) {
+		return regionBitmap{}, fmt.Errorf("continuous PDF viewport exceeds cache budget")
+	}
+	top := clampInt(position-max(0, (rows-height)/2), 0, total-rows)
+	size, ok := limits.RGBA("continuous PDF strip", width, rows)
+	if !ok {
+		return regionBitmap{}, fmt.Errorf("continuous PDF strip exceeds bitmap budget")
+	}
+	// C writes native BGRA, which is the framebuffer's uint32 representation.
+	pixels := make([]uint32, size/4)
+	if C.pdf_scroll_render(p.handle, C.int(width), C.int(top), C.int(rows), (*C.uchar)(unsafe.Pointer(&pixels[0]))) != 1 {
+		return regionBitmap{}, fmt.Errorf("cannot render continuous PDF strip")
+	}
+	return regionBitmap{pixels: pixels, width: width, height: rows, top: top, contentHeight: total}, nil
+}
 
 // renderPDFPage renders page `page` (0-based) of the PDF in `data` to a BGRA
 // buffer scaled to fit outW x outH. Returns the buffer and its row stride.

@@ -14,7 +14,7 @@ endfunction
 
 function! s:Scroll(value) abort
   if a:value !~# '^[+-]\=\d\+$'
-    echoerr 'VimtexScroll expects a signed block count'
+    echoerr 'VimtexScroll expects a signed wheel-step count'
     return
   endif
   call echoraw("\<Esc>Pregion secondary scroll " . str2nr(a:value) . "\<Esc>\\")

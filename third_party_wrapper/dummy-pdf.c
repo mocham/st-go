@@ -29,3 +29,11 @@ pdf_page_count(const unsigned char *pdf_data, int pdf_len)
 	(void)pdf_len;
 	return 0; /* failure: no PDF support */
 }
+
+void *pdf_scroll_open(const unsigned char *data, int len, int max_pages)
+{ (void)data; (void)len; (void)max_pages; return NULL; }
+void pdf_scroll_close(void *view) { (void)view; }
+int pdf_scroll_height(void *view, int width, int max_height)
+{ (void)view; (void)width; (void)max_height; return 0; }
+int pdf_scroll_render(void *view, int width, int top, int height, unsigned char *out)
+{ (void)view; (void)width; (void)top; (void)height; (void)out; return 0; }

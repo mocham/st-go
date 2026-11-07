@@ -49,13 +49,14 @@ TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 FULL_GO_TAGS = webpcache sqlite_omit_load_extension
 
 # Sources that affect the Go file-browser demo, including the sibling
-# latexpdf module selected by go.mod. The target links the existing static
-# ALSA wrapper below.
+# latexpdf module and semantic-HTML renderer. The target links the existing
+# static ALSA wrapper below.
 FILE_BROWSER = file-browser
 LATEXPDF_SRC = $(wildcard latexpdf/*.go) \
 	       $(wildcard latexpdf/pdf_assets/*)
+SEMHTML_SRC = $(wildcard semhtml/*.go)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
-	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC)
+	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC)
 GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)

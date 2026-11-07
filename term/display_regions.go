@@ -32,6 +32,8 @@ type RegionImage struct {
 	Options ImageDecodeOptions
 	// KeepPage retains the target's current page when replacing a document.
 	KeepPage bool
+	// Continuous displays PDF pages as one locally scrollable, fit-width view.
+	Continuous bool
 }
 
 // RegionHooks is an optional frontend capability. Keeping rectangle-based
@@ -49,6 +51,7 @@ type RegionHooks interface {
 
 // RegionNavigation describes an application-owned preview position. scroll
 // values are signed wheel steps; seek values are one-based source lines.
+// position is a local continuous-view position in millionths (0..1,000,000).
 type RegionNavigation struct {
 	Kind  string
 	Value int
@@ -138,7 +141,7 @@ func (t *Term) dslRegion(args []string) error {
 	}
 	id := RegionID(args[0])
 	switch args[1] {
-	case "scroll", "seek":
+	case "scroll", "seek", "position":
 		if len(args) != 3 {
 			return fmt.Errorf("region navigation requires one value")
 		}
@@ -166,6 +169,8 @@ func (t *Term) dslRegion(args []string) error {
 		req := RegionImage{Path: t.resolveImagePath(args[2]), Options: ImageDecodeOptions{FitContain: true}}
 		for i := 3; i < len(args); i++ {
 			switch args[i] {
+			case "continuous":
+				req.Continuous = true
 			case "fit-contain", "fit-width", "fit-height", "native":
 				req.Options.FitContain = args[i] == "fit-contain"
 				req.Options.FitWidth = args[i] == "fit-width"

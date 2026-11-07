@@ -46,6 +46,56 @@ func TestPDFCustomPageSize(t *testing.T) {
 	}
 }
 
+func TestPDFCompactPreviewMarginsAndCrop(t *testing.T) {
+	document := Document{Source: "\\begin{document}Bodymarker.\n\nSecondmarker.\\end{document}", Title: "Titlemarker"}
+	renderer := NewRenderer()
+	normal, err := renderer.RenderPDF(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := renderer.RenderPDFWithOptions(document, PDFOptions{Compact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := func(text string) []byte {
+		var result []byte
+		for _, b := range []byte(text) {
+			result = append(result, 0, b)
+		}
+		return result
+	}
+	content := inflatedPDFStreams(compact)
+	if !bytes.Contains(inflatedPDFStreams(normal), encoded(document.Title)) || bytes.Contains(content, encoded(document.Title)) ||
+		!bytes.Contains(content, encoded("Bodymarker.")) || !bytes.Contains(content, encoded("Secondmarker.")) {
+		t.Fatal("compact preview lost body content or kept the generated title")
+	}
+	positions := regexp.MustCompile(`BT ([0-9.]+) ([0-9.]+) Td`).FindAllSubmatch(content, -1)
+	if len(positions) < 2 {
+		t.Fatal("missing PDF text positions")
+	}
+	for _, position := range positions {
+		x, _ := strconv.ParseFloat(string(position[1]), 64)
+		y, _ := strconv.ParseFloat(string(position[2]), 64)
+		if x < 8 || x > 10 || y < 780 {
+			t.Fatalf("excessive preview margins: x=%g y=%g", x, y)
+		}
+	}
+	crops := regexp.MustCompile(`/CropBox\s*\[0(?:\.0+)? ([0-9.]+) [0-9.]+ ([0-9.]+)\]`).FindAllSubmatch(compact, -1)
+	if len(crops) != 1 {
+		t.Fatalf("got %d preview crop boxes, want 1", len(crops))
+	}
+	for _, crop := range crops {
+		bottom, _ := strconv.ParseFloat(string(crop[1]), 64)
+		top, _ := strconv.ParseFloat(string(crop[2]), 64)
+		if top-bottom < 10 || top-bottom > 70 {
+			t.Fatalf("unused paper not cropped: height=%gpt", top-bottom)
+		}
+	}
+	if bytes.Contains(normal, []byte("/CropBox")) {
+		t.Fatal("default PDF unexpectedly cropped")
+	}
+}
+
 func TestPDFFontsLoadLazilyAndRemainEmbedded(t *testing.T) {
 	tests := []struct {
 		name     string

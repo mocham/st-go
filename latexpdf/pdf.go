@@ -113,18 +113,20 @@ type pdfBoxTheme struct {
 }
 
 type pdfDocumentLayout struct {
-	renderer   *pdfRenderer
-	pdf        *fpdf.Fpdf
-	monoLoaded bool
-	cjkLoaded  bool
-	y          float64
-	title      string
-	rightInset float64
-	pageWidth  float64
-	pageHeight float64
-	anchors    map[string]pdfAnchor
-	links      map[string]int
-	tocEntries []pdfTOCEntry
+	renderer                                         *pdfRenderer
+	pdf                                              *fpdf.Fpdf
+	monoLoaded                                       bool
+	cjkLoaded                                        bool
+	y                                                float64
+	title                                            string
+	rightInset                                       float64
+	pageWidth                                        float64
+	pageHeight                                       float64
+	marginLeft, marginRight, marginTop, marginBottom float64
+	anchors                                          map[string]pdfAnchor
+	links                                            map[string]int
+	tocEntries                                       []pdfTOCEntry
+	pageEnds                                         map[int]float64 // compact preview crop heights
 }
 
 type pdfAnchor struct {
@@ -170,8 +172,9 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 		Size:           fpdf.SizeType{Wd: pageWidth, Ht: pageHeight},
 	})
 	pdf.SetCompression(true)
-	pdf.SetMargins(pdfMarginLeft, pdfMarginTop, pdfMarginRight)
-	pdf.SetAutoPageBreak(false, pdfMarginBottom)
+	left, right, top, bottom := pdfMargins(options)
+	pdf.SetMargins(left, top, right)
+	pdf.SetAutoPageBreak(false, bottom)
 	pdf.SetTitle(document.Title, true)
 	pdf.SetAuthor(document.Author, true)
 	pdf.SetCreator("latexpdf native Go renderer", true)
@@ -194,29 +197,37 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 	if err := pdf.Error(); err != nil {
 		return nil, fmt.Errorf("load embedded PDF font: %w", err)
 	}
-	pdf.SetFooterFunc(func() {
-		pdf.SetY(-11)
-		pdf.SetTextColor(100, 112, 132)
-		pdf.SetFont(pdfSerifFamily, "", 8)
-		pdf.CellFormat(0, 5, fmt.Sprintf("%d / {nb}", pdf.PageNo()), "", 0, "C", false, 0, "")
-	})
+	if !options.Compact {
+		pdf.SetFooterFunc(func() {
+			pdf.SetY(-11)
+			pdf.SetTextColor(100, 112, 132)
+			pdf.SetFont(pdfSerifFamily, "", 8)
+			pdf.CellFormat(0, 5, fmt.Sprintf("%d / {nb}", pdf.PageNo()), "", 0, "C", false, 0, "")
+		})
+	}
 
 	layout := &pdfDocumentLayout{
 		renderer: renderer, pdf: pdf, title: document.Title,
 		pageWidth: pageWidth, pageHeight: pageHeight,
+		marginLeft: left, marginRight: right, marginTop: top, marginBottom: bottom,
 		anchors: make(map[string]pdfAnchor), links: make(map[string]int),
 	}
-	layout.addPage()
-	titleStyle := pdfTextStyle{size: 22, bold: true, red: 23, green: 32, blue: 51}
-	layout.drawParagraph([]pdfInline{{text: document.Title, style: titleStyle}}, 0, 0, 4)
-	if document.Author != "" {
-		authorStyle := pdfTextStyle{size: 10.5, red: 68, green: 84, blue: 106}
-		layout.drawParagraph([]pdfInline{{text: document.Author, style: authorStyle}}, 0, 0, 2.5)
+	if options.Compact {
+		layout.pageEnds = make(map[int]float64)
 	}
-	layout.pdf.SetDrawColor(205, 213, 220)
-	layout.pdf.SetLineWidth(0.25)
-	layout.pdf.Line(pdfMarginLeft, layout.y, layout.pageWidth-pdfMarginRight, layout.y)
-	layout.y += 5
+	layout.addPage()
+	if !options.Compact {
+		titleStyle := pdfTextStyle{size: 22, bold: true, red: 23, green: 32, blue: 51}
+		layout.drawParagraph([]pdfInline{{text: document.Title, style: titleStyle}}, 0, 0, 4)
+		if document.Author != "" {
+			authorStyle := pdfTextStyle{size: 10.5, red: 68, green: 84, blue: 106}
+			layout.drawParagraph([]pdfInline{{text: document.Author, style: authorStyle}}, 0, 0, 2.5)
+		}
+		layout.pdf.SetDrawColor(205, 213, 220)
+		layout.pdf.SetLineWidth(0.25)
+		layout.pdf.Line(left, layout.y, layout.pageWidth-right, layout.y)
+		layout.y += 5
+	}
 
 	root, err := html.Parse(strings.NewReader("<!doctype html><html><body>" + string(body) + "</body></html>"))
 	if err != nil {
@@ -228,6 +239,17 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 	}
 	layout.renderChildren(bodyNode, 0)
 	layout.drawTOCPageNumbers()
+	if options.Compact {
+		layout.recordPageEnd()
+		lastPage := pdf.PageNo()
+		for page, usedHeight := range layout.pageEnds {
+			pdf.SetPage(page)
+			// PDF crop boxes use bottom-left coordinates. Keep the content at
+			// the top and remove unused paper below each preview fragment.
+			pdf.SetPageBox("crop", 0, pageHeight-usedHeight, pageWidth, usedHeight)
+		}
+		pdf.SetPage(lastPage)
+	}
 	if err := pdf.Error(); err != nil {
 		return nil, fmt.Errorf("lay out PDF: %w", err)
 	}
@@ -253,6 +275,13 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 	return data, nil
 }
 
+func pdfMargins(options PDFOptions) (left, right, top, bottom float64) {
+	if options.Compact {
+		return 3, 3, 2, 2
+	}
+	return pdfMarginLeft, pdfMarginRight, pdfMarginTop, pdfMarginBottom
+}
+
 func pdfPageSize(options PDFOptions) (float64, float64, error) {
 	width, height := options.PageWidth, options.PageHeight
 	if math.IsNaN(width) || math.IsInf(width, 0) || width < 0 {
@@ -267,22 +296,31 @@ func pdfPageSize(options PDFOptions) (float64, float64, error) {
 	if height == 0 {
 		height = defaultPDFPageHeight
 	}
-	if width <= pdfMarginLeft+pdfMarginRight+1 {
+	left, right, top, bottom := pdfMargins(options)
+	if width <= left+right+1 {
 		return 0, 0, fmt.Errorf("PDF page width %.2fmm is too small", width)
 	}
-	if height <= pdfMarginTop+pdfMarginBottom+1 {
+	if height <= top+bottom+1 {
 		return 0, 0, fmt.Errorf("PDF page height %.2fmm is too small", height)
 	}
 	return width, height, nil
 }
 
 func (layout *pdfDocumentLayout) addPage() {
+	layout.recordPageEnd()
 	layout.pdf.AddPage()
-	layout.y = pdfMarginTop
+	layout.y = layout.marginTop
+}
+
+func (layout *pdfDocumentLayout) recordPageEnd() {
+	if layout.pageEnds != nil && layout.pdf.PageNo() > 0 {
+		layout.pageEnds[layout.pdf.PageNo()] = math.Min(layout.pageHeight,
+			math.Max(layout.marginTop+layout.marginBottom+1, layout.y+layout.marginBottom))
+	}
 }
 
 func (layout *pdfDocumentLayout) ensureSpace(height float64) {
-	if layout.y+height <= layout.pageHeight-pdfMarginBottom {
+	if layout.y+height <= layout.pageHeight-layout.marginBottom {
 		return
 	}
 	layout.addPage()
@@ -292,7 +330,7 @@ func (layout *pdfDocumentLayout) verticalSpace(height float64) {
 	if height <= 0 {
 		return
 	}
-	if layout.y+height > layout.pageHeight-pdfMarginBottom {
+	if layout.y+height > layout.pageHeight-layout.marginBottom {
 		layout.addPage()
 		return
 	}
@@ -465,7 +503,7 @@ func (layout *pdfDocumentLayout) renderBoxedEnvironment(node *html.Node, indent 
 	}
 	// Do not create a new page solely for a box's bottom padding; that would
 	// produce a thin, empty continuation box at the top of the next page.
-	if layout.y+2.2 <= layout.pageHeight-pdfMarginBottom {
+	if layout.y+2.2 <= layout.pageHeight-layout.marginBottom {
 		layout.y += 2.2
 	}
 	layout.rightInset = previousRightInset
@@ -475,11 +513,11 @@ func (layout *pdfDocumentLayout) renderBoxedEnvironment(node *html.Node, indent 
 }
 
 func (layout *pdfDocumentLayout) drawBoxAcrossPages(startPage int, startY float64, endPage int, endY, indent float64, theme pdfBoxTheme) {
-	x := pdfMarginLeft + indent
-	width := layout.pageWidth - pdfMarginLeft - pdfMarginRight - 2*indent
-	pageBottom := layout.pageHeight - pdfMarginBottom
+	x := layout.marginLeft + indent
+	width := layout.pageWidth - layout.marginLeft - layout.marginRight - 2*indent
+	pageBottom := layout.pageHeight - layout.marginBottom
 	for page := startPage; page <= endPage; page++ {
-		top, bottom := pdfMarginTop, pageBottom
+		top, bottom := layout.marginTop, pageBottom
 		if page == startPage {
 			top = startY
 		}
@@ -533,7 +571,7 @@ func (layout *pdfDocumentLayout) renderNumberedEquation(node *html.Node, indent 
 	startY := layout.y
 	layout.drawDisplayFormula(formulaNode, indent)
 	if layout.pdf.PageNo() != pageBefore {
-		startY = pdfMarginTop
+		startY = layout.marginTop
 	}
 	if anchor := htmlAttribute(node, "id"); anchor != "" {
 		layout.registerAnchor(anchor, startY)
@@ -548,7 +586,7 @@ func (layout *pdfDocumentLayout) renderNumberedEquation(node *html.Node, indent 
 		width := layout.pdf.GetStringWidth(number)
 		fraction := (float64(index) + 0.5) / float64(len(numbers))
 		baseline := startY + (layout.y-startY)*fraction + fontMM*0.3
-		x := layout.pageWidth - pdfMarginRight - indent - width
+		x := layout.pageWidth - layout.marginRight - indent - width
 		layout.pdf.Text(x, baseline, number)
 	}
 }
@@ -645,7 +683,7 @@ func (layout *pdfDocumentLayout) drawTOCPageNumbers() {
 		layout.pdf.SetPage(entry.page)
 		layout.setStyle(style, label)
 		width := layout.pdf.GetStringWidth(label)
-		x := layout.pageWidth - pdfMarginRight - entry.indent - width
+		x := layout.pageWidth - layout.marginRight - entry.indent - width
 		layout.pdf.Text(x, entry.baseline, label)
 		if link, linkOK := layout.linkForAnchor(entry.target); linkOK {
 			fontMM := style.size * 25.4 / 72
@@ -743,14 +781,14 @@ func (layout *pdfDocumentLayout) drawDisplayFormula(wrapper *html.Node, indent f
 		width *= scale
 		height *= scale
 	}
-	maxHeight := layout.pageHeight - pdfMarginTop - pdfMarginBottom - 5
+	maxHeight := layout.pageHeight - layout.marginTop - layout.marginBottom - 5
 	if height > maxHeight {
 		scale := maxHeight / height
 		width *= scale
 		height *= scale
 	}
 	layout.ensureSpace(height + 5)
-	x := pdfMarginLeft + indent + (available-width)/2
+	x := layout.marginLeft + indent + (available-width)/2
 	layout.drawFormula(formula, x, layout.y+2, width, renderColor{23, 32, 51})
 	layout.y += height + 5
 }
@@ -781,7 +819,7 @@ func (layout *pdfDocumentLayout) drawParagraph(runs []pdfInline, indent, before,
 		if len(line) == 0 {
 			return
 		}
-		layout.drawLine(line, pdfMarginLeft+indent)
+		layout.drawLine(line, layout.marginLeft+indent)
 		line = nil
 		lineWidth = 0
 	}
@@ -847,7 +885,7 @@ func (layout *pdfDocumentLayout) drawParagraph(runs []pdfInline, indent, before,
 }
 
 func (layout *pdfDocumentLayout) availableWidth(leftIndent float64) float64 {
-	return math.Max(1, layout.pageWidth-pdfMarginLeft-pdfMarginRight-leftIndent-layout.rightInset)
+	return math.Max(1, layout.pageWidth-layout.marginLeft-layout.marginRight-leftIndent-layout.rightInset)
 }
 
 func fitInlineFormula(item pdfLineItem, available float64) pdfLineItem {

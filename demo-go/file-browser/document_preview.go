@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mocham/GoLS/latexpdf"
+	"st-go/semhtml"
 )
 
 const (
@@ -32,6 +33,7 @@ type previewDocumentRenderer struct {
 	cacheDir string
 	docs     map[string]*documentPreview
 	latex    *latexpdf.Renderer
+	semantic *semhtml.Renderer
 }
 
 func newPreviewDocumentRenderer(cacheDir string) *previewDocumentRenderer {
@@ -39,6 +41,7 @@ func newPreviewDocumentRenderer(cacheDir string) *previewDocumentRenderer {
 		cacheDir: cacheDir,
 		docs:     make(map[string]*documentPreview),
 		latex:    latexpdf.NewRenderer(),
+		semantic: semhtml.NewRenderer(),
 	}
 }
 
@@ -60,7 +63,7 @@ func (document *documentPreview) pagePath(page int) (string, bool) {
 }
 
 func isRenderedDocument(path string) bool {
-	return hasSuffixAny(strings.ToLower(path), ".tex", ".md", ".markdown")
+	return hasSuffixAny(strings.ToLower(path), ".tex", ".md", ".markdown", ".epub", ".html", ".htm", ".xhtml")
 }
 
 func (renderer *previewDocumentRenderer) render(path string) (*documentPreview, error) {
@@ -68,6 +71,13 @@ func (renderer *previewDocumentRenderer) render(path string) (*documentPreview, 
 }
 
 func (renderer *previewDocumentRenderer) renderSized(path string, pageWidth, pageHeight float64) (*documentPreview, error) {
+	extension := strings.ToLower(filepath.Ext(path))
+	switch extension {
+	case ".epub":
+		return renderer.renderEPUBSized(path, pageWidth, pageHeight)
+	case ".html", ".htm", ".xhtml":
+		return renderer.renderHTMLSized(path, pageWidth, pageHeight)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -75,7 +85,6 @@ func (renderer *previewDocumentRenderer) renderSized(path string, pageWidth, pag
 	if len(data) > maxPreviewDocumentSize {
 		return nil, fmt.Errorf("document is too large to preview")
 	}
-	extension := strings.ToLower(filepath.Ext(path))
 	kind := "Markdown"
 	source := string(data)
 	if extension == ".tex" {

@@ -76,6 +76,7 @@ func startVimtexPTY(t *testing.T, source, ready string) *vimtexPTY {
 	})
 	go func() {
 		var pending []byte
+		continuous := false
 		buf := make([]byte, 8192)
 		for {
 			n, err := master.Read(buf)
@@ -104,12 +105,21 @@ func startVimtexPTY(t *testing.T, source, ready string) *vimtexPTY {
 					f.mu.Unlock()
 					if strings.Contains(command, "region query") {
 						// Emulate st-go's split reply and the outer narrowed PTY.
-						ptyutil.SetWinSizePixels(master, 24, 44, 352, 384)
-						master.Write([]byte("\x1bPregion layout main 1 1 44 24 secondary 45 1 36 24\x1b\\"))
+						var previewPercent int
+						if _, err := fmt.Sscanf(command, "region split %d%%;", &previewPercent); err != nil || previewPercent < 1 || previewPercent > 99 {
+							return
+						}
+						previewCols := max(1, 80*previewPercent/100)
+						mainCols := 80 - previewCols
+						ptyutil.SetWinSizePixels(master, 24, mainCols, mainCols*8, 384)
+						master.Write([]byte(fmt.Sprintf("\x1bPregion layout main 1 1 %d 24 secondary %d 1 %d 24\x1b\\", mainCols, mainCols+1, previewCols)))
 					}
 					fields := strings.Fields(command)
+					if strings.HasPrefix(command, "region secondary open ") {
+						continuous = strings.HasSuffix(command, "continuous")
+					}
 					if len(fields) == 4 && fields[0] == "region" && fields[1] == "secondary" && (fields[2] == "seek" || fields[2] == "scroll") {
-						if _, err := strconv.Atoi(fields[3]); err == nil {
+						if _, err := strconv.Atoi(fields[3]); err == nil && (fields[2] == "seek" || !continuous) {
 							master.Write([]byte("\x1bPregion secondary event " + fields[2] + " " + fields[3] + "\x1b\\"))
 						}
 					}
@@ -164,11 +174,11 @@ func TestVimtexPTYSaveRefreshResizeAndCleanup(t *testing.T) {
 		return len(strings.Fields(string(data))) == 2
 	}, "Vim startup")
 	data, err := os.ReadFile(ready)
-	if err != nil || !strings.HasPrefix(string(data), "44\n") {
+	if err != nil || !strings.HasPrefix(string(data), "32\n") {
 		t.Fatalf("Vim did not receive pane width: %q, %v", data, err)
 	}
 	first := f.previews()[0]
-	path := strings.TrimSuffix(strings.TrimPrefix(first.command, "region secondary open '"), "' fit-width page 1")
+	path := strings.TrimSuffix(strings.TrimPrefix(first.command, "region secondary open '"), "' fit-width continuous")
 	pdf, err := os.ReadFile(path)
 	if err != nil || !bytes.HasPrefix(pdf, []byte("%PDF-")) {
 		t.Fatalf("missing first PDF: %s, %v", path, err)
@@ -180,8 +190,8 @@ func TestVimtexPTYSaveRefreshResizeAndCleanup(t *testing.T) {
 	f.master.Write([]byte(":call setline(3, 'Latest saved version.')\r:w\r"))
 	awaitPTY(t, f, func() bool { return len(f.previews()) >= 2 }, "saved preview")
 	second := f.previews()[1]
-	if second.at.Sub(first.at) <= 2*time.Second || !strings.HasSuffix(second.command, "fit-width page 1") {
-		t.Fatalf("bad redraw interval/page retention: %v, %q", second.at.Sub(first.at), second.command)
+	if second.at.Sub(first.at) <= 2*time.Second || !strings.HasSuffix(second.command, "fit-width continuous") {
+		t.Fatalf("bad redraw interval/continuous mode: %v, %q", second.at.Sub(first.at), second.command)
 	}
 	pdf, err = os.ReadFile(path)
 	if err != nil || sha256.Sum256(pdf) == firstHash {
@@ -271,22 +281,28 @@ func TestVimtexPTYVimscriptAndWheelNavigation(t *testing.T) {
 	writeSource(t, source, document.String())
 	f := startVimtexPTY(t, source, ready)
 	awaitPTY(t, f, func() bool { return len(f.previews()) == 1 }, "initial source viewport")
-	path := strings.TrimSuffix(strings.TrimPrefix(f.previews()[0].command, "region secondary open '"), "' fit-width page 1")
+	path := strings.TrimSuffix(strings.TrimPrefix(f.previews()[0].command, "region secondary open '"), "' fit-width continuous")
 	first, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.master.Write([]byte(":VimtexPreview 120\r"))
-	awaitPTY(t, f, func() bool { return len(f.previews()) >= 2 }, "Vimscript seek viewport")
-	second, err := os.ReadFile(path)
-	if err != nil || bytes.Equal(first, second) {
-		t.Fatal("Vimscript seek did not change nearby content")
+	hasFrame := func(prefix string) bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, frame := range f.frames {
+			if strings.HasPrefix(frame.command, prefix) {
+				return true
+			}
+		}
+		return false
 	}
+	start := time.Now()
+	f.master.Write([]byte(":VimtexPreview 120\r"))
+	awaitPTY(t, f, func() bool { return hasFrame("region secondary position ") }, "immediate Vimscript seek")
 	f.master.Write([]byte("\x1bPregion secondary event scroll -1\x1b\\"))
-	awaitPTY(t, f, func() bool { return len(f.previews()) >= 3 }, "wheel viewport")
-	third, err := os.ReadFile(path)
-	if err != nil || bytes.Equal(second, third) {
-		t.Fatal("wheel did not move the virtual cursor")
+	awaitPTY(t, f, func() bool { return hasFrame("region secondary scroll -1") }, "immediate scroll forwarding")
+	if time.Since(start) > time.Second {
+		t.Fatal("navigation waited for the save-refresh gap")
 	}
 	modified := filepath.Join(dir, "modified")
 	f.master.Write([]byte(fmt.Sprintf(":call writefile([string(&modified)], '%s')\r", modified)))
@@ -294,5 +310,11 @@ func TestVimtexPTYVimscriptAndWheelNavigation(t *testing.T) {
 		data, _ := os.ReadFile(modified)
 		return string(data) == "0\n"
 	}, "navigation events leaving Vim's buffer untouched")
+	// Wait beyond the refresh gap: navigating must not queue a later PDF render.
+	time.Sleep(2200 * time.Millisecond)
+	current, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(first, current) || len(f.previews()) != 1 {
+		t.Fatal("navigation regenerated the saved document")
+	}
 	f.master.Write([]byte(":qa!\r"))
 }

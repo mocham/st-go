@@ -176,7 +176,7 @@ func run(o options, in *os.File, out io.Writer) error {
 	}
 	// A blocking write of a large paste can deadlock if Vim fills its output
 	// PTY while processing it. Poll both directions with bounded backpressure.
-	var cursor previewCursor
+	var cursor previewNavigation
 	var navigation navigationInput
 	inputQueue := navigation.feed(pendingInput, time.Now(), cursor.navigate)
 	results := make(chan renderResult, 1)
@@ -230,7 +230,7 @@ func run(o options, in *os.File, out io.Writer) error {
 		}
 		var viewKey [sha256.Size]byte
 		if source != nil {
-			viewKey = cursor.key(source)
+			viewKey = source.hash
 		}
 		select {
 		case result := <-results:
@@ -250,26 +250,32 @@ func run(o options, in *os.File, out io.Writer) error {
 			if err := publishPDF(previewPath, pending.pdf); err != nil {
 				limits.Report("vimtex publish", "%v", err)
 			} else {
-				if err := dcs(out, "region secondary open "+quoteDSL(previewPath)+" fit-width page 1"); err != nil {
+				if err := dcs(out, "region secondary open "+quoteDSL(previewPath)+" fit-width continuous"); err != nil {
 					return err
 				}
 				clock.lastPublished = time.Now()
-				cursor = previewCursor{block: pending.block}
-				viewKey = cursor.key(source)
 				clock.published, clock.hasPublished = viewKey, true
 				clock.attempted, clock.hasAttempt = viewKey, true
 			}
 			pending = nil
 		}
+		if !exited && clock.hasPublished && source != nil && source.err == nil && boundary.safe() {
+			if command := cursor.command(source); command != "" {
+				if err := dcs(out, command); err != nil {
+					return err
+				}
+				cursor = previewNavigation{}
+			}
+		}
 		if !exited && pending == nil && source != nil && source.err == nil && clock.ready(now, viewKey) {
 			clock.start(now, viewKey)
-			go func(snapshot *sourceSnapshot, position previewCursor) {
-				result := renderSource(o.file, snapshot, position)
+			go func(snapshot *sourceSnapshot) {
+				result := renderSource(o.file, snapshot)
 				select {
 				case results <- result:
 				case <-done:
 				}
-			}(source, cursor)
+			}(source)
 		}
 		fds := []unix.PollFd{{Fd: int32(in.Fd())}, {Fd: int32(masterFD), Events: unix.POLLIN}}
 		if len(inputQueue) <= limits.ClipboardBytes-8192-128 {

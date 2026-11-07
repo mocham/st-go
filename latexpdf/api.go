@@ -35,6 +35,9 @@ type Document struct {
 type PDFOptions struct {
 	PageWidth  float64
 	PageHeight float64
+	// Compact uses narrow preview padding and omits generated title/footer
+	// furniture. Titles explicitly present in the source still render.
+	Compact bool
 }
 
 // Section describes one rendered section heading.
@@ -91,6 +94,11 @@ func NewRenderer() *Renderer {
 	renderer.ensureInitialized()
 	return renderer
 }
+
+// EmbeddedFallbackFont returns the immutable embedded CJK fallback face used
+// by the PDF renderer. It lets sibling renderers share the same font payload
+// without embedding a second copy. Callers must not modify the returned bytes.
+func EmbeddedFallbackFont() []byte { return pdfFontBytes }
 
 // SupplementTableMacros adds generated table definitions when source invokes
 // one or more of them without defining them itself. Standalone fragments are
@@ -179,6 +187,7 @@ func PDFCacheKeyWithOptions(document Document, options PDFOptions) string {
 		document.Modified.UTC().Format(time.RFC3339Nano),
 		strconv.FormatFloat(options.PageWidth, 'g', -1, 64),
 		strconv.FormatFloat(options.PageHeight, 'g', -1, 64),
+		strconv.FormatBool(options.Compact),
 		document.Source,
 	} {
 		_, _ = digest.Write([]byte(value))

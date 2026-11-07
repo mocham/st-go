@@ -16,6 +16,14 @@ int pdf_render_page(const unsigned char *pdf_data, int pdf_len,
 /* Returns the number of pages in the PDF, or 0 on failure. */
 int pdf_page_count(const unsigned char *pdf_data, int pdf_len);
 
+/* A continuous PDF view is owned and used by one decoder worker. Rendering
+ * crops to a bounded strip; it never allocates a document-sized bitmap. */
+void *pdf_scroll_open(const unsigned char *data, int len, int max_pages);
+void pdf_scroll_close(void *view);
+int pdf_scroll_height(void *view, int width, int max_height);
+int pdf_scroll_render(void *view, int width, int top, int height,
+                      unsigned char *out_bgra);
+
 #ifdef __cplusplus
 }
 #endif

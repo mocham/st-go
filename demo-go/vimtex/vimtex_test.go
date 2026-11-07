@@ -136,6 +136,51 @@ func TestMissingSourceAndGapValidation(t *testing.T) {
 	}
 }
 
+func TestSplitOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "source.tex")
+	writeSource(t, path, "Hello.")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		width int // zero expects an invalid option error
+	}{
+		{"default", nil, 60},
+		{"equal", []string{"-split", "1:1"}, 50},
+		{"vim wider", []string{"-split", "3:2"}, 40},
+		{"rounded", []string{"-split", "1:2"}, 67},
+		{"large weights", []string{"-split", "4294967295:4294967295"}, 50},
+		{"legacy width", []string{"-width", "45"}, 45},
+		{"conflicting flags", []string{"-split", "4:6", "-width", "50"}, 0},
+		{"missing colon", []string{"-split", "46"}, 0},
+		{"extra colon", []string{"-split", "4:6:2"}, 0},
+		{"empty weight", []string{"-split", "4:"}, 0},
+		{"zero weight", []string{"-split", "0:6"}, 0},
+		{"negative weight", []string{"-split", "4:-6"}, 0},
+		{"overflow", []string{"-split", "18446744073709551616:6"}, 0},
+		{"too narrow", []string{"-split", "1000:1"}, 0},
+		{"too wide", []string{"-split", "1:1000"}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"-vim", executable}, tc.args...)
+			args = append(args, path, "-u", "NONE")
+			o, err := parseOptions(args, io.Discard)
+			if tc.width == 0 {
+				if err == nil {
+					t.Fatal("accepted invalid split options")
+				}
+				return
+			}
+			if err != nil || o.previewWidth != tc.width || strings.Join(o.vimArgs, " ") != "-u NONE" {
+				t.Fatalf("preview width=%d, Vim args=%v, err=%v", o.previewWidth, o.vimArgs, err)
+			}
+		})
+	}
+}
+
 func TestRenderAndPublishPDF(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "source.tex")
@@ -144,7 +189,7 @@ func TestRenderAndPublishPDF(t *testing.T) {
 	if snapshot.err != nil {
 		t.Fatal(snapshot.err)
 	}
-	result := renderSource(path, snapshot, previewCursor{})
+	result := renderSource(path, snapshot)
 	if result.err != nil || !bytes.HasPrefix(result.pdf, []byte("%PDF-")) {
 		t.Fatalf("render PDF: %v", result.err)
 	}

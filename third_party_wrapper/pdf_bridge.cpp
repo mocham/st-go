@@ -106,3 +106,81 @@ try {
 } catch (...) {
     return -1;
 }
+
+namespace {
+struct scroll_page { double width, height; };
+struct scroll_pdf {
+    poppler::byte_array data;
+    std::unique_ptr<poppler::document> doc;
+    std::vector<scroll_page> pages;
+    std::vector<int> tops;
+    int width = 0;
+};
+}
+
+void *pdf_scroll_open(const unsigned char *data, int len, int max_pages)
+try {
+    if (!data || len <= 0 || max_pages <= 0) return nullptr;
+    std::unique_ptr<scroll_pdf> view(new scroll_pdf);
+    view->data.assign(data, data + len);
+    view->doc.reset(poppler::document::load_from_data(&view->data));
+    if (!view->doc || view->doc->pages() < 1 || view->doc->pages() > max_pages)
+        return nullptr;
+    for (int i = 0; i < view->doc->pages(); ++i) {
+        std::unique_ptr<poppler::page> page(view->doc->create_page(i));
+        if (!page) return nullptr;
+        const double w = page->page_rect().width(), h = page->page_rect().height();
+        if (!std::isfinite(w) || !std::isfinite(h) || w < 1 || h < 1)
+            return nullptr;
+        view->pages.push_back({w, h});
+    }
+    return view.release();
+} catch (...) { return nullptr; }
+
+void pdf_scroll_close(void *view) { delete static_cast<scroll_pdf *>(view); }
+
+int pdf_scroll_height(void *handle, int width, int max_height)
+try {
+    auto *view = static_cast<scroll_pdf *>(handle);
+    if (!view || width <= 0 || max_height <= 0) return 0;
+    if (view->width == width && !view->tops.empty())
+        return view->tops.back() <= max_height ? view->tops.back() : 0;
+    std::vector<int> tops(1, 0);
+    for (auto page : view->pages) {
+        double h = std::ceil(page.height * ((double)width / page.width));
+        if (!std::isfinite(h) || h < 1 || h > max_height - tops.back()) return 0;
+        tops.push_back(tops.back() + (int)h);
+    }
+    view->tops.swap(tops);
+    view->width = width;
+    return view->tops.back();
+} catch (...) { return 0; }
+
+int pdf_scroll_render(void *handle, int width, int top, int height, unsigned char *out)
+try {
+    auto *view = static_cast<scroll_pdf *>(handle);
+    if (!view || !out || view->width != width || view->tops.empty() ||
+        top < 0 || top >= view->tops.back() || height <= 0 ||
+        height > view->tops.back() - top) return 0;
+    std::memset(out, 255, (size_t)width * height * 4);
+    int index = (int)(std::upper_bound(view->tops.begin(), view->tops.end(), top) - view->tops.begin()) - 1;
+    poppler::page_renderer renderer;
+    renderer.set_render_hint(poppler::page_renderer::antialiasing, true);
+    renderer.set_render_hint(poppler::page_renderer::text_antialiasing, true);
+    for (; index < (int)view->pages.size() && view->tops[index] < top + height; ++index) {
+        int start = std::max(top, view->tops[index]);
+        int end = std::min(top + height, view->tops[index + 1]);
+        std::unique_ptr<poppler::page> page(view->doc->create_page(index));
+        if (!page) return 0;
+        double dpi = 72.0 * width / view->pages[index].width;
+        auto image = renderer.render_page(page.get(), dpi, dpi, 0, start - view->tops[index], width, end - start);
+        if (!image.is_valid()) return 0;
+        int rows = std::min(image.height(), end - start);
+        int cols = std::min(image.width(), width);
+        for (int y = 0; y < rows; ++y) {
+            std::memcpy(out + (size_t)(start - top + y) * width * 4,
+                        image.const_data() + (size_t)y * image.bytes_per_row(), (size_t)cols * 4);
+        }
+    }
+    return 1;
+} catch (...) { return 0; }

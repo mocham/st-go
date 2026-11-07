@@ -182,7 +182,7 @@ func iconValue(key string) string {
 const defaultOpenCmd = `
 editor=${ST_GO_EXECUTABLE:-st}
 case ${FILE,,} in
-  *.txt|*.md|*.markdown|*.html|*.htm|*.css|*.tex|*.bib|*.bbl|*.py|*.c|*.h|*.cc|*.cpp|*.cxx|*.go|*.rs|*.java|*.js|*.jsx|*.ts|*.tsx|*.sh|*.bash|*.zsh|*.yml|*.yaml|*.json|*.toml|*.ini|*.conf|*.xml|*.csv|*.log|*.rst)
+  *.txt|*.md|*.markdown|*.html|*.htm|*.xhtml|*.css|*.tex|*.bib|*.bbl|*.py|*.c|*.h|*.cc|*.cpp|*.cxx|*.go|*.rs|*.java|*.js|*.jsx|*.ts|*.tsx|*.sh|*.bash|*.zsh|*.yml|*.yaml|*.json|*.toml|*.ini|*.conf|*.xml|*.csv|*.log|*.rst)
     "$editor" vim "$FILE"
     ;;
   *)
@@ -641,7 +641,7 @@ func (b *Browser) fileType(path string) string {
 		return "code"
 	case hasSuffixAny(ext, ".json", ".yaml", ".yml", ".toml", ".ini", ".conf", ".xml"):
 		return "config"
-	case hasSuffixAny(ext, ".txt", ".md", ".markdown", ".html", ".htm", ".css", ".tex", ".bib", ".bbl", ".rst", ".log", ".csv"):
+	case hasSuffixAny(ext, ".txt", ".md", ".markdown", ".html", ".htm", ".xhtml", ".css", ".tex", ".bib", ".bbl", ".rst", ".log", ".csv", ".epub"):
 		return "text"
 	default:
 		if isExecutable(path) {

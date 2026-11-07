@@ -45,7 +45,7 @@ func (t *Terminal) run(termCore *term.Term) {
 	// `anim`). Each frame is wrapped in PaintStop/PaintResume, so one frame =
 	// one atomic paint batch = one flush.
 	go func() {
-		ticker := time.NewTicker(25 * time.Millisecond)
+		ticker := time.NewTicker(16 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
@@ -53,6 +53,7 @@ func (t *Terminal) run(termCore *term.Term) {
 				t.mu.Lock()
 				if t.termCore != nil {
 					t.termCore.TickAnim(now)
+					t.tickRegionScroll(now)
 				}
 				t.mu.Unlock()
 			case <-t.done:

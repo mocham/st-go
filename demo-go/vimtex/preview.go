@@ -13,10 +13,9 @@ import (
 )
 
 type renderResult struct {
-	hash  [sha256.Size]byte
-	pdf   []byte
-	err   error
-	block int
+	hash [sha256.Size]byte
+	pdf  []byte
+	err  error
 }
 
 type refreshClock struct {
@@ -38,20 +37,8 @@ func (c *refreshClock) start(now time.Time, hash [sha256.Size]byte) {
 	c.lastAttempt, c.attempted, c.hasAttempt, c.busy = now, hash, true, true
 }
 
-func renderSource(file string, source *sourceSnapshot, cursor previewCursor) renderResult {
-	result := renderResult{hash: cursor.key(source)}
-	line := cursor.line
-	if line > 0 {
-		line = source.expandedLine(line)
-	}
-	viewport, err := latexpdf.PrepareSourceViewport(source.text, latexpdf.SourceViewportOptions{
-		Block: cursor.block, Line: line, Step: cursor.step, MaxBytes: limits.ControlBytes / 8,
-	})
-	if err != nil {
-		result.err = err
-		return result
-	}
-	result.block = viewport.Block
+func renderSource(file string, source *sourceSnapshot) renderResult {
+	result := renderResult{hash: source.hash}
 	title := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
 	if value, ok := latexpdf.FindCommandArgument(source.text, "title"); ok {
 		title = latexpdf.PlainText(value)
@@ -59,10 +46,9 @@ func renderSource(file string, source *sourceSnapshot, cursor previewCursor) ren
 	author, _ := latexpdf.FindCommandArgument(source.text, "author")
 	// A fresh renderer per revision releases whole-document/formula caches;
 	// keeping one Renderer forever would retain every saved revision.
-	title = fmt.Sprintf("%s — lines %d–%d", title, viewport.StartLine, viewport.EndLine)
-	rendered, err := latexpdf.NewRenderer().RenderPreparedPDFResultWithOptions(latexpdf.Document{
-		Source: viewport.Prepared, Title: title, Author: latexpdf.PlainText(author),
-	}, viewport.Body, latexpdf.PDFOptions{PageWidth: 140, PageHeight: 1000})
+	rendered, err := latexpdf.NewRenderer().RenderPDFResultWithOptions(latexpdf.Document{
+		Source: source.text, Title: title, Author: latexpdf.PlainText(author),
+	}, latexpdf.PDFOptions{PageWidth: 140, PageHeight: 297, Compact: true})
 	if err == nil && !limits.Check("vimtex PDF", int64(len(rendered.PDF)), limits.FileBytes) {
 		err = fmt.Errorf("rendered PDF exceeds resource limit")
 	}
