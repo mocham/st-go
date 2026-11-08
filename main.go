@@ -27,7 +27,7 @@ func main() {
 		log.Fatal(err)
 	}
 	var cfgPath string
-	flag.StringVar(&cfgPath, "config", "", "path to JSON config (default: <exe-dir>/config.json, else embedded)")
+	flag.StringVar(&cfgPath, "config", "", "path to JSON config (default: <exe-dir>/st.json, then config.json, else embedded)")
 	var glyphOut string
 	flag.StringVar(&glyphOut, "glyphtest", "", "render a glyph to PPM and exit")
 	var dumpText string

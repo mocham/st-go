@@ -24,7 +24,8 @@ PREVIEW
   paginated vector PDFs by latexpdf; Markdown supports inline and display
   LaTeX math through the same pipeline.
   Animated WebP files play once in the preview pane (progress shown in
-  the rect); the terminal does all image/animation decoding.
+  the rect); a visible sidebar reserves its space so redraws do not stop
+  playback. The terminal does all image/animation decoding.
   MP3 files are decoded in-browser and played through the ALSA
   device; their tags, duration, and sample rate are shown. Enter or
   o opens the mp3 viewer, q stops playback and closes it.

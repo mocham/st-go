@@ -13,7 +13,7 @@
  * setting each to the given pixel height. Faces that cannot be opened are
  * silently skipped; the loader keeps the first successful ones, so missing
  * font files are transparently replaced by the next entry. Returns non-zero
- * only if the FreeType library initialised. Glyph lookups walk the loaded
+ * only if at least one face loaded. Glyph lookups walk the loaded
  * faces in order, so fonts[0] wins when multiple faces carry a glyph.
  */
 int ft_init(char **path_list, int npaths, int height);
@@ -46,7 +46,8 @@ int  ff2_load_fonts(int pixsize);
 void ff2_unload_fonts(void);
 
 /* Register an in-memory font (e.g. a go:embed'd TTF) for a slot; the buffer
- * must outlive the library. ff2_load_fonts() prefers it over any path. */
+ * must outlive the library. Slot 0 precedes file faces; other memory slots
+ * follow the primary file and precede optional file fallback faces. */
 void ff2_set_memory_font(int slot, const unsigned char *data, size_t len);
 
 /* Renders utf8_char (null-terminated UTF-8) blended against bg into dst,

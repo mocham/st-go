@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "ff2.h"
 
 uint32_t utf8_to_codepoint(const char* utf8) {
@@ -58,8 +59,9 @@ ff2_discover(const char *name)
 {
 	const char *home;
 	char path[PATH_MAX];
+	struct stat st;
 
-	if (name[0] == '/' && access(name, R_OK) == 0)
+	if (name[0] == '/' && stat(name, &st) == 0 && S_ISREG(st.st_mode) && access(name, R_OK) == 0)
 		return ff2_strdup(name);
 	if (strchr(name, '/'))
 		return NULL;
@@ -67,13 +69,13 @@ ff2_discover(const char *name)
 	if ((home = getenv("HOME")) != NULL) {
 		snprintf(path, sizeof path, "%s/.local/share/fonts/%s",
 				home, name);
-		if (access(path, R_OK) == 0)
+		if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && access(path, R_OK) == 0)
 			return ff2_strdup(path);
 	}
 	if (getcwd(path, sizeof path) != NULL) {
 		size_t n = strlen(path);
 		snprintf(path + n, sizeof path - n, "/%s", name);
-		if (access(path, R_OK) == 0)
+		if (stat(path, &st) == 0 && S_ISREG(st.st_mode) && access(path, R_OK) == 0)
 			return ff2_strdup(path);
 	}
 	return NULL;
@@ -148,7 +150,7 @@ ff2_unload_fonts(void)
 int
 ff2_load_fonts(int pixsize)
 {
-	char *plist[FF2_MAXFONTS];
+	char *plist[FF2_MAXFONTS] = {0};
 	int i, j, nfont = 0;
 	char *p;
 
@@ -160,7 +162,8 @@ ff2_load_fonts(int pixsize)
 			continue;
 		p = ff2_discover(nm);
 		if (p) {
-			plist[nfont++] = p;
+			plist[i] = p;
+			nfont++;
 		} else {
 			fprintf(stderr, "st: font not found, trying next: %s\n", nm);
 		}
@@ -176,53 +179,68 @@ ff2_load_fonts(int pixsize)
 		char syspath[PATH_MAX];
 		for (j = 0; j < (int)(sizeof sysdirs / sizeof sysdirs[0]); j++)
 			if (ff2_scan_dir(sysdirs[j], syspath, 0)) {
-				plist[nfont++] = ff2_strdup(syspath);
+				plist[0] = ff2_strdup(syspath);
+				nfont++;
 				break;
 			}
 	}
 	if (nfont == 0 && !has_mem)
 		return 0;
 
-	if (!ft_init(plist, nfont, pixsize)) {
-		while (nfont > 0) free(plist[--nfont]);
-		return 0;
-	}
-	while (nfont > 0)
-		free(plist[--nfont]);
-
-	return 1;
+	int ok = ft_init(plist, FF2_MAXFONTS, pixsize);
+	for (i = 0; i < FF2_MAXFONTS; i++) free(plist[i]);
+	return ok;
 }
 
 int ft_init(char **path_list, int npaths, int height) {
 	int i, n;
 
+	ft_cleanup();
 	if (FT_Init_FreeType(&ft_lib)) return 0;
 	n = 0;
-	/* memory fonts first (slot 0 is the go:embed'd primary unless
-	 * overwritten by a path set via ff2_set_font) */
-	for (i = 0; i < FF2_MAXFONTS && n < FF2_MAXFONTS; i++) {
-		if (!ff2_mem[i] || ff2_mem_len[i] == 0)
-			continue;
-		if (FT_New_Memory_Face(ft_lib, ff2_mem[i],
-		    (FT_Long)ff2_mem_len[i], 0, &fonts[n]) == 0) {
-			FT_Set_Pixel_Sizes(fonts[n], 0, height);
-			n++;
+	/* Slot 0 is the embedded primary when no file override is selected. */
+	if (ff2_mem[0] && ff2_mem_len[0] > 0) {
+		if (FT_New_Memory_Face(ft_lib, ff2_mem[0],
+		    (FT_Long)ff2_mem_len[0], 0, &fonts[n]) == 0) {
+			if (FT_Set_Pixel_Sizes(fonts[n], 0, height) == 0) n++;
+			else FT_Done_Face(fonts[n]);
 		}
 	}
-	for (i = 0; i < npaths && n < FF2_MAXFONTS; i++) {
+	if (npaths > 0 && path_list[0]) {
+		if (FT_New_Face(ft_lib, path_list[0], 0, &fonts[n]) == 0) {
+			if (FT_Set_Pixel_Sizes(fonts[n], 0, height) == 0) n++;
+			else FT_Done_Face(fonts[n]);
+		}
+	}
+	/* Embedded fallback follows the requested primary, before optional system
+	 * fonts. A missing/corrupt primary must not switch normal text to an icon
+	 * font or depend on which fonts happen to be installed. */
+	for (i = 1; i < FF2_MAXFONTS && n < FF2_MAXFONTS; i++) {
+		if (!ff2_mem[i] || ff2_mem_len[i] == 0) continue;
+		if (FT_New_Memory_Face(ft_lib, ff2_mem[i],
+		    (FT_Long)ff2_mem_len[i], 0, &fonts[n]) == 0) {
+			if (FT_Set_Pixel_Sizes(fonts[n], 0, height) == 0) n++;
+			else FT_Done_Face(fonts[n]);
+		}
+	}
+	for (i = 1; i < npaths && n < FF2_MAXFONTS; i++) {
 		if (!path_list[i]) continue;
 		if (FT_New_Face(ft_lib, path_list[i], 0, &fonts[n]) == 0) {
-			FT_Set_Pixel_Sizes(fonts[n], 0, height);
-			n++;
+			if (FT_Set_Pixel_Sizes(fonts[n], 0, height) == 0) n++;
+			else FT_Done_Face(fonts[n]);
 		}
 	}
 	fonts[n] = NULL;
-	return 1;
+	return n > 0;
 }
 
 void ft_cleanup() {
-	for (int i = 0; i < FF2_MAXFONTS && fonts[i]; i++) { FT_Done_Face(fonts[i]); }
-	FT_Done_FreeType(ft_lib);
+	for (int i = 0; i < FF2_MAXFONTS; i++) {
+		if (fonts[i]) FT_Done_Face(fonts[i]);
+		fonts[i] = NULL;
+	}
+	if (ft_lib) FT_Done_FreeType(ft_lib);
+	ft_lib = NULL;
 }
 
 int ft_fixed_width(const char *path) {

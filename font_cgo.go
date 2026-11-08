@@ -35,17 +35,25 @@ func loadFonts(fontName string, pixsize int) bool {
 		return false
 	}
 	if fontName == "" {
-		// register the embedded font on slot 0 (must outlive the library;
-		// embeddedFont is a package global, so it does).
+		// The primary embedded font must outlive the library.
 		ptr := unsafe.Pointer(&embeddedFont[0])
 		C.ff2_set_memory_font(0, (*C.uchar)(ptr), C.size_t(len(embeddedFont)))
+		C.ff2_set_memory_font(C.FF2_MAXFONTS-1, nil, 0)
 	} else {
+		C.ff2_set_memory_font(0, nil, 0)
 		cname := C.CString(fontName)
 		defer C.free(unsafe.Pointer(cname))
 		C.ff2_set_font(0, cname)
+		// Keep readable text even if a configured file is missing, corrupt or
+		// only contains icons. This memory slot follows the primary file.
+		C.ff2_set_memory_font(C.FF2_MAXFONTS-1, (*C.uchar)(unsafe.Pointer(&embeddedFont[0])), C.size_t(len(embeddedFont)))
 	}
 	ok := C.ff2_load_fonts(C.int(pixsize))
 	ft.loaded = ok != 0
+	glyphMu.Lock()
+	clear(glyphCache)
+	glyphCacheBytes = 0
+	glyphMu.Unlock()
 	if !ft.loaded {
 		log.Printf("ft2: failed to load fonts\n")
 	}

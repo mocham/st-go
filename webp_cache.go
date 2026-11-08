@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"st-go/limits"
 
@@ -22,11 +21,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const (
-	staticWebPFrame       = -1
-	webPCacheMaxEntries   = 4096
-	webPCacheMaxByteUsage = limits.PreviewCacheBytes
-)
+const staticWebPFrame = -1
 
 // webPCache stores decoded WebP pixels as PNG. Animated frames use the hash of
 // the source WebP plus their frame index and are cached only when requested.
@@ -36,7 +31,6 @@ type webPCache struct {
 	mu            sync.RWMutex
 	closed        bool
 	writes        chan webPCacheWrite
-	touches       chan webPFrameKey
 	stop          chan struct{}
 	pendingFrames map[webPFrameKey]pendingWebPFrame
 	pendingBytes  int
@@ -79,16 +73,11 @@ func openWebPCache(path string) (*webPCache, error) {
 	// The writer never holds a transaction while encoding. A second connection
 	// keeps foreground cache reads from waiting on its short INSERT statements.
 	db.SetMaxOpenConns(2)
-	// New cache databases use incremental auto-vacuum. Existing databases still
-	// reuse pages freed by pruning even if their historical mode cannot change
-	// without a full VACUUM.
-	_, _ = db.Exec(`PRAGMA auto_vacuum=INCREMENTAL`)
 	for _, schema := range []string{
 		`CREATE TABLE IF NOT EXISTS webp_frames (
 			source_hash BLOB NOT NULL,
 			frame_index INTEGER NOT NULL,
 			png BLOB NOT NULL,
-			accessed_at INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (source_hash, frame_index)
 		) WITHOUT ROWID`,
 	} {
@@ -97,52 +86,14 @@ func openWebPCache(path string) (*webPCache, error) {
 			return nil, err
 		}
 	}
-	if err := ensureWebPCacheAccessColumn(db); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS webp_frames_accessed_at ON webp_frames(accessed_at)`); err != nil {
-		db.Close()
-		return nil, err
-	}
 	cache := &webPCache{
 		db:            db,
 		writes:        make(chan webPCacheWrite, 2),
-		touches:       make(chan webPFrameKey, 64),
 		stop:          make(chan struct{}),
 		pendingFrames: make(map[webPFrameKey]pendingWebPFrame),
 	}
-	cache.prune(webPCacheMaxEntries, webPCacheMaxByteUsage)
 	go cache.runWriter()
 	return cache, nil
-}
-
-func ensureWebPCacheAccessColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(webp_frames)`)
-	if err != nil {
-		return err
-	}
-	found := false
-	for rows.Next() {
-		var cid, notNull, primaryKey int
-		var name, dataType string
-		var defaultValue any
-		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
-			rows.Close()
-			return err
-		}
-		if name == "accessed_at" {
-			found = true
-		}
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	if found {
-		return nil
-	}
-	_, err = db.Exec(`ALTER TABLE webp_frames ADD COLUMN accessed_at INTEGER NOT NULL DEFAULT 0`)
-	return err
 }
 
 func secureCacheFile(path string) error {
@@ -226,9 +177,6 @@ func (c *webPCache) frame(data []byte, frameIdx int) (w, h int, rgba []byte, ok 
 		return 0, 0, nil, false
 	}
 	w, h, rgba, ok = decodeCachedPNG(encoded)
-	if ok {
-		c.touch(key)
-	}
 	return w, h, rgba, ok
 }
 
@@ -245,25 +193,10 @@ func (c *webPCache) putFrameHash(hash [sha256.Size]byte, frameIdx, w, h int, rgb
 		return false
 	}
 	_, err := c.db.Exec(
-		`INSERT OR REPLACE INTO webp_frames (source_hash, frame_index, png, accessed_at) VALUES (?, ?, ?, ?)`,
-		hash[:], frameIdx, encoded, time.Now().UnixNano(),
+		`INSERT OR REPLACE INTO webp_frames (source_hash, frame_index, png) VALUES (?, ?, ?)`,
+		hash[:], frameIdx, encoded,
 	)
-	if err == nil {
-		c.prune(webPCacheMaxEntries, webPCacheMaxByteUsage)
-	}
 	return err == nil
-}
-
-func (c *webPCache) touch(key webPFrameKey) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.closed {
-		return
-	}
-	select {
-	case c.touches <- key:
-	default:
-	}
 }
 
 func (c *webPCache) putFrameAsync(data []byte, frameIdx, w, h int, rgba []byte) {
@@ -300,7 +233,17 @@ func (c *webPCache) runWriter() {
 		select {
 		case <-c.stop:
 			return
+		default:
+		}
+		select {
+		case <-c.stop:
+			return
 		case job := <-c.writes:
+			select {
+			case <-c.stop:
+				return
+			default:
+			}
 			c.putFrameHash(job.hash, job.frameIndex, job.w, job.h, job.rgba)
 			c.mu.Lock()
 			key := webPFrameKey{hash: job.hash, index: job.frameIndex}
@@ -309,65 +252,7 @@ func (c *webPCache) runWriter() {
 				delete(c.pendingFrames, key)
 			}
 			c.mu.Unlock()
-		case key := <-c.touches:
-			_, _ = c.db.Exec(
-				`UPDATE webp_frames SET accessed_at=? WHERE source_hash=? AND frame_index=?`,
-				time.Now().UnixNano(), key.hash[:], key.index,
-			)
 		}
-	}
-}
-
-func (c *webPCache) prune(maxEntries, maxBytes int) {
-	if c == nil || c.db == nil || maxEntries < 1 || maxBytes < 1 {
-		return
-	}
-	var count int
-	var total int64
-	if err := c.db.QueryRow(`SELECT count(*), COALESCE(sum(length(png)), 0) FROM webp_frames`).Scan(&count, &total); err != nil {
-		return
-	}
-	if count <= maxEntries && total <= int64(maxBytes) {
-		return
-	}
-	type cachedKey struct {
-		hash  []byte
-		index int
-		size  int64
-	}
-	rows, err := c.db.Query(`
-		SELECT source_hash, frame_index, length(png)
-		FROM webp_frames ORDER BY accessed_at, source_hash, frame_index`)
-	if err != nil {
-		return
-	}
-	var remove []cachedKey
-	for rows.Next() && (count > maxEntries || total > int64(maxBytes)) {
-		var key cachedKey
-		if err := rows.Scan(&key.hash, &key.index, &key.size); err != nil {
-			break
-		}
-		key.hash = append([]byte(nil), key.hash...)
-		remove = append(remove, key)
-		count--
-		total -= key.size
-	}
-	_ = rows.Close()
-	if len(remove) == 0 {
-		return
-	}
-	tx, err := c.db.Begin()
-	if err != nil {
-		return
-	}
-	for _, key := range remove {
-		if _, err := tx.Exec(`DELETE FROM webp_frames WHERE source_hash=? AND frame_index=?`, key.hash, key.index); err != nil {
-			_ = tx.Rollback()
-			return
-		}
-	}
-	if tx.Commit() == nil {
-		_, _ = c.db.Exec(`PRAGMA incremental_vacuum(64)`)
 	}
 }
 

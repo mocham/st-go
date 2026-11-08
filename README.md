@@ -32,7 +32,7 @@ parser and screen model, and the X11 frontend is built on the pure-Go
 - Clipboard & PRIMARY selection with INCR transfer, bracketed paste
 - XIM-free keyboard handling with a full Linux-console keymap
 - Inline image display via a DCS display DSL (stb_image / libwebp decoders)
-- PDF display via a minimal static poppler (C++ API, first page or `page N`)
+- PDF display via static Poppler/Splash, including embedded JPEG images
 - JSON configuration (`config.json`)
 
 ## Resource limits and error logs
@@ -48,7 +48,6 @@ from it:
 | Terminal screen grids (both buffers plus bookkeeping) | 64 MiB |
 | Glyph cache | 32 MiB / 16,384 entries |
 | Continuous PDF cache | 256 MiB per strip, up to five screenfuls |
-| Persistent WebP cache | 256 MiB / 4,096 frames |
 | Clipboard transfer | 8 MiB |
 | OSC/DCS control string | 1 MiB |
 | Animation frame count | 65,536 |
@@ -334,8 +333,10 @@ Beyond `st-min`, each target adds libraries on top of the previous one:
   PNG/JPEG/GIF/BMP/TGA decoding. This enables the inline-image DSL for raster
   formats. WebP and PDF remain stubbed.
 - **`st-pdf`** — adds a **minimal static poppler** built with only the C++
-  API (`page_renderer` → raw BGRA; no cairo/glib/gobject/ffi/pixman/lcms/
-  openjpeg/turbojpeg). Enables displaying PDFs (first page, or `page N`).
+  API and Splash renderer, with FreeType, zlib, libpng, and **libjpeg-turbo**
+  linked statically. The libjpeg API decodes embedded JPEG (`DCTDecode`) images,
+  including scanned covers/pages. NASM optionally enables x86 SIMD when building
+  libjpeg-turbo. Enables displaying PDFs (first page, or `page N`).
   WebP remains stubbed.
 - **`st`** (default, `make`) — the full build: stb_image, libwebp, poppler, and
   the SQLite WebP cache, so every format the DSL supports is decoded.
@@ -360,6 +361,15 @@ the stub objects live in `third_party_wrapper/dummy-{stb,webp,pdf}.c`. See
 ./st vim -c 'set number' notes.md
 ```
 
+Configuration lookup is `-config <file>`, then `st.json` beside the executable
+(the name written by `make install`), then legacy `config.json` beside it,
+then the embedded defaults. Copying `st` into `~/.local/bin` needs no companion
+files. Missing, malformed or unusable configuration falls back to embedded
+defaults with a diagnostic; it must not prevent startup or leave black text on
+a black background. Relative font paths are resolved beside the selected
+configuration. A missing/corrupt custom font, or missing glyphs in it, falls
+back to the **embedded Monaco font** before optional system fallback faces.
+
 `st-go` generates the compiled `st-256color` entry directly in Go; it does not
 require `tic` or a system terminfo development package. `make install` writes
 the entry and its `stterm-256color` alias beneath
@@ -373,8 +383,7 @@ location, or disable the cache with an empty path, in JSON. `{uid}` in a
 configured path expands to the current numeric user ID. The cache directory
 must be owned by the current user and not writable by other users.
 PNG encoding and SQLite writes run on a bounded background worker so cache
-population does not block terminal rendering or input. Least-recently-used
-frames are pruned at 4,096 entries or 256 MiB.
+population does not block terminal rendering or input.
 Animated WebP metadata is read without rasterizing frames; frames are decoded
 and queued for caching individually only as playback requests them.
 

@@ -1326,9 +1326,15 @@ func (b *Browser) renderPreview() {
 		b.setPreviewLink(path)
 		title := "PREVIEW  "
 		anim := ""
+		width := b.previewW
 		if isAnimatedWebp(path) {
 			title = "ANIMATED  "
 			anim = " anim"
+			// Writes over an animation cancel playback. Keep its live rectangle
+			// out of the floating sidebar, including the divider column.
+			if b.navigationVisible {
+				width = max(1, min(width, b.listX-2))
+			}
 		}
 		b.drawPreviewTitle(title + displayText(baseName(path)))
 		h := b.rows - 3
@@ -1338,7 +1344,7 @@ func (b *Browser) renderPreview() {
 		if b.isPDF(path) {
 			b.dcs(fmt.Sprintf("open '%s' rect 1 3 %d %d fit-contain page %d", b.previewLink, b.previewW, h, b.page))
 		} else {
-			b.dcs(fmt.Sprintf("open '%s' rect 1 3 %d %d fit-contain%s", b.previewLink, b.previewW, h, anim))
+			b.dcs(fmt.Sprintf("open '%s' rect 1 3 %d %d fit-contain%s", b.previewLink, width, h, anim))
 		}
 		b.atlasClean = false
 		b.previewWasGraphic = true

@@ -8,12 +8,12 @@
 #   - poppler     : PDF rendering (first page / page N via "open")
 #   - zlib        : poppler's stream decompression
 #   - libpng      : poppler's embedded-image support
+#   - libjpeg-turbo: poppler's JPEG/DCT image decoder
 # SQLite comes from go-sqlite3's bundled amalgamation rather than third_party/.
 #
-# poppler is built MINIMAL: only the C++ API (page_renderer -> raw BGRA) is
-# linked, so cairo/glib/gobject/ffi/pixman/lcms/openjpeg/turbojpeg are NOT
-# needed (the bloat that poppler's glib API would pull in). Only freetype +
-# zlib + libpng are required.
+# poppler uses the C++/Splash renderer with static freetype, zlib, libpng and
+# libjpeg-turbo. The JPEG decoder uses libjpeg.a, not the TurboJPEG API.
+# GUI bindings, Cairo, color management and JPEG 2000 are disabled.
 #
 # X is driven by the pure-Go xgb library over sockets, so no X11 C library
 # is needed. The result is a fully static binary with no dynamic deps.
@@ -63,10 +63,7 @@ VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
-# A MINIMAL static poppler using only the C++ API (page_renderer -> raw BGRA),
-# so we do NOT need cairo/glib/gobject/ffi/pixman/lcms/openjpeg/turbojpeg
-# (the bloat that poppler's glib API pulls in). Only freetype (already in
-# third_party/) + zlib + libpng are required.
+# Static C++/Splash rendering, including embedded JPEG images through libjpeg.
 POPPLER_VERSION = 25.07.0
 POPPLER_URL     = https://poppler.freedesktop.org/poppler-$(POPPLER_VERSION).tar.xz
 POPPLER_TAR     = third_party/poppler-$(POPPLER_VERSION).tar.xz
@@ -85,6 +82,15 @@ PNG_URL     = https://download.sourceforge.net/libpng/libpng-$(PNG_VERSION).tar.
 PNG_TAR     = third_party/libpng-$(PNG_VERSION).tar.gz
 PNG_SRC     = third_party/libpng-src
 PNG_LIB     = third_party/poppler/lib/libpng16.a
+
+JPEG_VERSION = 3.2.1
+JPEG_URL     = https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/$(JPEG_VERSION)/libjpeg-turbo-$(JPEG_VERSION).tar.gz
+JPEG_SHA256  = c27ad72a68da151177929aa969ae773a2da5ac2af9ce946079314fdac8cece7f
+JPEG_TAR     = third_party/libjpeg-turbo-$(JPEG_VERSION).tar.gz
+JPEG_SRC     = third_party/libjpeg-turbo-src
+JPEG_BUILD   = $(JPEG_SRC)/build
+JPEG_DIR     = third_party/jpeg
+JPEG_LIB     = $(JPEG_DIR)/lib/libjpeg.a
 
 # libwebp: WebP decode (stb_image has no WebP support).
 WEBP_VERSION = 1.6.0
@@ -178,6 +184,29 @@ $(PNG_LIB): $(ZLIB_LIB)
 	cp "$(PNG_SRC)/.libs/libpng16.a" "$(PNG_LIB)"
 	cp "$(PNG_SRC)/png.h" "$(PNG_SRC)/pngconf.h" "$(PNG_SRC)/pnglibconf.h" third_party/poppler/include/
 
+# --- libjpeg-turbo static (poppler DCTDecode/JPEG support) ----------------
+# Build only the libjpeg API. SIMD is auto-detected; NASM enables it on x86.
+$(JPEG_LIB): Makefile
+	@mkdir -p third_party
+	@if [ ! -f "$(JPEG_TAR)" ]; then \
+		echo "downloading libjpeg-turbo $(JPEG_VERSION)..."; \
+		curl -fL --retry 3 -o "$(JPEG_TAR).tmp" "$(JPEG_URL)" && \
+		mv "$(JPEG_TAR).tmp" "$(JPEG_TAR)"; \
+	fi
+	printf '%s  %s\n' '$(JPEG_SHA256)' '$(JPEG_TAR)' | sha256sum -c -
+	rm -rf "$(JPEG_SRC)" "$(JPEG_DIR)"
+	mkdir -p "$(JPEG_SRC)" "$(JPEG_DIR)/lib" "$(JPEG_DIR)/include"
+	tar -xzf "$(JPEG_TAR)" -C "$(JPEG_SRC)" --strip-components=1
+	cmake -S "$(JPEG_SRC)" -B "$(JPEG_BUILD)" \
+		-DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+		-DCMAKE_C_FLAGS="-ffunction-sections -fdata-sections" \
+		-DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_TURBOJPEG=OFF \
+		-DWITH_TOOLS=OFF -DWITH_TESTS=OFF
+	$(MAKE) -C "$(JPEG_BUILD)" jpeg-static
+	cp "$(JPEG_BUILD)/libjpeg.a" "$(JPEG_LIB)"
+	cp "$(JPEG_BUILD)/jconfig.h" "$(JPEG_SRC)/src/jpeglib.h" \
+		"$(JPEG_SRC)/src/jmorecfg.h" "$(JPEG_SRC)/src/jerror.h" "$(JPEG_DIR)/include/"
+
 # --- libwebp static (WebP decode; stb_image has no WebP support) ----------
 $(WEBP_LIB):
 	@mkdir -p third_party
@@ -237,7 +266,7 @@ $(SND_O): $(SND_C) $(ALSA_LIB)
 	$(CC) -O2 -fPIC -Ithird_party/alsa/include -c "$<" -o "$@"
 
 # --- poppler static (minimal, C++ API only) ------------------------------
-$(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB)
+$(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB) $(JPEG_LIB) Makefile
 	@mkdir -p third_party
 	@if [ ! -f "$(POPPLER_TAR)" ]; then \
 		echo "downloading poppler $(POPPLER_VERSION)..."; \
@@ -258,11 +287,13 @@ $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB)
 		-DZLIB_LIBRARY="$(abspath third_party/poppler/lib/libz.a)" \
 		-DPNG_INCLUDE_DIR="$(abspath third_party/poppler/include)" \
 		-DPNG_LIBRARY="$(abspath third_party/poppler/lib/libpng16.a)" \
+		-DJPEG_INCLUDE_DIR="$(abspath $(JPEG_DIR)/include)" \
+		-DJPEG_LIBRARY="$(abspath $(JPEG_LIB))" \
 		-DFONT_CONFIGURATION=generic \
 		-DENABLE_GLIB=OFF -DENABLE_QT5=OFF -DENABLE_QT6=OFF \
 		-DENABLE_BOOST=OFF -DENABLE_CAIRO=OFF -DENABLE_LCMS=OFF \
 		-DENABLE_LIBCURL=OFF -DENABLE_LIBTIFF=OFF -DENABLE_NSS3=OFF \
-		-DENABLE_GPGME=OFF -DENABLE_LIBOPENJPEG=none -DENABLE_DCTDECODER=none \
+		-DENABLE_GPGME=OFF -DENABLE_LIBOPENJPEG=none -DENABLE_DCTDECODER=libjpeg \
 		-DENABLE_CPP=ON -DENABLE_UTILS=OFF -DENABLE_GTK_DOC=OFF \
 		-DBUILD_QT5_TESTS=OFF -DBUILD_QT6_TESTS=OFF -DBUILD_CPP_TESTS=OFF
 	$(MAKE) -C "$(POPPLER_BUILD)"
@@ -295,8 +326,8 @@ PDF_BRIDGE_O = third_party/pdf_bridge.o
 # -ffunction-sections -fdata-sections).
 MIN_EXTRA  = $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF)
 STB_EXTRA  = $(STB_O) -lm $(DUMMY_WEBP) $(DUMMY_PDF)
-PDF_EXTRA  = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(DUMMY_WEBP)
-FULL_EXTRA = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
+PDF_EXTRA  = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(DUMMY_WEBP)
+FULL_EXTRA = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
 
 # ALSA link items for the Go file-browser (libasound + the playback wrapper).
 # snd.o must precede -l:libasound.a. -ldl/-lpthread are no-ops on modern glibc
@@ -390,6 +421,13 @@ TEST_EXTRA = $(FULL_EXTRA) $(ALSA_EXTRA)
 test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O)
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
+# End-to-end animated-WebP playback through the built browser, PTY, terminal
+# timer and X framebuffer. Point DISPLAY at an isolated X server.
+test-webp-x11: st file-browser
+	ST_TEST_WEBP_X11=1 ST_TEST_BINARY=./st ST_TEST_FILE_BROWSER=./file-browser \
+	go test -tags '$(FULL_GO_TAGS)' . -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' \
+		-run '^TestWebPAnimationX11FileBrowserPlayback$$' -count=1 -v
+
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
 	rm -f "$(DESTDIR)$(TERMINFO_DIR)/s/st-256color" \
@@ -401,4 +439,4 @@ clean:
 distclean:
 	rm -rf third_party st st-min st-stb st-pdf file-browser gols vimtex zat
 
-.PHONY: all install uninstall clean distclean test
+.PHONY: all install uninstall clean distclean test test-webp-x11

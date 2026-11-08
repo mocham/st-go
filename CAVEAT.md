@@ -86,6 +86,40 @@ A GC is depth-tied, not drawable-tied; a GC created on the backing pixmap works
 for `PutImage`/`CopyArea` on the window of the same depth. The backing pixmap
 is currently unused for blitting (we `PutImage` straight to the window).
 
+### 1.11 Relocated startup and configuration fallback
+
+Test the actual executable copied into an otherwise empty directory, not only
+the frontend helpers. `ST_TEST_STARTUP_X11=1` enables the isolated-X test;
+`ST_TEST_BINARY` selects the built variant. It checks visible shell output and
+keyboard input with absent, invalid and legacy adjacent configuration files.
+A 16-entry `colorname` array used to leave slots 256..259 absent, making both
+foreground and background black. Invalid palettes/geometry must fall back to
+the embedded configuration. `st.json` (the installer filename) takes precedence
+over legacy `config.json`; an invalid selected file falls back to embedded
+defaults. Never accept partially unmarshaled settings after a JSON error.
+The embedded Monaco face must remain available behind any custom font; native
+font initialization must report failure if it loaded no usable faces.
+
+### 1.12 Animated WebP playback
+
+WebP cache/playback is restored to the implementation before `c8160d9`:
+content-hash/frame lookups, pending pixels and bounded asynchronous writes.
+The cache-cleanse migration, access-time updates, pruning and vacuum code, and
+the subsequent cache rewrites have been reverted.
+
+Floating browser sidebars used to cancel animations immediately after frame 1:
+any ordinary write into an animation rectangle cancels playback by design.
+Keep animated previews within the unobscured area left of the sidebar/divider.
+This restores the pane boundary used before floating navigation was introduced
+in `569a236`; do not rely on output ordering to keep an overlapping animation
+alive. The browser regression replays its real drawing output into the terminal
+core and verifies frame advancement and sidebar preservation.
+`TestWebPAnimationX11FileBrowserPlayback` is the process-level check: with
+`DISPLAY=:N make test-webp-x11` on an isolated X server, it launches the built
+terminal and browser, keeps floating navigation enabled, and requires multiple
+distinct preview frames from `GetImage` rather than trusting decoder state
+alone.
+
 ---
 
 ## 2. Terminal emulation caveats
@@ -240,12 +274,17 @@ gc-sections traps:
 
 ### 3.2 Minimal poppler (bloat removal)
 
-poppler's **glib API** drags in glib/gobject/ffi/cairo/pixman/lcms/openjpeg/
-turbojpeg. Use the **C++ API** (`poppler::page_renderer::render_page()` → raw
-BGRA) instead — it only needs freetype + zlib (+ libpng for embedded images).
+The **C++/Splash API** produces raw pixels without the GLib/Cairo GUI stack.
+Image codecs are separate from the API choice: embedded JPEG (`DCTDecode`)
+images require the static libjpeg API supplied by libjpeg-turbo, alongside
+FreeType, zlib and libpng. Disabling DCT decoding can yield a successful render
+containing a blank page; regression tests must check pixels, not only success.
 Build flags: `-DENABLE_GLIB=OFF -DENABLE_QT5=OFF -DENABLE_QT6=OFF
 -DENABLE_CAIRO=OFF -DENABLE_LCMS=OFF -DENABLE_GPGME=OFF -DFONT_CONFIGURATION=generic
--DENABLE_LIBOPENJPEG=none -DENABLE_DCTDECODER=none`.
+-DENABLE_LIBOPENJPEG=none -DENABLE_DCTDECODER=libjpeg`.
+Pass the vendored JPEG include/archive paths to CMake, and place `libjpeg.a`
+after `libpoppler.a` in the static linker list. Both `st` and `st-pdf`, plus
+`make test`, use that archive; the separate TurboJPEG API is not needed.
 
 ### 3.3 Config must be self-contained
 
@@ -258,7 +297,8 @@ silently stop working. Keep the embedded config complete.
 ### 3.4 Makefile third-party rebuilds
 
 `third_party/` is gitignored and rebuilt on demand (freetype, stb, zlib, libpng,
-poppler). Pitfalls seen:
+libjpeg-turbo, poppler). Poppler and libjpeg-turbo depend on `Makefile` so codec
+configuration changes rebuild existing archives. Pitfalls seen:
 - Use `tar --strip-components=1` (GNU) — `--transform` is not portable.
 - After copying libs around, `make` can spuriously rebuild due to timestamp
   races (lib copied in the same second as its dependency). `touch` the outputs.
