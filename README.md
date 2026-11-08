@@ -531,6 +531,23 @@ XHTML, and EPUB previews pass sanitized semantic markup to the separate native
 `semhtml` PDF renderer; EPUB files first resolve their package spine. This path
 preserves headings, paragraphs, lists, inline emphasis, code, links, table text,
 and image alt text while deliberately ignoring CSS and publication fonts.
+Preliminary `.docx` and `.xlsx` previews extract text directly from their ZIP
+parts and use the same paged PDF viewer. DOCX includes body paragraphs and table
+text; XLSX shows sheets in workbook order with cell references and values,
+including shared/inline strings and saved formula results. Office formatting,
+images, date/number styles, and formula recalculation are not supported. ZIP/XML
+reads and extracted text are bounded; external relationships are never fetched.
+Legacy `.doc` files also have a self-contained, text-only preview for unencrypted
+Word 97–2003 binary documents (including compatible later saves). A bounded OLE
+reader follows the Word piece table, decoding compressed and UTF-16 text in
+document order. It reads only header, piece-table and text ranges rather than
+loading picture-heavy Word/Table streams, and tolerates unallocated trailers
+and missing unused data-sector padding. Missing referenced bytes still fail;
+metadata/text budgets and the 256 MiB container limit remain enforced.
+Saved field results are shown without field instructions;
+formatting, images, headers, footnotes, and embedded documents are omitted.
+Encrypted files, older Word formats, and RTF/HTML files renamed to `.doc` are
+not supported. No `antiword`, `catdoc`, or Office installation is required.
 The file-browser and gols use a **1.7× font scale** for their LaTeX/Markdown
 previews; vimtex uses its own **0.8× font scale** for the fit-width editor pane.
 Generated document previews are session-temporary. A changed source digest

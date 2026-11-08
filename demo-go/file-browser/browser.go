@@ -649,7 +649,7 @@ func (b *Browser) fileType(path string) string {
 		return "code"
 	case hasSuffixAny(ext, ".json", ".yaml", ".yml", ".toml", ".ini", ".conf", ".xml"):
 		return "config"
-	case hasSuffixAny(ext, ".txt", ".md", ".markdown", ".html", ".htm", ".xhtml", ".css", ".tex", ".bib", ".bbl", ".rst", ".log", ".csv", ".epub"):
+	case hasSuffixAny(ext, ".txt", ".md", ".markdown", ".html", ".htm", ".xhtml", ".css", ".tex", ".bib", ".bbl", ".rst", ".log", ".csv", ".epub", ".doc", ".docx", ".xlsx"):
 		return "text"
 	default:
 		if isExecutable(path) {

@@ -74,7 +74,7 @@ func (document *documentPreview) pagePath(page int) (string, bool) {
 }
 
 func isRenderedDocument(path string) bool {
-	return hasSuffixAny(strings.ToLower(path), ".tex", ".md", ".markdown", ".epub", ".html", ".htm", ".xhtml")
+	return hasSuffixAny(strings.ToLower(path), ".tex", ".md", ".markdown", ".epub", ".html", ".htm", ".xhtml", ".doc", ".docx", ".xlsx")
 }
 
 func (renderer *previewDocumentRenderer) render(path string) (*documentPreview, error) {
@@ -88,6 +88,10 @@ func (renderer *previewDocumentRenderer) renderSized(path string, pageWidth, pag
 		return renderer.renderEPUBSized(path, pageWidth, pageHeight)
 	case ".html", ".htm", ".xhtml":
 		return renderer.renderHTMLSized(path, pageWidth, pageHeight)
+	case ".docx", ".xlsx":
+		return renderer.renderOfficeSized(path, pageWidth, pageHeight)
+	case ".doc":
+		return renderer.renderDOCSized(path, pageWidth, pageHeight)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

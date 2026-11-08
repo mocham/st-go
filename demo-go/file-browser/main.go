@@ -27,7 +27,9 @@ matching entries, :help shows this manual, Tab shows/hides the navigation
 sidebar, Shift+Tab toggles floating/pinned navigation, . toggles hidden files,
 r refreshes, q quits.
 Mouse: click selects, double-click opens/enters, wheel scrolls the list; over a
-PDF, TeX, or Markdown preview the wheel changes pages.
+PDF or rendered document preview the wheel changes pages.
+DOCX and XLSX have preliminary text-only, paginated previews from their ZIP XML.
+Legacy DOC previews support unencrypted Word 97–2003 binary files without external tools.
 SQLite .sqlite3, .sqlite, .db, .db3, and .s3db files open as read-only virtual
 directories: tables contain paginated record entries.
 `)

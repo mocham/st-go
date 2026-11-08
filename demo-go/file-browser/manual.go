@@ -23,13 +23,22 @@ PREVIEW
   modes for newly painted previews. TeX and Markdown are rendered locally to
   paginated vector PDFs by latexpdf; Markdown supports inline and display
   LaTeX math through the same pipeline.
+  DOCX and XLSX have preliminary text-only previews extracted from their
+  ZIP bundles. DOCX shows paragraphs and table text; XLSX shows sheet names,
+  cell references and values (saved formula results, without recalculation).
+  Office formatting, images and date/number styles are not reproduced.
+  Legacy DOC previews read unencrypted Word 97–2003 binary files directly,
+  including compatible later saves. Main-body text and saved field results
+  are shown; headers, footnotes, images and formatting are omitted. Older,
+  encrypted, and renamed RTF/HTML files are not supported. No Office tools
+  are needed.
   Animated WebP files play once in the preview pane (progress shown in
   the rect); a visible sidebar reserves its space so redraws do not stop
   playback. The terminal does all image/animation decoding.
   MP3 files are decoded in-browser and played through the ALSA
   device; their tags, duration, and sample rate are shown. Enter or
   o opens the mp3 viewer, q stops playback and closes it.
-  Wheel over a PDF, TeX, or Markdown preview changes pages; [ and ] do the same.
+  Wheel over a PDF or rendered document preview changes pages; [ and ] do the same.
   A text preview stops at the last visible row and never scrolls.
 
 COMMAND PROMPT  (:)
