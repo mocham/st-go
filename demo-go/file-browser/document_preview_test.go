@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -117,5 +118,86 @@ The macro renders as $\ZZ/n\ZZ$.
 	}
 	if pagePath, isPDF := document.pagePath(2); !isPDF || pagePath != document.PDFPath {
 		t.Fatalf("pagePath(2) = %q, %t; want shared PDF %q", pagePath, isPDF, document.PDFPath)
+	}
+}
+
+func TestDocumentPreviewCacheRemovesSupersededRevision(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "changing.md")
+	if err := os.WriteFile(path, []byte("# First\n\nOld body."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	renderer := newPreviewDocumentRenderer(dir)
+	first, err := renderer.renderSized(path, 120, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := renderer.renderSized(path, 140, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.PDFPath == second.PDFPath || len(renderer.docs) != 2 {
+		t.Fatalf("size variants = %q, %q; cache entries=%d", first.PDFPath, second.PDFPath, len(renderer.docs))
+	}
+	if err := os.WriteFile(path, []byte("# Second\n\nNew body with a changed digest."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := renderer.renderSized(path, 120, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.PDFPath == first.PDFPath || len(renderer.docs) != 1 {
+		t.Fatalf("updated preview = %q; cache entries=%d", updated.PDFPath, len(renderer.docs))
+	}
+	for _, stale := range []string{first.PDFPath, second.PDFPath} {
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Fatalf("stale preview %q still exists: %v", stale, err)
+		}
+	}
+}
+
+func TestDocumentPreviewCacheBoundsSizeVariants(t *testing.T) {
+	dir := t.TempDir()
+	renderer := newPreviewDocumentRenderer(dir)
+	logicalPath := renderer.prepareSource(filepath.Join(dir, "document.tex"), "revision")
+	var paths []string
+	for index := 0; index < maxPreviewVariants+2; index++ {
+		path := filepath.Join(dir, fmt.Sprintf("variant-%d.pdf", index))
+		if err := os.WriteFile(path, []byte("pdf"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+		renderer.storeSourcePreview(logicalPath, fmt.Sprintf("key-%d", index), &documentPreview{PDFPath: path})
+	}
+	if len(renderer.docs) != maxPreviewVariants {
+		t.Fatalf("variant cache entries = %d, want %d", len(renderer.docs), maxPreviewVariants)
+	}
+	for _, stale := range paths[:2] {
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Fatalf("evicted variant %q still exists: %v", stale, err)
+		}
+	}
+}
+
+func TestDocumentPreviewCacheBoundsAllSources(t *testing.T) {
+	dir := t.TempDir()
+	renderer := newPreviewDocumentRenderer(dir)
+	var paths []string
+	for index := 0; index < maxDocumentPreviews+2; index++ {
+		logicalPath := renderer.prepareSource(filepath.Join(dir, fmt.Sprintf("document-%d.tex", index)), "revision")
+		path := filepath.Join(dir, fmt.Sprintf("document-%d.pdf", index))
+		if err := os.WriteFile(path, []byte("pdf"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+		renderer.storeSourcePreview(logicalPath, fmt.Sprintf("key-%d", index), &documentPreview{PDFPath: path})
+	}
+	if len(renderer.docs) != maxDocumentPreviews || len(renderer.order) != maxDocumentPreviews {
+		t.Fatalf("global preview cache = %d entries / %d order, want %d", len(renderer.docs), len(renderer.order), maxDocumentPreviews)
+	}
+	for _, stale := range paths[:2] {
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Fatalf("globally evicted preview %q still exists: %v", stale, err)
+		}
 	}
 }

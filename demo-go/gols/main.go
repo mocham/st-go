@@ -23,8 +23,9 @@ shown. Opening a database moves it to the front of that list.
 Hierarchy: database -> corpus -> documents -> PDF/LaTeX contents
 
 Keys: arrows navigate, Enter/right opens a level, Backspace/left goes back,
-PgUp/PgDn scroll, / searches, [ and ] change rendered TeX pages, and Tab hides
-or focuses the navigation pane. Mouse clicks and wheel scrolling are supported.
+PgUp/PgDn scroll, / searches, r reopens databases, [ and ] change rendered TeX
+pages, and Tab hides or focuses the navigation pane. Mouse clicks and wheel
+scrolling are supported.
 `)
 }
 

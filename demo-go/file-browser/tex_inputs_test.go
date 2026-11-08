@@ -54,8 +54,11 @@ func TestTeXPreviewCacheIncludesDependencyContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.PDFPath == second.PDFPath || len(renderer.docs) != 2 {
+	if first.PDFPath == second.PDFPath || len(renderer.docs) != 1 {
 		t.Fatalf("include edit reused stale preview: first=%q second=%q entries=%d", first.PDFPath, second.PDFPath, len(renderer.docs))
+	}
+	if _, err := os.Stat(first.PDFPath); !os.IsNotExist(err) {
+		t.Fatalf("superseded dependency preview still exists: %v", err)
 	}
 }
 

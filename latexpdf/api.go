@@ -82,8 +82,8 @@ type SourcePage struct {
 
 type latexSourcePage = SourcePage
 
-// Renderer owns concurrency-safe in-memory HTML, formula, and PDF caches.
-// A Renderer may be reused by multiple goroutines.
+// Renderer owns bounded, concurrency-safe in-memory HTML, formula, and PDF
+// caches. A Renderer may be reused by multiple goroutines.
 type Renderer struct {
 	once  sync.Once
 	latex *latexRenderer
@@ -156,12 +156,11 @@ func (renderer *Renderer) RenderPDFResultWithOptions(document Document, options 
 	renderer.ensureInitialized()
 	key := PDFCacheKeyWithOptions(document, options)
 	rendered := renderer.RenderHTML(document.Source, "pdf-html-"+sourceCacheKey(document.Source))
-	pdf, err := renderer.pdf.render(document, rendered.Body, rendered.Sections, key, options)
+	pdf, sectionPages, err := renderer.pdf.render(document, rendered.Body, rendered.Sections, key, options)
 	if err != nil {
 		return PDFResult{}, err
 	}
 	sections := append([]Section(nil), rendered.Sections...)
-	sectionPages := renderer.pdf.pagesForSections(key)
 	for index := range sections {
 		sections[index].Page = sectionPages[sections[index].ID]
 	}

@@ -11,7 +11,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -45,9 +44,13 @@ const (
 var pdfFontBytes []byte
 
 type pdfRenderer struct {
-	documents    sync.Map
-	sectionPages sync.Map
-	formulae     sync.Map
+	documents *boundedCache[cachedPDFDocument]
+	formulae  *boundedCache[*pdfFormula]
+}
+
+type cachedPDFDocument struct {
+	data         []byte
+	sectionPages map[string]int
 }
 
 type pdfFormula struct {
@@ -143,33 +146,28 @@ type pdfTOCEntry struct {
 }
 
 func newPDFRenderer() *pdfRenderer {
-	return &pdfRenderer{}
+	return &pdfRenderer{
+		documents: newBoundedCache[cachedPDFDocument](16),
+		formulae:  newBoundedCache[*pdfFormula](1024),
+	}
 }
 
-func (renderer *pdfRenderer) pagesForSections(cacheKey string) map[string]int {
-	result := make(map[string]int)
-	stored, ok := renderer.sectionPages.Load(cacheKey)
-	if !ok {
-		return result
-	}
-	for id, page := range stored.(map[string]int) {
-		result[id] = page
-	}
-	return result
-}
-
-func (renderer *pdfRenderer) render(document Document, body template.HTML, sections []Section, cacheKey string, options PDFOptions) ([]byte, error) {
+func (renderer *pdfRenderer) render(document Document, body template.HTML, sections []Section, cacheKey string, options PDFOptions) ([]byte, map[string]int, error) {
 	if cached, ok := renderer.documents.Load(cacheKey); ok {
-		return append([]byte(nil), cached.([]byte)...), nil
+		pages := make(map[string]int, len(cached.sectionPages))
+		for id, page := range cached.sectionPages {
+			pages[id] = page
+		}
+		return append([]byte(nil), cached.data...), pages, nil
 	}
 
 	pageWidth, pageHeight, err := pdfPageSize(options)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fontScale := options.FontScale
 	if math.IsNaN(fontScale) || math.IsInf(fontScale, 0) || fontScale < 0 {
-		return nil, fmt.Errorf("invalid PDF font scale %g", fontScale)
+		return nil, nil, fmt.Errorf("invalid PDF font scale %g", fontScale)
 	}
 	if fontScale == 0 {
 		fontScale = 1
@@ -203,7 +201,7 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 	// fpdf parses and emits every registered UTF-8 face. Optional mono and CJK
 	// faces are registered by setStyle only when document text selects them.
 	if err := pdf.Error(); err != nil {
-		return nil, fmt.Errorf("load embedded PDF font: %w", err)
+		return nil, nil, fmt.Errorf("load embedded PDF font: %w", err)
 	}
 	if !options.Compact {
 		pdf.SetFooterFunc(func() {
@@ -240,11 +238,11 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 
 	root, err := html.Parse(strings.NewReader("<!doctype html><html><body>" + string(body) + "</body></html>"))
 	if err != nil {
-		return nil, fmt.Errorf("parse rendered document for PDF: %w", err)
+		return nil, nil, fmt.Errorf("parse rendered document for PDF: %w", err)
 	}
 	bodyNode := findHTMLNode(root, "body")
 	if bodyNode == nil {
-		return nil, errors.New("rendered document has no body")
+		return nil, nil, errors.New("rendered document has no body")
 	}
 	layout.renderChildren(bodyNode, 0)
 	layout.drawTOCPageNumbers()
@@ -260,16 +258,16 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 		pdf.SetPage(lastPage)
 	}
 	if err := pdf.Error(); err != nil {
-		return nil, fmt.Errorf("lay out PDF: %w", err)
+		return nil, nil, fmt.Errorf("lay out PDF: %w", err)
 	}
 
 	var output bytes.Buffer
 	if err := pdf.Output(&output); err != nil {
-		return nil, fmt.Errorf("write PDF: %w", err)
+		return nil, nil, fmt.Errorf("write PDF: %w", err)
 	}
 	data := append([]byte(nil), output.Bytes()...)
 	if len(data) < 5 || !bytes.HasPrefix(data, []byte("%PDF-")) {
-		return nil, errors.New("PDF writer returned an invalid document")
+		return nil, nil, errors.New("PDF writer returned an invalid document")
 	}
 	sectionPages := make(map[string]int, len(sections))
 	for _, section := range sections {
@@ -277,11 +275,10 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 			sectionPages[section.ID] = anchor.page
 		}
 	}
-	// Publish section destinations before the PDF cache entry so a concurrent
-	// cache hit can always retrieve both parts of the completed render.
-	renderer.sectionPages.Store(cacheKey, sectionPages)
-	renderer.documents.Store(cacheKey, append([]byte(nil), data...))
-	return data, nil
+	renderer.documents.Store(cacheKey, cachedPDFDocument{
+		data: append([]byte(nil), data...), sectionPages: sectionPages,
+	})
+	return data, sectionPages, nil
 }
 
 func pdfMargins(options PDFOptions) (left, right, top, bottom float64) {
@@ -1234,7 +1231,7 @@ func (renderer *pdfRenderer) formulaFromWrapper(wrapper *html.Node) (*pdfFormula
 	digest := sha256.Sum256(serialized.Bytes())
 	key := hex.EncodeToString(digest[:])
 	if cached, ok := renderer.formulae.Load(key); ok {
-		return cached.(*pdfFormula), nil
+		return cached, nil
 	}
 	formula, err := parseMathJaxSVG(svg)
 	if err != nil {

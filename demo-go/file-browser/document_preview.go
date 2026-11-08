@@ -18,6 +18,8 @@ const (
 	documentPreviewVersion = "latexpdf-document-v11-auxiliary-bibliography"
 	maxPreviewDocumentSize = 12 << 20
 	previewFontScale       = 1.7
+	maxPreviewVariants     = 4
+	maxDocumentPreviews    = 32
 )
 
 var pdfPageObject = regexp.MustCompile(`/Type\s*/Page\b`)
@@ -33,14 +35,22 @@ type documentPreview struct {
 type previewDocumentRenderer struct {
 	cacheDir string
 	docs     map[string]*documentPreview
+	sources  map[string]*documentPreviewSource
+	order    []string
 	latex    *latexpdf.Renderer
 	semantic *semhtml.Renderer
+}
+
+type documentPreviewSource struct {
+	revision string
+	keys     []string
 }
 
 func newPreviewDocumentRenderer(cacheDir string) *previewDocumentRenderer {
 	return &previewDocumentRenderer{
 		cacheDir: cacheDir,
 		docs:     make(map[string]*documentPreview),
+		sources:  make(map[string]*documentPreviewSource),
 		latex:    latexpdf.NewRenderer(),
 		semantic: semhtml.NewRenderer(),
 	}
@@ -99,16 +109,28 @@ func (renderer *previewDocumentRenderer) renderSized(path string, pageWidth, pag
 		source = latexpdf.MarkdownToLaTeX(source)
 	}
 
-	version := fmt.Sprintf("%s\x00%s\x00%.6f\x00%.6f\x00%g\x00", documentPreviewVersion, extension, pageWidth, pageHeight, previewFontScale)
-	digest := sha256.Sum256(append([]byte(version), data...))
-	key := hex.EncodeToString(digest[:])
+	modified := fileModificationTime(path)
+	logicalPath := renderer.prepareSource(path, previewCacheDigest(
+		documentPreviewVersion, extension, modified.UTC().Format(time.RFC3339Nano), string(data),
+	))
+	key := previewCacheDigest(
+		documentPreviewVersion, logicalPath, extension,
+		fmt.Sprintf("%.6f", pageWidth), fmt.Sprintf("%.6f", pageHeight),
+		fmt.Sprintf("%g", previewFontScale), modified.UTC().Format(time.RFC3339Nano), string(data),
+	)
 	if cached, ok := renderer.docs[key]; ok {
+		renderer.touchSourcePreview(key)
 		return cached, nil
 	}
-	return renderer.renderPDFDocument(path, source, key, kind, pageWidth, pageHeight)
+	result, err := renderer.renderPDFDocument(path, source, key, kind, modified, pageWidth, pageHeight)
+	if err != nil {
+		return nil, err
+	}
+	renderer.storeSourcePreview(logicalPath, key, result)
+	return result, nil
 }
 
-func (renderer *previewDocumentRenderer) renderPDFDocument(path, source, key, kind string, pageWidth, pageHeight float64) (*documentPreview, error) {
+func (renderer *previewDocumentRenderer) renderPDFDocument(path, source, key, kind string, modified time.Time, pageWidth, pageHeight float64) (*documentPreview, error) {
 	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	if kind == "TeX" {
 		if value, ok := latexpdf.FindCommandArgument(source, "title"); ok {
@@ -121,11 +143,6 @@ func (renderer *previewDocumentRenderer) renderPDFDocument(path, source, key, ki
 	if value, ok := latexpdf.FindCommandArgument(source, "author"); ok {
 		author = strings.TrimSpace(latexpdf.PlainText(value))
 	}
-	modified := time.Time{}
-	if info, err := os.Stat(path); err == nil {
-		modified = info.ModTime()
-	}
-
 	rendered, err := renderer.latex.RenderPDFResultWithOptions(latexpdf.Document{
 		Source: source, Title: title, Author: author, Modified: modified,
 	}, latexpdf.PDFOptions{PageWidth: pageWidth, PageHeight: pageHeight, FontScale: previewFontScale})
@@ -143,6 +160,111 @@ func (renderer *previewDocumentRenderer) renderPDFDocument(path, source, key, ki
 	result := &documentPreview{
 		PDFPath: pdfPath, PageCount: pageCount, MathErrors: rendered.MathErrors, Kind: kind,
 	}
-	renderer.docs[key] = result
 	return result, nil
+}
+
+func previewCacheDigest(values ...string) string {
+	digest := sha256.New()
+	for _, value := range values {
+		_, _ = digest.Write([]byte(value))
+		_, _ = digest.Write([]byte{0})
+	}
+	return hex.EncodeToString(digest.Sum(nil))
+}
+
+func previewLogicalPath(path string) string {
+	if absolute, err := filepath.Abs(path); err == nil {
+		return filepath.Clean(absolute)
+	}
+	return filepath.Clean(path)
+}
+
+func (renderer *previewDocumentRenderer) prepareSource(path, revision string) string {
+	logicalPath := previewLogicalPath(path)
+	if renderer.docs == nil {
+		renderer.docs = make(map[string]*documentPreview)
+	}
+	if renderer.sources == nil {
+		renderer.sources = make(map[string]*documentPreviewSource)
+	}
+	if source := renderer.sources[logicalPath]; source != nil {
+		if source.revision == revision {
+			return logicalPath
+		}
+		for _, key := range append([]string(nil), source.keys...) {
+			renderer.removeSourcePreview(key)
+		}
+		// Drop stale PDF/HTML/formula bytes held behind content keys. Valid
+		// on-disk variants for other sources remain available through docs.
+		renderer.latex = latexpdf.NewRenderer()
+		renderer.semantic = semhtml.NewRenderer()
+	}
+	renderer.sources[logicalPath] = &documentPreviewSource{revision: revision}
+	return logicalPath
+}
+
+func (renderer *previewDocumentRenderer) storeSourcePreview(logicalPath, key string, preview *documentPreview) {
+	renderer.docs[key] = preview
+	source := renderer.sources[logicalPath]
+	if source == nil {
+		source = &documentPreviewSource{}
+		renderer.sources[logicalPath] = source
+	}
+	for _, existing := range source.keys {
+		if existing == key {
+			renderer.touchSourcePreview(key)
+			return
+		}
+	}
+	source.keys = append(source.keys, key)
+	for len(source.keys) > maxPreviewVariants {
+		oldest := source.keys[0]
+		source.keys = source.keys[1:]
+		renderer.removeSourcePreview(oldest)
+	}
+	renderer.touchSourcePreview(key)
+	for len(renderer.order) > maxDocumentPreviews {
+		renderer.removeSourcePreview(renderer.order[0])
+	}
+}
+
+func (renderer *previewDocumentRenderer) removeSourcePreview(key string) {
+	preview := renderer.docs[key]
+	delete(renderer.docs, key)
+	for logicalPath, source := range renderer.sources {
+		for index, sourceKey := range source.keys {
+			if sourceKey == key {
+				source.keys = append(source.keys[:index], source.keys[index+1:]...)
+				break
+			}
+		}
+		if len(source.keys) == 0 {
+			delete(renderer.sources, logicalPath)
+		}
+	}
+	for index, cachedKey := range renderer.order {
+		if cachedKey == key {
+			renderer.order = append(renderer.order[:index], renderer.order[index+1:]...)
+			break
+		}
+	}
+	if preview == nil {
+		return
+	}
+	if preview.PDFPath != "" {
+		_ = os.Remove(preview.PDFPath)
+	}
+	for _, page := range preview.Pages {
+		_ = os.Remove(page)
+	}
+}
+
+func (renderer *previewDocumentRenderer) touchSourcePreview(key string) {
+	for index, cachedKey := range renderer.order {
+		if cachedKey == key {
+			renderer.order = append(renderer.order[:index], renderer.order[index+1:]...)
+			break
+		}
+	}
+	renderer.order = append(renderer.order, key)
 }

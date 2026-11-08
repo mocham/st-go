@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -39,8 +38,8 @@ const (
 )
 
 type pdfRenderer struct {
-	documents sync.Map
-	formulae  sync.Map
+	documents *boundedCache[[]byte]
+	formulae  *boundedCache[*pdfFormula]
 }
 
 type pdfFormula struct {
@@ -134,12 +133,15 @@ type pdfTOCEntry struct {
 }
 
 func newPDFRenderer() *pdfRenderer {
-	return &pdfRenderer{}
+	return &pdfRenderer{
+		documents: newBoundedCache[[]byte](16),
+		formulae:  newBoundedCache[*pdfFormula](1024),
+	}
 }
 
 func (renderer *pdfRenderer) render(document Document, body template.HTML, cacheKey string, options PDFOptions) ([]byte, error) {
 	if cached, ok := renderer.documents.Load(cacheKey); ok {
-		return append([]byte(nil), cached.([]byte)...), nil
+		return append([]byte(nil), cached...), nil
 	}
 
 	pageWidth, pageHeight, err := pdfPageSize(options)
@@ -1183,7 +1185,7 @@ func (renderer *pdfRenderer) formulaFromWrapper(wrapper *html.Node) (*pdfFormula
 	digest := sha256.Sum256(serialized.Bytes())
 	key := hex.EncodeToString(digest[:])
 	if cached, ok := renderer.formulae.Load(key); ok {
-		return cached.(*pdfFormula), nil
+		return cached, nil
 	}
 	formula, err := parseMathJaxSVG(svg)
 	if err != nil {

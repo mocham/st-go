@@ -45,6 +45,7 @@ type courseSummary struct {
 
 type corpus struct {
 	file          string
+	revision      string
 	label         string
 	description   string
 	generated     string
@@ -179,7 +180,18 @@ func (corpus *corpus) load(ctx context.Context) error {
 		corpus.documents = append(corpus.documents, document)
 		corpus.documentPaths[document.Path] = document
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	values := []string{corpus.label, corpus.description, corpus.generated}
+	for _, document := range corpus.documents {
+		values = append(values,
+			fmt.Sprintf("%d", document.ID), document.Path, document.Title,
+			fmt.Sprintf("%d", document.ModTimeNS), document.SHA256,
+		)
+	}
+	corpus.revision = previewDigest(values...)
+	return nil
 }
 
 func (corpus *corpus) close() error {

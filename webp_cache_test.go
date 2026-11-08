@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -87,6 +88,82 @@ func TestWebPCacheAsyncFrameWriteDoesNotBlock(t *testing.T) {
 		t.Fatalf("pending frame = %dx%d ok=%v", w, h, ok)
 	}
 	waitForCachedRows(t, cache, "webp_frames", 1)
+}
+
+func TestWebPCachePrunesLeastRecentlyUsedFrames(t *testing.T) {
+	cache, err := openWebPCache(filepath.Join(t.TempDir(), "webp.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.close()
+	rgba := []byte{255, 0, 0, 255}
+	sources := [][]byte{[]byte("first"), []byte("second"), []byte("third")}
+	for _, source := range sources {
+		if !cache.putFrame(source, staticWebPFrame, 1, 1, rgba) {
+			t.Fatal("putFrame failed")
+		}
+	}
+	for index, source := range sources {
+		hash := webPHash(source)
+		if _, err := cache.db.Exec(
+			`UPDATE webp_frames SET accessed_at=? WHERE source_hash=? AND frame_index=?`,
+			index+1, hash[:], staticWebPFrame,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cache.prune(2, webPCacheMaxByteUsage)
+	if _, _, _, ok := cache.frame(sources[0], staticWebPFrame); ok {
+		t.Fatal("oldest WebP frame survived pruning")
+	}
+	for _, source := range sources[1:] {
+		if _, _, _, ok := cache.frame(source, staticWebPFrame); !ok {
+			t.Fatal("recent WebP frame was pruned")
+		}
+	}
+}
+
+func TestOpenWebPCacheMigratesAccessTimes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "webp.sqlite3")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE webp_frames (
+		source_hash BLOB NOT NULL,
+		frame_index INTEGER NOT NULL,
+		png BLOB NOT NULL,
+		PRIMARY KEY (source_hash, frame_index)
+	) WITHOUT ROWID`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cache, err := openWebPCache(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.close()
+	rows, err := cache.db.Query(`PRAGMA table_info(webp_frames)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		found = found || name == "accessed_at"
+	}
+	if !found {
+		t.Fatal("legacy WebP cache was not migrated")
+	}
 }
 
 func waitForCachedRows(t *testing.T, cache *webPCache, table string, want int) {

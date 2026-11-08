@@ -30,7 +30,7 @@ type PDFOptions struct {
 	PageHeight float64
 }
 
-// Renderer owns concurrency-safe PDF and formula caches.
+// Renderer owns bounded, concurrency-safe PDF and formula caches.
 type Renderer struct {
 	once sync.Once
 	pdf  *pdfRenderer

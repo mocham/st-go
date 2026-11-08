@@ -48,6 +48,7 @@ from it:
 | Terminal screen grids (both buffers plus bookkeeping) | 64 MiB |
 | Glyph cache | 32 MiB / 16,384 entries |
 | Continuous PDF cache | 256 MiB per strip, up to five screenfuls |
+| Persistent WebP cache | 256 MiB / 4,096 frames |
 | Clipboard transfer | 8 MiB |
 | OSC/DCS control string | 1 MiB |
 | Animation frame count | 65,536 |
@@ -372,7 +373,8 @@ location, or disable the cache with an empty path, in JSON. `{uid}` in a
 configured path expands to the current numeric user ID. The cache directory
 must be owned by the current user and not writable by other users.
 PNG encoding and SQLite writes run on a bounded background worker so cache
-population does not block terminal rendering or input.
+population does not block terminal rendering or input. Least-recently-used
+frames are pruned at 4,096 entries or 256 MiB.
 Animated WebP metadata is read without rasterizing frames; frames are decoded
 and queued for caching individually only as playback requests them.
 
@@ -522,6 +524,10 @@ preserves headings, paragraphs, lists, inline emphasis, code, links, table text,
 and image alt text while deliberately ignoring CSS and publication fonts.
 The file-browser and gols use a **1.7× font scale** for their LaTeX/Markdown
 previews; vimtex uses its own **0.8× font scale** for the fit-width editor pane.
+Generated document previews are session-temporary. A changed source digest
+deletes all variants of the superseded revision, and each current revision keeps
+at most four pane-size variants. Least-recently-used previews are removed after
+32 generated variants across all sources.
 
 ### Go corpus browser
 
@@ -548,9 +554,11 @@ Tab again hides it. `/` searches document paths/titles/content,
 `[` and `]` change rendered document pages, and `q` exits. PDFs are generated only
 when a document is opened. The selected page-size variant remains pinned while
 the window is resized; reopening at another size creates or reuses that cached
-variant. Successfully opened databases are kept in most-recently-used order in
-`$HOME/.cache/gols.json`. Starting `gols` without a path displays that recent
-database list; selecting an entry moves it to the front for the next launch.
+variant. `r` reopens the immutable databases; changed record digests invalidate
+and remove their old session previews. Successfully opened databases are kept
+in most-recently-used order in `$HOME/.cache/gols.json`. Starting `gols` without
+a path displays that recent database list; selecting an entry moves it to the
+front for the next launch.
 
 ## License
 

@@ -38,6 +38,13 @@ const (
 )
 
 const pathPopupMax = 8
+const maxMP3CacheEntries = 32
+
+type mp3CacheEntry struct {
+	meta      mp3Meta
+	size      int64
+	modTimeNS int64
+}
 
 // archiveCtx is one level of archive browsing. While an archive is open the
 // browser lists its entries virtually (metadata only) and extracts a file to
@@ -128,11 +135,12 @@ type Browser struct {
 	manualLines  []string
 
 	// mp3 state
-	mp3Active    bool
-	mp3Cache     map[string]mp3Meta
-	playback     *alsaPlayer // non-nil while the mp3 viewer is playing
-	playbackStop chan struct{}
-	playbackErr  error
+	mp3Active     bool
+	mp3Cache      map[string]mp3CacheEntry
+	mp3CacheOrder []string
+	playback      *alsaPlayer // non-nil while the mp3 viewer is playing
+	playbackStop  chan struct{}
+	playbackErr   error
 
 	// runtime
 	resized  bool
@@ -255,7 +263,7 @@ func (b *Browser) setup() {
 	b.doubleClickMS = parseDoubleClickMS()
 	b.geometryToken = os.Getenv("ST_GO_GEOMETRY_TOKEN")
 	b.dirLabel = b.dir
-	b.mp3Cache = map[string]mp3Meta{}
+	b.mp3Cache = map[string]mp3CacheEntry{}
 	// Materialize the embedded alsa.conf before any libasound call.
 	if b.cacheDir != "" {
 		_ = writeALSAConfig(b.cacheDir)
@@ -1378,15 +1386,10 @@ func (b *Browser) drawMp3Preview(path string) {
 	b.previewWasGraphic = false
 	b.clearPreview()
 	name := displayText(baseName(path))
-	meta, ok := b.mp3Cache[path]
-	if !ok {
-		m, err := readMp3Meta(path)
-		if err != nil {
-			b.drawPreviewMessage("MP3 AUDIO", name, "Could not decode.")
-			return
-		}
-		meta = m
-		b.mp3Cache[path] = meta
+	meta, err := b.cachedMP3Meta(path)
+	if err != nil {
+		b.drawPreviewMessage("MP3 AUDIO", name, "Could not decode.")
+		return
 	}
 	title := meta.title
 	if title == "" {
@@ -1450,13 +1453,7 @@ func (b *Browser) openMp3(path string) {
 		}
 		path = real
 	}
-	meta, ok := b.mp3Cache[path]
-	if !ok {
-		if m, err := readMp3Meta(path); err == nil {
-			meta = m
-			b.mp3Cache[path] = meta
-		}
-	}
+	meta, _ := b.cachedMP3Meta(path)
 	b.mp3Active = true
 	b.playbackErr = nil
 	b.playbackStop = nil
@@ -1502,6 +1499,60 @@ func (b *Browser) openMp3(path string) {
 	b.stopPlayback()
 	b.status = "Closed mp3"
 	b.renderAll()
+}
+
+func (b *Browser) cachedMP3Meta(path string) (mp3Meta, error) {
+	if b.mp3Cache == nil {
+		b.mp3Cache = make(map[string]mp3CacheEntry)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return mp3Meta{}, err
+	}
+	if cached, ok := b.mp3Cache[path]; ok && cached.size == info.Size() && cached.modTimeNS == info.ModTime().UnixNano() {
+		b.touchMP3Cache(path)
+		return cached.meta, nil
+	}
+	meta, err := readMp3Meta(path)
+	if err != nil {
+		b.removeMP3Cache(path)
+		return mp3Meta{}, err
+	}
+	b.storeMP3Cache(path, mp3CacheEntry{meta: meta, size: info.Size(), modTimeNS: info.ModTime().UnixNano()})
+	return meta, nil
+}
+
+func (b *Browser) storeMP3Cache(path string, entry mp3CacheEntry) {
+	if b.mp3Cache == nil {
+		b.mp3Cache = make(map[string]mp3CacheEntry)
+	}
+	b.mp3Cache[path] = entry
+	b.touchMP3Cache(path)
+	for len(b.mp3CacheOrder) > maxMP3CacheEntries {
+		oldest := b.mp3CacheOrder[0]
+		b.mp3CacheOrder = b.mp3CacheOrder[1:]
+		delete(b.mp3Cache, oldest)
+	}
+}
+
+func (b *Browser) removeMP3Cache(path string) {
+	delete(b.mp3Cache, path)
+	for index, cachedPath := range b.mp3CacheOrder {
+		if cachedPath == path {
+			b.mp3CacheOrder = append(b.mp3CacheOrder[:index], b.mp3CacheOrder[index+1:]...)
+			return
+		}
+	}
+}
+
+func (b *Browser) touchMP3Cache(path string) {
+	for index, cachedPath := range b.mp3CacheOrder {
+		if cachedPath == path {
+			b.mp3CacheOrder = append(b.mp3CacheOrder[:index], b.mp3CacheOrder[index+1:]...)
+			break
+		}
+	}
+	b.mp3CacheOrder = append(b.mp3CacheOrder, path)
 }
 
 // loop is the main input loop.

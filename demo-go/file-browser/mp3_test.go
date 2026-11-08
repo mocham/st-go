@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -210,5 +211,19 @@ func TestReadMp3Meta(t *testing.T) {
 	}
 	if meta.bitrateKbps <= 0 {
 		t.Fatalf("bitrate = %d, want > 0", meta.bitrateKbps)
+	}
+}
+
+func TestMP3MetadataCacheIsBounded(t *testing.T) {
+	browser := &Browser{}
+	for index := 0; index < maxMP3CacheEntries+2; index++ {
+		path := fmt.Sprintf("song-%d.mp3", index)
+		browser.storeMP3Cache(path, mp3CacheEntry{meta: mp3Meta{title: path}})
+	}
+	if len(browser.mp3Cache) != maxMP3CacheEntries || len(browser.mp3CacheOrder) != maxMP3CacheEntries {
+		t.Fatalf("MP3 metadata cache = %d entries / %d order, want %d", len(browser.mp3Cache), len(browser.mp3CacheOrder), maxMP3CacheEntries)
+	}
+	if _, ok := browser.mp3Cache["song-0.mp3"]; ok {
+		t.Fatal("oldest MP3 metadata entry survived eviction")
 	}
 }

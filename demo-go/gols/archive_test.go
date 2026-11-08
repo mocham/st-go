@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -234,6 +235,78 @@ func TestPreviewRendersArchiveMarkdownWithInlineMath(t *testing.T) {
 	}
 	if len(preview.toc) != 1 || preview.toc[0].Title != "Notes" || preview.toc[0].Page < 1 {
 		t.Fatalf("Markdown contents = %#v", preview.toc)
+	}
+}
+
+func TestCorpusRefreshRemovesStalePreviewRevision(t *testing.T) {
+	file := writeTestCorpus(t)
+	opened, err := openCorpus(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewer := newDocumentPreviewer(t.TempDir())
+	browser := &Browser{corpora: []*corpus{opened}, previewer: previewer}
+	metadata := opened.documentPaths["AA/lecture.tex"]
+	preview, err := previewer.render(context.Background(), opened, metadata, 120, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := sql.Open("sqlite3", file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, updateErr := db.Exec(`UPDATE documents
+		SET content='\newcommand{\R}{\mathbb Q}', sha256='changed-include', mod_time_ns=99
+		WHERE id=1`)
+	closeErr := db.Close()
+	if updateErr != nil {
+		t.Fatal(updateErr)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err := browser.refreshCorpora(); err != nil {
+		t.Fatal(err)
+	}
+	defer browser.corpora[0].close()
+	if len(previewer.cache) != 0 {
+		t.Fatalf("stale preview cache entries = %d, want 0", len(previewer.cache))
+	}
+	if _, err := os.Stat(preview.path); !os.IsNotExist(err) {
+		t.Fatalf("stale preview %q still exists: %v", preview.path, err)
+	}
+	refreshed := browser.corpora[0]
+	updated, err := previewer.render(context.Background(), refreshed, refreshed.documentPaths["AA/lecture.tex"], 120, 160)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.path == preview.path || len(previewer.cache) != 1 {
+		t.Fatalf("updated preview = %q, old = %q, entries=%d", updated.path, preview.path, len(previewer.cache))
+	}
+}
+
+func TestDocumentPreviewCacheBoundsAllRecords(t *testing.T) {
+	dir := t.TempDir()
+	previewer := newDocumentPreviewer(dir)
+	var paths []string
+	for index := 0; index < maxDocumentPreviews+2; index++ {
+		sourceID := previewSourceID{corpus: "corpus.sqlite3", id: int64(index + 1)}
+		previewer.prepareSource(sourceID, "revision")
+		path := filepath.Join(dir, fmt.Sprintf("document-%d.pdf", index))
+		if err := os.WriteFile(path, []byte("pdf"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+		previewer.storeSourcePreview(sourceID, fmt.Sprintf("key-%d", index), renderedPreview{path: path, pdf: true})
+	}
+	if len(previewer.cache) != maxDocumentPreviews || len(previewer.order) != maxDocumentPreviews {
+		t.Fatalf("global preview cache = %d entries / %d order, want %d", len(previewer.cache), len(previewer.order), maxDocumentPreviews)
+	}
+	for _, stale := range paths[:2] {
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Fatalf("globally evicted preview %q still exists: %v", stale, err)
+		}
 	}
 }
 

@@ -18,8 +18,8 @@ import (
 )
 
 type latexRenderer struct {
-	documents sync.Map
-	formulae  sync.Map
+	documents *boundedCache[renderedLatex]
+	formulae  *boundedCache[renderedFormula]
 	mathMu    sync.Mutex
 }
 
@@ -49,7 +49,10 @@ type renderedFormula struct {
 }
 
 func newLatexRenderer() *latexRenderer {
-	return &latexRenderer{}
+	return &latexRenderer{
+		documents: newBoundedCache[renderedLatex](32),
+		formulae:  newBoundedCache[renderedFormula](1024),
+	}
 }
 
 func (renderer *latexRenderer) render(source, digest string) renderedLatex {
@@ -61,7 +64,7 @@ func (renderer *latexRenderer) render(source, digest string) renderedLatex {
 
 func (renderer *latexRenderer) renderPrepared(prepared, body, digest string) renderedLatex {
 	if cached, ok := renderer.documents.Load(digest); ok {
-		return cached.(renderedLatex)
+		return cached
 	}
 	body = normalizeLatexSourceEncodingWithPreamble(body, prepared)
 	prepared = normalizeLatexSourceEncoding(prepared)
@@ -1565,7 +1568,7 @@ func (context *latexRenderContext) renderMath(expression string, display bool) s
 	keyBytes := sha256.Sum256([]byte(fmt.Sprintf("%t\x00%s", display, expanded)))
 	key := hex.EncodeToString(keyBytes[:])
 	if cached, ok := context.renderer.formulae.Load(key); ok {
-		formula := cached.(renderedFormula)
+		formula := cached
 		if formula.hadError {
 			context.errors++
 			context.errorExpressions = append(context.errorExpressions, expanded)

@@ -92,12 +92,11 @@ func PrepareSourceViewport(source string, options SourceViewportOptions) (Source
 func (renderer *Renderer) RenderPreparedPDFResultWithOptions(document Document, body string, options PDFOptions) (PDFResult, error) {
 	key := PDFCacheKeyWithOptions(document, options) + "-viewport-" + sourceCacheKey(body)
 	rendered := renderer.RenderPreparedHTML(document.Source, body, key)
-	pdf, err := renderer.pdf.render(document, rendered.Body, rendered.Sections, key, options)
+	pdf, pages, err := renderer.pdf.render(document, rendered.Body, rendered.Sections, key, options)
 	if err != nil {
 		return PDFResult{}, err
 	}
 	sections := append([]Section(nil), rendered.Sections...)
-	pages := renderer.pdf.pagesForSections(key)
 	for i := range sections {
 		sections[i].Page = pages[sections[i].ID]
 	}

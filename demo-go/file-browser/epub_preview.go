@@ -96,13 +96,12 @@ func (renderer *previewDocumentRenderer) renderSemanticHTMLSized(filePath string
 		HTML: book.HTML, Title: book.Title, Author: book.Author, Modified: modified,
 	}
 	options := semhtml.PDFOptions{PageWidth: pageWidth, PageHeight: pageHeight}
-	cacheSource := fmt.Sprintf("%s\x00%s", cacheVersion, semhtml.PDFCacheKeyWithOptions(document, options))
-	digest := sha256.Sum256([]byte(cacheSource))
-	key := hex.EncodeToString(digest[:])
-	if renderer.docs == nil {
-		renderer.docs = make(map[string]*documentPreview)
-	}
+	logicalPath := renderer.prepareSource(filePath, previewCacheDigest(
+		cacheVersion, semhtml.PDFCacheKey(document),
+	))
+	key := previewCacheDigest(cacheVersion, logicalPath, semhtml.PDFCacheKeyWithOptions(document, options))
 	if cached, ok := renderer.docs[key]; ok {
+		renderer.touchSourcePreview(key)
 		return cached, nil
 	}
 	if renderer.semantic == nil {
@@ -122,7 +121,7 @@ func (renderer *previewDocumentRenderer) renderSemanticHTMLSized(filePath string
 		return nil, err
 	}
 	result := &documentPreview{PDFPath: pdfPath, PageCount: pageCount, Kind: kind}
-	renderer.docs[key] = result
+	renderer.storeSourcePreview(logicalPath, key, result)
 	return result, nil
 }
 

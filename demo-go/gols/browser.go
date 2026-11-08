@@ -274,6 +274,36 @@ func (browser *Browser) previewDocument(corpusIndex int, document documentMeta) 
 	return browser.previewer.render(ctx, corpus, document, width, height)
 }
 
+func (browser *Browser) refreshCorpora() error {
+	var failures []string
+	changed := false
+	for index, old := range browser.corpora {
+		reopened, err := openCorpus(old.file)
+		if err != nil {
+			failures = append(failures, filepath.Base(old.file)+": "+err.Error())
+			continue
+		}
+		if reopened.revision != old.revision {
+			changed = true
+			if browser.previewer != nil {
+				browser.previewer.invalidateCorpus(old.file)
+			}
+		}
+		browser.corpora[index] = reopened
+		_ = old.close()
+	}
+	if changed {
+		browser.openedDocumentID = 0
+		browser.openedPreview = renderedPreview{}
+		browser.page = 1
+		browser.pages = 0
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("refresh failed: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
 func (browser *Browser) selectedEntry() *browserEntry {
 	if browser.idx < 0 || browser.idx >= len(browser.entries) {
 		return nil
@@ -536,7 +566,11 @@ func (browser *Browser) handleNavigationKey(character byte) {
 	case '/', 's', 'S':
 		browser.searchPrompt()
 	case 'r', 'R':
-		browser.status = "Refreshed"
+		if err := browser.refreshCorpora(); err != nil {
+			browser.status = err.Error()
+		} else {
+			browser.status = "Refreshed"
+		}
 		browser.buildEntries()
 		browser.renderAll()
 	case '\r', '\n':
