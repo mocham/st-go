@@ -49,13 +49,17 @@ func setRegionTestPixels(trm *Terminal, pixel uint32) {
 	for i := range bitmap.pixels {
 		bitmap.pixels[i] = pixel
 	}
+	trm.displayRegions.mu.Lock()
 	trm.displayRegions.secondary.bitmap = bitmap
 	trm.displayRegions.secondary.dirty = true
 	trm.requestRegionPaint()
+	trm.displayRegions.mu.Unlock()
+	trm.paint()
 }
 
 func assertRegionPixels(t *testing.T, trm *Terminal, pixel uint32) {
 	t.Helper()
+	trm.paint()
 	r := trm.secondaryPixels()
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
@@ -101,7 +105,7 @@ func TestDisplayRegionLayoutResizeAndReset(t *testing.T) {
 	setRegionTestPixels(trm, 0xff913b57)
 	before := trm.Regions()
 	for _, invalid := range [][]term.DisplayRegion{
-		{{ID: term.MainRegion, Bounds: term.CellRect{Width: 20, Height: 2}}, {ID: term.SecondaryRegion, Bounds: term.CellRect{Y: 2, Width: 20, Height: 3}}},
+		{{ID: term.MainRegion, Bounds: term.CellRect{Width: 20, Height: 2}}, {ID: term.SecondaryRegion, Bounds: term.CellRect{Y: 1, Width: 20, Height: 4}}},
 		{{ID: term.MainRegion, Bounds: term.CellRect{Width: 10, Height: 5}}, {ID: term.SecondaryRegion, Bounds: term.CellRect{X: 9, Width: 11, Height: 5}}},
 		{{ID: term.MainRegion, Bounds: term.CellRect{Width: 10, Height: 5}}, {ID: term.SecondaryRegion, Bounds: term.CellRect{X: 11, Width: 9, Height: 5}}},
 		{{ID: "other", Bounds: term.CellRect{Width: 20, Height: 5}}},
@@ -127,6 +131,52 @@ func TestDisplayRegionLayoutResizeAndReset(t *testing.T) {
 	}
 	if trm.cols != 20 || trm.termCore.Cols() != 20 || len(trm.Regions()) != 1 || sizes[len(sizes)-1] != [2]int{5, 20} {
 		t.Fatalf("reset did not restore PTY/core: regions=%#v, sizes=%v", trm.Regions(), sizes)
+	}
+}
+
+func TestStackedRegionClippingResizeAndMouse(t *testing.T) {
+	trm := regionTestTerminal(t)
+	var sizes [][2]int
+	trm.ttyResize = func(rows, cols int) { sizes = append(sizes, [2]int{rows, cols}) }
+	trm.writeTerminalOutput(trm.termCore, []byte("\x1bPregion stack 1\x1b\\"))
+	if trm.rows != 1 || trm.cols != 20 || trm.Regions()[1].Bounds != (term.CellRect{Y: 1, Width: 20, Height: 4}) {
+		t.Fatalf("stack: %#v", trm.Regions())
+	}
+	setRegionTestPixels(trm, 0xff913b57)
+	trm.writeTerminalOutput(trm.termCore, []byte("\x1b[2J\x1b[Hstatus\r\nmore\x1b[K"))
+	trm.fillRect(0xff123456, -100, -100, fbW+200, fbH+200)
+	assertRegionPixels(t, trm, 0xff913b57)
+	trm.resize(30*trm.cw+2, 8*trm.ch+2)
+	if trm.rows != 1 || trm.cols != 30 || trm.Regions()[1].Bounds.Height != 7 {
+		t.Fatalf("resized stack: %#v", trm.Regions())
+	}
+	assertRegionPixels(t, trm, 0xff913b57)
+	buttons = 0
+	t.Cleanup(func() { buttons = 0 })
+	var input bytes.Buffer
+	trm.termCore.SetWriter(func(b []byte) { input.Write(b) })
+	trm.termCore.Twrite([]byte("\x1b[?1000h\x1b[?1006h"), false)
+	trm.bpress(xproto.ButtonPressEvent{Detail: 1, EventX: 2, EventY: 12})
+	trm.brelease(xproto.ButtonReleaseEvent{Detail: 1, EventX: 2, EventY: 2})
+	if input.Len() != 0 || trm.regionButtons != 0 {
+		t.Fatal("PDF click leaked into command row")
+	}
+	trm.bpress(xproto.ButtonPressEvent{Detail: 1, EventX: 2, EventY: 2})
+	trm.brelease(xproto.ButtonReleaseEvent{Detail: 1, EventX: 2, EventY: 12})
+	if !strings.Contains(input.String(), "m") {
+		t.Fatal("command row lost mouse release")
+	}
+	trm.resize(30*trm.cw+2, trm.ch+2)
+	if trm.Regions()[1].Bounds.Height != 0 {
+		t.Fatal("one-row window did not suspend PDF")
+	}
+	trm.resize(30*trm.cw+2, 8*trm.ch+2)
+	assertRegionPixels(t, trm, 0xff913b57)
+	if err := trm.SetRegions(nil); err != nil {
+		t.Fatal(err)
+	}
+	if trm.rows != 8 || trm.cols != 30 || sizes[len(sizes)-1] != [2]int{8, 30} {
+		t.Fatalf("reset: %#v %v", trm.Regions(), sizes)
 	}
 }
 
@@ -194,7 +244,10 @@ func TestDisplayRegionAsyncImage(t *testing.T) {
 		ready := func() bool {
 			trm.mu.Lock()
 			defer trm.mu.Unlock()
-			if len(trm.displayRegions.secondary.bitmap.pixels) == 0 {
+			trm.displayRegions.mu.Lock()
+			ready := len(trm.displayRegions.secondary.bitmap.pixels) > 0
+			trm.displayRegions.mu.Unlock()
+			if !ready {
 				return false
 			}
 			assertRegionPixels(t, trm, 0xff913b57)

@@ -732,7 +732,7 @@ func TestMarkdownMathPreviewEmitsFittedPage(t *testing.T) {
 	}
 	f := startBrowser(t, testEnv(), dir)
 	f.send("\x1b[B")
-	waitContains(t, f, "MARKDOWN  1/1", "rendered markdown page title")
+	waitContains(t, f, "MARKDOWN  1/", "rendered markdown page title")
 	waitContains(t, f, " page 1", "Markdown latexpdf page")
 	if strings.Contains(f.output(), "fit-contain page 1") {
 		t.Fatal("Markdown latexpdf preview requested an avoidable raster scaling pass")

@@ -33,6 +33,12 @@ their standard command names. Unrecognized commands remain diagnostics but are
 shown explicitly as red `\Command` literals in prose and vector mathematics;
 they do not become opaque MathJax error boxes.
 
+Callers with a TeX-generated `.bbl` can pass it through
+`SupplementBibliography` before rendering. Traditional `\bibitem` BBL files
+and biblatex data BBL files are supported; citations and `\printbibliography`
+then resolve to the native bibliography output. The file-browser preview does
+this automatically for local sibling or `\bibliography{...}` auxiliaries.
+
 ```go
 renderer := latexpdf.NewRenderer()
 pdf, err := renderer.RenderPDF(latexpdf.Document{
@@ -51,6 +57,12 @@ pdf, err := renderer.RenderPDFWithOptions(document, latexpdf.PDFOptions{
     PageWidth: 120, PageHeight: 90,
 })
 ```
+
+`PDFOptions.FontScale` scales text, headings, and inline/display mathematics
+before wrapping and pagination; zero or `1` uses the original sizes. For
+example, `1.7` makes text 70% larger, and `0.8` makes it 20% smaller. Page
+dimensions and margins retain their configured sizes. The font scale is part
+of the PDF cache key.
 
 `RenderPDFResult` and `RenderPDFResultWithOptions` return the same PDF together
 with MathJax diagnostics and section metadata mapped to final PDF page numbers.

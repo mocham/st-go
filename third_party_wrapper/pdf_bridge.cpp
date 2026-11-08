@@ -6,6 +6,11 @@
 #include <poppler-document.h>
 #include <poppler-page.h>
 #include <poppler-page-renderer.h>
+#include "GlobalParams.h"
+#include "cpp/poppler-page-private.h"
+#include "cpp/poppler-document-private.h"
+#include "SplashOutputDev.h"
+#include "splash/SplashBitmap.h"
 
 #include <vector>
 #include <cstring>
@@ -13,6 +18,16 @@
 #include <cmath>
 #include <memory>
 #include <algorithm>
+
+int pdf_font_support(void) { return 1; }
+
+void pdf_register_font(const char *name, const char *path)
+try {
+    // Hold a reference for the process lifetime: standalone page decodes and
+    // the continuous worker share Poppler's font map without reset races.
+    static GlobalParamsIniter fonts(nullptr);
+    if (name && path) globalParams->addFontFile(name, path);
+} catch (...) { }
 
 int pdf_render_page(const unsigned char *pdf_data, int pdf_len,
                     int page, int outW, int outH,
@@ -112,6 +127,10 @@ struct scroll_page { double width, height; };
 struct scroll_pdf {
     poppler::byte_array data;
     std::unique_ptr<poppler::document> doc;
+    // One native engine per preview document, confined to its decoder worker.
+    // Reuse the font engine across slices rather than recreating it per page.
+    PDFDoc *native = nullptr;
+    std::unique_ptr<SplashOutputDev> renderer;
     std::vector<scroll_page> pages;
     std::vector<int> tops;
     int width = 0;
@@ -129,11 +148,18 @@ try {
     for (int i = 0; i < view->doc->pages(); ++i) {
         std::unique_ptr<poppler::page> page(view->doc->create_page(i));
         if (!page) return nullptr;
+        if (!view->native) view->native = poppler::page_private::get(page.get())->doc->doc;
         const double w = page->page_rect().width(), h = page->page_rect().height();
         if (!std::isfinite(w) || !std::isfinite(h) || w < 1 || h < 1)
             return nullptr;
         view->pages.push_back({w, h});
     }
+    SplashColor paper = {255, 255, 255};
+    view->renderer = std::make_unique<SplashOutputDev>(splashModeXBGR8, 4, false, paper, true);
+    view->renderer->setFontAntialias(true);
+    view->renderer->setVectorAntialias(true);
+    view->renderer->setFreeTypeHinting(false, false);
+    view->renderer->startDoc(view->native);
     return view.release();
 } catch (...) { return nullptr; }
 
@@ -169,24 +195,42 @@ try {
         out[i + 3] = 255;
     }
     int index = (int)(std::upper_bound(view->tops.begin(), view->tops.end(), top) - view->tops.begin()) - 1;
-    poppler::page_renderer renderer;
-    renderer.set_paper_color(background);
-    renderer.set_render_hint(poppler::page_renderer::antialiasing, true);
-    renderer.set_render_hint(poppler::page_renderer::text_antialiasing, true);
+    SplashColor paper = {static_cast<unsigned char>(background & 255),
+                         static_cast<unsigned char>((background >> 8) & 255), static_cast<unsigned char>((background >> 16) & 255)};
+    view->renderer->setPaperColor(paper);
     for (; index < (int)view->pages.size() && view->tops[index] < top + height; ++index) {
         int start = std::max(top, view->tops[index]);
         int end = std::min(top + height, view->tops[index + 1]);
-        std::unique_ptr<poppler::page> page(view->doc->create_page(index));
-        if (!page) return 0;
         double dpi = 72.0 * width / view->pages[index].width;
-        auto image = renderer.render_page(page.get(), dpi, dpi, 0, start - view->tops[index], width, end - start);
-        if (!image.is_valid()) return 0;
-        int rows = std::min(image.height(), end - start);
-        int cols = std::min(image.width(), width);
+        view->native->displayPageSlice(view->renderer.get(), index + 1, dpi, dpi, 0, false, true, false,
+                                      0, start - view->tops[index], width, end - start);
+        auto *image = view->renderer->getBitmap();
+        if (!image || !image->getDataPtr()) return 0;
+        int rows = std::min(image->getHeight(), end - start);
+        int cols = std::min(image->getWidth(), width);
         for (int y = 0; y < rows; ++y) {
             std::memcpy(out + (size_t)(start - top + y) * width * 4,
-                        image.const_data() + (size_t)y * image.bytes_per_row(), (size_t)cols * 4);
+                        image->getDataPtr() + (size_t)y * image->getRowSize(), (size_t)cols * 4);
         }
     }
     return 1;
+} catch (...) { return 0; }
+
+int pdf_scroll_page_tops(void *handle, int *tops, int capacity)
+try {
+    auto *view = static_cast<scroll_pdf *>(handle);
+    if (!view || !tops || capacity < (int)view->tops.size()) return 0;
+    std::copy(view->tops.begin(), view->tops.end(), tops);
+    return (int)view->tops.size();
+} catch (...) { return 0; }
+
+int pdf_scroll_search_page(void *handle, int index, const char *text)
+try {
+    auto *view = static_cast<scroll_pdf *>(handle);
+    if (!view || !text || index < 0 || index >= (int)view->pages.size()) return 0;
+    std::unique_ptr<poppler::page> page(view->doc->create_page(index));
+    if (!page) return 0;
+    poppler::rectf rect;
+    if (!page->search(poppler::ustring::from_utf8(text), rect, poppler::page::search_from_top, poppler::case_insensitive)) return 0;
+    return 1 + (int)(1000000 * std::max(0.0, std::min(1.0, rect.top() / view->pages[index].height)));
 } catch (...) { return 0; }

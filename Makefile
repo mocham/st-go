@@ -60,6 +60,7 @@ FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
+ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # A MINIMAL static poppler using only the C++ API (page_renderer -> raw BGRA),
@@ -317,7 +318,7 @@ GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
 
 # Rebuild when build flags change; trim source and module-cache paths from all
 # distributable Go binaries, including their stack-trace/debug metadata.
-st st-pdf st-stb st-min $(FILE_BROWSER) gols vimtex: Makefile
+st st-pdf st-stb st-min $(FILE_BROWSER) gols vimtex zat: Makefile
 
 st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
@@ -353,6 +354,10 @@ gols: $(GOLS_GO_SRC)
 vimtex: $(VIMTEX_GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/vimtex
 
+# PDF viewer; Poppler and the pixel cache live in the terminal, not this TUI.
+zat: $(ZAT_GO_SRC)
+	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/zat
+
 # --- dummy objects (no-op stubs for dropped libraries) --------------------
 $(DUMMY_DIR)/dummy-stb.o: third_party_wrapper/dummy-stb.c
 	@mkdir -p $(DUMMY_DIR)
@@ -367,9 +372,9 @@ $(DUMMY_DIR)/dummy-pdf.o: third_party_wrapper/dummy-pdf.c
 	$(CC) -O2 -ffunction-sections -fdata-sections -c $< -o $@
 
 # --- pdf bridge object (real poppler bridge, compiled outside cgo) --------
-$(PDF_BRIDGE_O): third_party_wrapper/pdf_bridge.cpp pdf_bridge.h
-	$(CXX) -std=c++11 -fPIC -Ithird_party/poppler/include \
-	       -Ithird_party/poppler/include/poppler -I. -c $< -o $@
+$(PDF_BRIDGE_O): third_party_wrapper/pdf_bridge.cpp pdf_bridge.h $(POPPLER_LIB)
+	$(CXX) -std=c++20 -O2 -fPIC -Ithird_party/poppler/include \
+	       -I$(POPPLER_SRC) -I$(POPPLER_SRC)/poppler -I$(POPPLER_BUILD) -I$(POPPLER_BUILD)/poppler -I. -c $< -o $@
 
 install: st
 	install -d "$(DESTDIR)$(BINDIR)"
@@ -391,9 +396,9 @@ uninstall:
 	      "$(DESTDIR)$(TERMINFO_DIR)/s/stterm-256color"
 
 clean:
-	rm -f st st-min st-stb st-pdf file-browser gols vimtex
+	rm -f st st-min st-stb st-pdf file-browser gols vimtex zat
 
 distclean:
-	rm -rf third_party st st-min st-stb st-pdf file-browser gols vimtex
+	rm -rf third_party st st-min st-stb st-pdf file-browser gols vimtex zat
 
 .PHONY: all install uninstall clean distclean test

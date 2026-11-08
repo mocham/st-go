@@ -1144,7 +1144,7 @@ func (context *latexRenderContext) renderInline(source string) string {
 					source = source[end:]
 					continue
 				}
-			case "it", "itshape", "sl", "slshape":
+			case "em", "it", "itshape", "sl", "slshape":
 				output.WriteString("<em>" + context.renderInline(source[commandEnd:]) + "</em>")
 				return output.String()
 			case "texttt":
@@ -1159,6 +1159,35 @@ func (context *latexRenderContext) renderInline(source string) string {
 			case "rm", "rmfamily", "normalfont":
 				source = source[commandEnd:]
 				continue
+			case "newblock":
+				output.WriteByte(' ')
+				source = source[commandEnd:]
+				continue
+			case "bysame":
+				output.WriteString("—")
+				source = source[commandEnd:]
+				continue
+			case "etalchar":
+				if argument, end, ok := parseBraced(source, position); ok {
+					output.WriteString(context.renderMath(`^{`+argument+`}`, false))
+					source = source[end:]
+					continue
+				}
+			case "MR":
+				if argument, end, ok := parseBraced(source, position); ok {
+					output.WriteString(" MR " + context.renderInline(argument))
+					source = source[end:]
+					continue
+				}
+			case "MRhref":
+				if _, next, ok := parseBraced(source, position); ok {
+					next = skipTeXSpace(source, next)
+					if label, end, labelOK := parseBraced(source, next); labelOK {
+						output.WriteString(context.renderInline(label))
+						source = source[end:]
+						continue
+					}
+				}
 			case "dynkin":
 				if rendered, end, ok := context.renderDynkinCommand(source, commandEnd); ok {
 					output.WriteString(rendered)

@@ -26,9 +26,13 @@ func (t *Terminal) writeTerminalOutput(core *term.Term, data []byte) int {
 	t.inPTYWrite = true
 	written := core.Twrite(data, false)
 	t.inPTYWrite = false
+	t.pauseRegionPaint(core.IsPaintPaused())
 	if t.ptyPaintRequested && !core.IsPaintPaused() {
 		t.ptyPaintRequested = false
 		t.paint()
+	}
+	if t.conn == nil && !core.IsPaintPaused() {
+		t.paintSecondary()
 	}
 	t.mu.Unlock()
 	return written
@@ -52,9 +56,12 @@ func (t *Terminal) paint() {
 	full := t.displayRegions.fullDirty
 	if full {
 		t.clearFramebuffer()
+		t.displayRegions.mu.Lock()
 		if t.displayRegions.secondary != nil {
 			t.displayRegions.secondary.dirty = true
+			t.requestRegionPaint()
 		}
+		t.displayRegions.mu.Unlock()
 	}
 	region := t.termCore.Draw()
 	secondary := t.paintSecondary()

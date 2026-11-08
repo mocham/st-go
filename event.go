@@ -53,7 +53,7 @@ func (t *Terminal) run(termCore *term.Term) {
 				t.mu.Lock()
 				if t.termCore != nil {
 					t.termCore.TickAnim(now)
-					t.tickRegionScroll(now)
+					t.flushRegionReplies()
 				}
 				t.mu.Unlock()
 			case <-t.done:
@@ -95,6 +95,12 @@ func (t *Terminal) toggleBlink() {
 func (t *Terminal) handleEvent(ev xgb.Event) {
 	switch e := ev.(type) {
 	case xproto.ExposeEvent:
+		if e.Window != 0 && e.Window != t.win {
+			if e.Count == 0 {
+				t.exposeRegion(e.Window)
+			}
+			return
+		}
 		if e.Count == 0 {
 			if t.termCore.IsPaintPaused() {
 				// Preserve synchronized output: re-submit the last committed
@@ -164,7 +170,7 @@ func (t *Terminal) resize(w, h int) {
 	if newRows < 1 {
 		newRows = 1
 	}
-	if newCols == t.physicalCols() && newRows == t.rows && w == fbW && h == fbH {
+	if newCols == t.physicalCols() && newRows == t.physicalRows() && w == fbW && h == fbH {
 		return
 	}
 	if !limits.Grid(newCols, newRows) || !ensureFramebuffer(w, h) {

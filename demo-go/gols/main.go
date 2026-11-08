@@ -17,8 +17,8 @@ func usage() {
 
 Browse immutable GoLS SQLite corpus databases directly in an st-go terminal.
 Directories are searched recursively for .sqlite3, .sqlite, and .db files.
-With no arguments, GOLS_DATABASES (a colon-separated path list) is used, then
-the current directory.
+With no arguments, the recently opened databases from ~/.cache/gols.json are
+shown. Opening a database moves it to the front of that list.
 
 Hierarchy: database -> corpus -> documents -> PDF/LaTeX contents
 
@@ -48,16 +48,6 @@ func parseArgs(args []string) (paths []string, done bool, code int) {
 }
 
 func databaseCandidates(inputs []string) ([]string, error) {
-	if len(inputs) == 0 {
-		inputs = filepath.SplitList(os.Getenv("GOLS_DATABASES"))
-	}
-	if len(inputs) == 0 {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		inputs = []string{cwd}
-	}
 	seen := make(map[string]bool)
 	var result []string
 	add := func(file string) {
@@ -112,33 +102,56 @@ func run() int {
 	if done {
 		return code
 	}
-	candidates, err := databaseCandidates(paths)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "gols: %v\n", err)
-		return 1
+	recentMode := len(paths) == 0
+	startupWarning := ""
+	var (
+		candidates []string
+		err        error
+	)
+	if recentMode {
+		candidates, err = loadRecentDatabases()
+		if err != nil {
+			startupWarning = "Could not read recent databases: " + err.Error()
+			candidates = nil
+		}
+	} else {
+		candidates, err = databaseCandidates(paths)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gols: %v\n", err)
+			return 1
+		}
 	}
 	var corpora []*corpus
+	var openedPaths []string
 	for _, candidate := range candidates {
 		opened, err := openCorpus(candidate)
 		if err != nil {
-			if len(paths) > 0 && len(candidates) == 1 {
+			if !recentMode && len(candidates) == 1 {
 				fmt.Fprintf(os.Stderr, "gols: %s: %v\n", candidate, err)
 				return 1
 			}
 			continue
 		}
 		corpora = append(corpora, opened)
+		openedPaths = append(openedPaths, opened.file)
 	}
-	if len(corpora) == 0 {
+	if !recentMode && len(corpora) == 0 {
 		fmt.Fprintln(os.Stderr, "gols: no GoLS corpus databases found")
 		return 1
 	}
+	if !recentMode && len(openedPaths) > 0 {
+		if err := recordRecentDatabases(openedPaths); err != nil {
+			startupWarning = "Could not update recent databases: " + err.Error()
+		}
+	}
 
 	browser := &Browser{
-		fd:      int(os.Stdin.Fd()),
-		out:     bufio.NewWriter(os.Stdout),
-		corpora: corpora,
-		sigCh:   make(chan os.Signal, 8),
+		fd:             int(os.Stdin.Fd()),
+		out:            bufio.NewWriter(os.Stdout),
+		corpora:        corpora,
+		recentMode:     recentMode,
+		recentRecorder: recordRecentDatabases,
+		sigCh:          make(chan os.Signal, 8),
 	}
 	browser.in = &input{fd: browser.fd}
 	signal.Notify(browser.sigCh, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -148,6 +161,13 @@ func run() int {
 			corpus.close()
 		}
 		return 1
+	}
+	if startupWarning != "" {
+		browser.status = startupWarning
+	} else if recentMode && len(corpora) == 0 {
+		browser.status = "No recent databases — run gols DATABASE to add one"
+	} else if recentMode {
+		browser.status = fmt.Sprintf("Recent databases: %d", len(corpora))
 	}
 	browser.makeRaw()
 	defer browser.cleanup()

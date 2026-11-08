@@ -48,7 +48,7 @@ func renderSource(file string, source *sourceSnapshot) renderResult {
 	// keeping one Renderer forever would retain every saved revision.
 	rendered, err := latexpdf.NewRenderer().RenderPDFResultWithOptions(latexpdf.Document{
 		Source: source.text, Title: title, Author: latexpdf.PlainText(author),
-	}, latexpdf.PDFOptions{PageWidth: 140, PageHeight: 297, Compact: true})
+	}, latexpdf.PDFOptions{PageWidth: 140, PageHeight: 297, Compact: true, FontScale: 0.8})
 	if err == nil && !limits.Check("vimtex PDF", int64(len(rendered.PDF)), limits.FileBytes) {
 		err = fmt.Errorf("rendered PDF exceeds resource limit")
 	}

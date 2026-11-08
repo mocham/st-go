@@ -15,11 +15,12 @@ import (
 )
 
 type sourceSnapshot struct {
-	text      string
-	hash      [sha256.Size]byte
-	files     map[string]os.FileInfo // nil also watches a missing include for creation
-	err       error
-	rootLines []int // root source line -> expanded source line (both one-based)
+	text       string
+	hash       [sha256.Size]byte
+	files      map[string]os.FileInfo // nil also watches a missing include for creation
+	err        error
+	rootLines  []int // root source line -> expanded source line (both one-based)
+	cursorLine int   // first %cursor comment in expanded source; zero when absent
 }
 
 func (s *sourceSnapshot) expandedLine(line int) int {
@@ -76,9 +77,39 @@ func loadSource(path string) *sourceSnapshot {
 		for i, offset := range s.rootLines {
 			s.rootLines[i] = 1 + sort.SearchInts(newlines, offset)
 		}
+		if s.err == nil {
+			s.cursorLine = sourceCursorLine(s.text)
+		}
 	}
 	s.hash = sha256.Sum256([]byte(s.text))
 	return s
+}
+
+// A cursor marker starts a TeX comment, either on its own line or after text.
+// Skip escaped percent signs and ordinary comments mentioning the marker.
+func sourceCursorLine(source string) int {
+	line := 1
+	for i := 0; i < len(source); i++ {
+		switch source[i] {
+		case '\n':
+			line++
+		case '\\':
+			if i+1 < len(source) && (source[i+1] == '\\' || source[i+1] == '%') {
+				i++
+			}
+		case '%':
+			end := len(source)
+			if n := strings.IndexByte(source[i:], '\n'); n >= 0 {
+				end = i + n
+			}
+			comment := strings.TrimSpace(source[i+1 : end])
+			if comment == "cursor" || strings.HasPrefix(comment, "cursor ") || strings.HasPrefix(comment, "cursor\t") {
+				return line
+			}
+			i = end - 1
+		}
+	}
+	return 0
 }
 
 type sourceExpander struct {

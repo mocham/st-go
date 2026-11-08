@@ -17,7 +17,7 @@ const (
 	// DefaultRenderPageBytes is the default source-size target used by
 	// PreparePages when paginating HTML views.
 	DefaultRenderPageBytes = defaultRenderPageBytes
-	pdfFormatVersion       = "latexpdf-native-v14-table-rows-eqnarray-dynkin"
+	pdfFormatVersion       = "latexpdf-native-v15-auxiliary-bibliography"
 )
 
 // Document contains an expanded LaTeX source document and its PDF metadata.
@@ -35,6 +35,9 @@ type Document struct {
 type PDFOptions struct {
 	PageWidth  float64
 	PageHeight float64
+	// FontScale multiplies text and mathematics sizes before line wrapping and
+	// pagination. Zero uses 1. Page dimensions and margins are independent.
+	FontScale float64
 	// Compact uses narrow preview padding and omits generated title/footer
 	// furniture. Titles explicitly present in the source still render.
 	Compact bool
@@ -188,6 +191,7 @@ func PDFCacheKeyWithOptions(document Document, options PDFOptions) string {
 		strconv.FormatFloat(options.PageWidth, 'g', -1, 64),
 		strconv.FormatFloat(options.PageHeight, 'g', -1, 64),
 		strconv.FormatBool(options.Compact),
+		strconv.FormatFloat(options.FontScale, 'g', -1, 64),
 		document.Source,
 	} {
 		_, _ = digest.Write([]byte(value))

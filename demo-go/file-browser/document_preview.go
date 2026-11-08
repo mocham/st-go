@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	documentPreviewVersion = "latexpdf-document-v10-table-rows-eqnarray-dynkin"
+	documentPreviewVersion = "latexpdf-document-v11-auxiliary-bibliography"
 	maxPreviewDocumentSize = 12 << 20
+	previewFontScale       = 1.7
 )
 
 var pdfPageObject = regexp.MustCompile(`/Type\s*/Page\b`)
@@ -98,7 +99,7 @@ func (renderer *previewDocumentRenderer) renderSized(path string, pageWidth, pag
 		source = latexpdf.MarkdownToLaTeX(source)
 	}
 
-	version := fmt.Sprintf("%s\x00%s\x00%.6f\x00%.6f\x00", documentPreviewVersion, extension, pageWidth, pageHeight)
+	version := fmt.Sprintf("%s\x00%s\x00%.6f\x00%.6f\x00%g\x00", documentPreviewVersion, extension, pageWidth, pageHeight, previewFontScale)
 	digest := sha256.Sum256(append([]byte(version), data...))
 	key := hex.EncodeToString(digest[:])
 	if cached, ok := renderer.docs[key]; ok {
@@ -127,7 +128,7 @@ func (renderer *previewDocumentRenderer) renderPDFDocument(path, source, key, ki
 
 	rendered, err := renderer.latex.RenderPDFResultWithOptions(latexpdf.Document{
 		Source: source, Title: title, Author: author, Modified: modified,
-	}, latexpdf.PDFOptions{PageWidth: pageWidth, PageHeight: pageHeight})
+	}, latexpdf.PDFOptions{PageWidth: pageWidth, PageHeight: pageHeight, FontScale: previewFontScale})
 	if err != nil {
 		return nil, err
 	}

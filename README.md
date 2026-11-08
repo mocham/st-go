@@ -38,7 +38,7 @@ parser and screen model, and the X11 frontend is built on the pure-Go
 ## Resource limits and error logs
 
 Resource budgets are centralized in [`limits/limits.go`](limits/limits.go).
-`MaxBytes` defaults to **64 MiB** per input/buffer; smaller budgets are derived
+`MaxBytes` defaults to **64 MiB** per input/buffer; other budgets are derived
 from it:
 
 | Resource | Limit |
@@ -47,6 +47,7 @@ from it:
 | Decoded bitmap, framebuffer, image atlas, pending WebP cache pixels | 64 MiB each |
 | Terminal screen grids (both buffers plus bookkeeping) | 64 MiB |
 | Glyph cache | 32 MiB / 16,384 entries |
+| Continuous PDF cache | 256 MiB per strip, up to five screenfuls |
 | Clipboard transfer | 8 MiB |
 | OSC/DCS control string | 1 MiB |
 | Animation frame count | 65,536 |
@@ -135,8 +136,9 @@ automatically.
 
 ### Independent display regions
 
-st-go can reserve a **full-height right-hand preview** beside the main terminal.
-The main terminal grid and PTY both shrink to the left region's width. Clears,
+st-go can reserve a **right-hand preview** beside the main terminal, or a
+**full-width preview below a fixed-height terminal header**. The main terminal
+grid and PTY both shrink to their region. Clears,
 scrolling, Vim's alternate screen, and cursor drawing stay inside that region;
 the preview has its own retained pixels. Ordinary terminal updates do not
 repaint the preview.
@@ -159,6 +161,7 @@ discarded. Input/bitmap limits apply, and failures are logged under `/tmp/`.
 | --- | --- |
 | `region split 45%` | Reserve 45% of columns for the right preview |
 | `region split 40` | Reserve 40 columns initially |
+| `region stack 1` | Reserve one terminal row at the top, with a full-width preview below |
 | `region layout main X Y W H secondary X Y W H` | Atomically set explicit cell rectangles |
 | `region secondary open '<path>' [page N\|current] [fit-contain\|fit-width\|fit-height\|native]` | Replace the preview with a static image or PDF page |
 | `region secondary open '<path>' fit-width continuous [background '#RRGGBB']` | Display a continuous PDF with locally animated pixel scrolling and optional paper/canvas color |
@@ -166,12 +169,19 @@ discarded. Input/bitmap limits apply, and failures are logged under `/tmp/`.
 | `region secondary scroll report\|pages` | Report navigation to the application, or use default PDF-page scrolling |
 | `region secondary scroll N` / `region secondary seek N` | Scroll locally in continuous mode, or emit an application navigation event |
 | `region secondary position N` | Set a continuous view's position in millionths of its scroll range (0–1000000) |
+| `region secondary page N` / `pages N` | Jump to a PDF page / move by signed PDF pages, using actual page dimensions |
+| `region secondary view N` | Animate by millionths of the viewport height (500000 = half a screen) |
+| `region secondary zoom N` | Set 10–500% of fit-width; 0 best-fits the current page |
+| `region secondary pan N` | Pan horizontally by signed steps when zoomed in |
+| `region secondary find forward\|backward\|next\|previous 'text'` | Asynchronous case-insensitive, page-wise PDF text search; wraps once |
+| `region secondary info` | Reply with `DCS region secondary status PAGE PAGES POSITION ZOOM LOADING FAILED ST` |
 | `region query` | Reply on terminal input with `DCS region layout … ST` |
-| `region reset` | Release the preview and restore the full-width PTY |
+| `region reset` | Release the preview and restore the full-window PTY |
 
 Rectangle X/Y coordinates and PDF page numbers are **one-based**. An explicit
-layout must cover the entire cell grid: `main` at the left edge, `secondary`
-immediately adjoining it at the right, both full-height. A single full-window
+layout must cover the entire cell grid: `main` at the top left, `secondary`
+immediately adjoining it at the right (both full-height) or below (both full-width).
+A single full-window
 `main` rectangle is also accepted. Unsupported IDs, gaps, overlaps, and other
 layouts are rejected without changing the active layout. For a 120×40 window:
 
@@ -179,13 +189,23 @@ layouts are rejected without changing the active layout. For a 120×40 window:
 printf '\033P%s\033\\' 'region layout main 1 1 70 40 secondary 71 1 50 40'
 ```
 
-Window resizing preserves the requested width ratio, resizing the main PTY and
-re-rendering the preview. At a one-column window, the preview is temporarily
-hidden and returns when space is available. `fit-contain` is the default for
+Window resizing preserves the requested width ratio for side-by-side layouts,
+or the main row count for stacked layouts, resizing the main PTY and re-rendering
+the preview. At a one-column/one-row window respectively, the preview is
+temporarily hidden and returns when space is available. `fit-contain` is the default for
 region images/PDFs; PDF `fit-width` fills the width and clips vertical overflow.
 Adding `continuous` stacks all PDF pages and scrolls cached strips immediately,
 independently of application refresh timing. A three-pixel divider occupies the
-left edge of the preview pane.
+left edge of side-by-side preview panes. Continuous PDFs retain the native
+document across zoom/resize; a new `open` reloads the file. Search replies with
+`DCS region secondary found PAGE ST` (0 means no match); `next`/`previous` start
+on the adjacent page. Status positions use millionths, zoom uses percent, and
+loading/failed are 0 or 1. Background prefetch does not report loading when the
+visible area is cached. A failed reload retains the previous pixels. Preview
+state has its own mutex; a dedicated painter uses a private framebuffer and
+X11 child drawable, with a minimum 16 ms frame interval. The decoder retains
+its own native rendering engine and reuses overlapping strip pixels. Cached
+scrolling shifts a retained X pixmap and uploads only newly exposed rows.
 By default the mouse wheel over the
 preview changes PDF pages (wrapping at either end); preview clicks are consumed
 locally. Keyboard input stays with the main terminal. The split persists across
@@ -195,8 +215,8 @@ should send that command during cleanup.
 The optional Go interface is `term.RegionHooks` in
 [`term/display_regions.go`](term/display_regions.go): stable `RegionID`s,
 `DisplayRegion` rectangles (zero-based in Go), `SetRegions`, `Regions`,
-`OpenRegion`, and `ClearRegion`. The first backend accepts only the two-region
-side-by-side layout, while the interface leaves room for future layouts.
+`OpenRegion`, and `ClearRegion`. Navigation and asynchronous search are optional
+`RegionNavigationHooks` / `RegionSearchHooks` capabilities.
 
 ### Vim + live LaTeX demo
 
@@ -217,8 +237,26 @@ pixels without waiting for a LaTeX render. Preview padding is trimmed and unused
 page-bottom whitespace is cropped. `:VimtexPreview [line]` provides an approximate
 source-line jump; `:VimtexScroll count` scrolls by wheel steps from Vimscript.
 Ordinary keyboard input stays with Vim.
+Add a `%cursor` comment to the source for automatic navigation when a changed
+preview is published; the first marker in the expanded saved document wins.
 The preview uses a soft warm off-white (`#f7f5ef`) background by default. Set
 `-preview-bg '#RRGGBB'` (alias `-bg`) before the filename to choose another color.
+
+### Zat PDF viewer
+
+[`demo-go/zat`](demo-go/zat/README.md) is a zathura-style TUI using the same
+native, smoothly scrolling PDF view as vimtex:
+
+```sh
+make st zat
+./st -e ./zat /path/to/document.pdf
+```
+
+Use `j/k` or the wheel to scroll, `J/K` for pages, `gg/G` or `42G` to jump,
+`+/-` to zoom, `s` for fit-width, `a` for best-fit, `/text` to search, and `q`
+to quit. `:help` shows the quick reference. The command/status row is at the top;
+PDF rendering and caching stay in st-go. See the demo's
+[performance notes](demo-go/zat/PERFORMANCE.md) for the zathura/Poppler comparison.
 
 ## Requirements
 
@@ -482,6 +520,8 @@ XHTML, and EPUB previews pass sanitized semantic markup to the separate native
 `semhtml` PDF renderer; EPUB files first resolve their package spine. This path
 preserves headings, paragraphs, lists, inline emphasis, code, links, table text,
 and image alt text while deliberately ignoring CSS and publication fonts.
+The file-browser and gols use a **1.7× font scale** for their LaTeX/Markdown
+previews; vimtex uses its own **0.8× font scale** for the fit-width editor pane.
 
 ### Go corpus browser
 
@@ -498,6 +538,7 @@ final level is an outline whose entries jump to their exact rendered PDF pages.
 make gols
 ./st -e ./gols /path/to/lectures.sqlite3
 ./st -e ./gols /path/to/corpus-directory   # recursively finds corpus DBs
+./st -e ./gols                              # choose a recent database
 ```
 
 The navigation pane is focused and visible at startup. Arrow keys and Enter
@@ -507,8 +548,9 @@ Tab again hides it. `/` searches document paths/titles/content,
 `[` and `]` change rendered document pages, and `q` exits. PDFs are generated only
 when a document is opened. The selected page-size variant remains pinned while
 the window is resized; reopening at another size creates or reuses that cached
-variant. `GOLS_DATABASES` supplies a colon-separated default database list when
-no command-line path is given.
+variant. Successfully opened databases are kept in most-recently-used order in
+`$HOME/.cache/gols.json`. Starting `gols` without a path displays that recent
+database list; selecting an entry moves it to the front for the next launch.
 
 ## License
 

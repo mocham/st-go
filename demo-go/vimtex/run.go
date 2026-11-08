@@ -253,6 +253,13 @@ func run(o options, in *os.File, out io.Writer) error {
 				if err := dcs(out, "region secondary open "+quoteDSL(previewPath)+" background "+quoteDSL(o.previewBG)+" fit-width continuous"); err != nil {
 					return err
 				}
+				// Anchor only the successfully published revision. Failed/stale
+				// renders and watcher polls must not disturb manual scrolling.
+				if source.cursorLine > 0 {
+					if err := dcs(out, fmt.Sprintf("region secondary position %d", source.previewPosition(source.cursorLine))); err != nil {
+						return err
+					}
+				}
 				clock.lastPublished = time.Now()
 				clock.published, clock.hasPublished = viewKey, true
 				clock.attempted, clock.hasAttempt = viewKey, true

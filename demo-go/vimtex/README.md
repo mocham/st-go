@@ -48,6 +48,20 @@ choose the PDF paper and surrounding canvas color. For example:
   Saving retains the scroll position, clamped if the new document is shorter.
 - Preview content is **fit to the pane width**, with narrow padding and unused
   page-bottom whitespace cropped. A **three-pixel divider** separates it from Vim.
+  Text and mathematics use an independent **0.8× font scale**.
+- Put **`%cursor`** at the desired source location to jump there automatically
+  when the updated preview is ready. Standalone and trailing comments work:
+
+  ```tex
+  %cursor
+  \section{Current work}
+  ```
+
+  The first marker in the expanded saved source wins, including local
+  `\input`/`\include` files. It is honored on the initial preview and each
+  changed revision, using the same approximate source-line mapping as
+  `:VimtexPreview`. With no marker, saving preserves the scroll position.
+  Unchanged files do not repeatedly pull the preview back to the marker.
 - Window resizing preserves the split and updates Vim's PTY dimensions.
 - Exiting Vim restores the full-width terminal and removes temporary PDFs.
 
@@ -58,7 +72,7 @@ successful preview. Diagnostics go to `/tmp/st-go-<pid>-errors-*.log`.
 
 ## Vimscript navigation
 
-The demo installs two commands, without automatic cursor-following or key maps:
+The demo also installs two commands for manual navigation, without key maps:
 
 ```vim
 :VimtexPreview       " seek to Vim's current line

@@ -13,21 +13,24 @@ import (
 )
 
 // MaxBytes is the common upper bound for one input, decoded bitmap, or buffer.
-// Smaller budgets below are derived from it. These are per-resource limits,
+// Other budgets below are derived from it. These are per-resource limits,
 // not a process-wide RSS limit (native decoders also use working memory).
 const (
-	MaxBytes          = 64 << 20
-	FileBytes         = MaxBytes
-	PixelBytes        = MaxBytes
-	ControlBytes      = MaxBytes / 64
-	ClipboardBytes    = MaxBytes / 8
-	GlyphCacheBytes   = MaxBytes / 2
-	GlyphCacheEntries = MaxBytes / 4096
-	PreviewCacheBytes = MaxBytes / 2
-	PreviewPages      = MaxBytes / 4096
-	PreviewHeight     = MaxBytes // total continuous-document height in pixels
-	AnimationFrames   = MaxBytes / 1024
-	LogBytes          = MaxBytes / 64
+	MaxBytes             = 64 << 20
+	FileBytes            = MaxBytes
+	PixelBytes           = MaxBytes
+	ControlBytes         = MaxBytes / 64
+	ClipboardBytes       = MaxBytes / 8
+	GlyphCacheBytes      = MaxBytes / 2
+	GlyphCacheEntries    = MaxBytes / 4096
+	PreviewCacheBytes    = MaxBytes * 4 // 256 MiB per continuous-PDF strip
+	PreviewScreens       = 5
+	PreviewFrameInterval = 16 * time.Millisecond
+	PreviewPages         = MaxBytes / 4096
+	PreviewHeight        = MaxBytes // total continuous-document height in pixels
+	PreviewSearchBytes   = MaxBytes / 65536
+	AnimationFrames      = MaxBytes / 1024
+	LogBytes             = MaxBytes / 64
 )
 
 var diagnostics struct {

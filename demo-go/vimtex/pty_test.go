@@ -329,3 +329,51 @@ func TestVimtexPTYVimscriptAndWheelNavigation(t *testing.T) {
 	}
 	f.master.Write([]byte(":qa!\r"))
 }
+
+func TestVimtexPTYCursorMarkerFollowsPublishedSaves(t *testing.T) {
+	dir := t.TempDir()
+	source, include := filepath.Join(dir, "source.tex"), filepath.Join(dir, "part.tex")
+	writeSource(t, source, "\\begin{document}\n\\input{part}\n\\end{document}\n")
+	original := "First.\n\nSecond.\n\nThird.\n\nFourth."
+	writeSource(t, include, original)
+	f := startVimtexPTY(t, source, filepath.Join(dir, "ready"))
+	positions := func() []previewFrame {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		var result []previewFrame
+		for _, frame := range f.frames {
+			if strings.HasPrefix(frame.command, "region secondary position ") {
+				result = append(result, frame)
+			}
+		}
+		return result
+	}
+	awaitPTY(t, f, func() bool { return len(f.previews()) == 1 }, "initial unmarked preview")
+	if len(positions()) != 0 {
+		t.Fatal("unmarked source caused an automatic seek")
+	}
+	for i, change := range []struct{ text, position string }{
+		{strings.Replace(original, "Second.", "Second. %cursor", 1), "375000"},
+		{strings.Replace(original, "Fourth.", "Fourth. %cursor", 1), "875000"},
+		{original, ""}, // removing the marker should retain manual scrolling
+	} {
+		writeSource(t, include+".next", change.text)
+		if err := os.Rename(include+".next", include); err != nil {
+			t.Fatal(err)
+		}
+		awaitPTY(t, f, func() bool { return len(f.previews()) == i+2 }, "saved include preview")
+		if change.position != "" {
+			awaitPTY(t, f, func() bool { return len(positions()) == i+1 }, "saved cursor marker navigation")
+			frame := positions()[i]
+			if frame.command != "region secondary position "+change.position || frame.at.Before(f.previews()[i+1].at) {
+				t.Fatalf("marker navigation did not follow its published revision: %#v", frame)
+			}
+		}
+	}
+	// Multiple watcher polls must not keep seeking, including after removal.
+	time.Sleep(600 * time.Millisecond)
+	if len(positions()) != 2 {
+		t.Fatalf("unexpected repeated/removed marker navigation: %v", positions())
+	}
+	f.master.Write([]byte(":qa!\r"))
+}

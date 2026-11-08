@@ -66,6 +66,12 @@ type RegionNavigationHooks interface {
 	NavigateRegion(RegionID, RegionNavigation) error
 }
 
+// RegionSearchHooks locates text asynchronously in the native PDF worker.
+// Direction is -1/1; next skips the current page (page-wise text search).
+type RegionSearchHooks interface {
+	FindRegion(RegionID, string, int, bool) error
+}
+
 func (t *Term) dslRegion(args []string) error {
 	hooks, ok := t.hooks.(RegionHooks)
 	if !ok {
@@ -75,6 +81,23 @@ func (t *Term) dslRegion(args []string) error {
 		return fmt.Errorf("region requires layout, split, reset, query, or a target")
 	}
 	switch args[0] {
+	case "stack":
+		if len(args) != 2 {
+			return fmt.Errorf("region stack requires the main height in rows")
+		}
+		cols, rows := 0, 0
+		for _, r := range hooks.Regions() {
+			cols = max(cols, r.Bounds.X+r.Bounds.Width)
+			rows = max(rows, r.Bounds.Y+r.Bounds.Height)
+		}
+		height, err := strconv.Atoi(args[1])
+		if err != nil || height < 1 || height >= rows {
+			return fmt.Errorf("stack must leave at least one row in each region")
+		}
+		return hooks.SetRegions([]DisplayRegion{
+			{MainRegion, CellRect{0, 0, cols, height}},
+			{SecondaryRegion, CellRect{0, height, cols, rows - height}},
+		})
 	case "reset":
 		if len(args) != 1 {
 			return fmt.Errorf("region reset takes no arguments")
@@ -144,7 +167,37 @@ func (t *Term) dslRegion(args []string) error {
 	}
 	id := RegionID(args[0])
 	switch args[1] {
-	case "scroll", "seek", "position":
+	case "find":
+		if len(args) != 4 {
+			return fmt.Errorf("region find requires forward/backward/next/previous and text")
+		}
+		search, ok := t.hooks.(RegionSearchHooks)
+		if !ok {
+			return fmt.Errorf("PDF text search is not supported by this frontend")
+		}
+		direction, next := 1, false
+		switch args[2] {
+		case "forward":
+		case "backward":
+			direction = -1
+		case "next":
+			next = true
+		case "previous":
+			direction, next = -1, true
+		default:
+			return fmt.Errorf("invalid PDF search direction")
+		}
+		return search.FindRegion(id, args[3], direction, next)
+	case "info":
+		if len(args) != 2 {
+			return fmt.Errorf("region info takes no arguments")
+		}
+		navigation, ok := t.hooks.(RegionNavigationHooks)
+		if !ok {
+			return fmt.Errorf("region navigation is not supported by this frontend")
+		}
+		return navigation.NavigateRegion(id, RegionNavigation{Kind: "info"})
+	case "scroll", "seek", "position", "page", "pages", "view", "zoom", "pan":
 		if len(args) != 3 {
 			return fmt.Errorf("region navigation requires one value")
 		}

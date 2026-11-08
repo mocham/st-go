@@ -122,6 +122,7 @@ type pdfDocumentLayout struct {
 	rightInset                                       float64
 	pageWidth                                        float64
 	pageHeight                                       float64
+	fontScale                                        float64
 	marginLeft, marginRight, marginTop, marginBottom float64
 	anchors                                          map[string]pdfAnchor
 	links                                            map[string]int
@@ -166,6 +167,13 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 	if err != nil {
 		return nil, err
 	}
+	fontScale := options.FontScale
+	if math.IsNaN(fontScale) || math.IsInf(fontScale, 0) || fontScale < 0 {
+		return nil, fmt.Errorf("invalid PDF font scale %g", fontScale)
+	}
+	if fontScale == 0 {
+		fontScale = 1
+	}
 	pdf := fpdf.NewCustom(&fpdf.InitType{
 		OrientationStr: "P",
 		UnitStr:        "mm",
@@ -201,7 +209,7 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 		pdf.SetFooterFunc(func() {
 			pdf.SetY(-11)
 			pdf.SetTextColor(100, 112, 132)
-			pdf.SetFont(pdfSerifFamily, "", 8)
+			pdf.SetFont(pdfSerifFamily, "", 8*fontScale)
 			pdf.CellFormat(0, 5, fmt.Sprintf("%d / {nb}", pdf.PageNo()), "", 0, "C", false, 0, "")
 		})
 	}
@@ -209,6 +217,7 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 	layout := &pdfDocumentLayout{
 		renderer: renderer, pdf: pdf, title: document.Title,
 		pageWidth: pageWidth, pageHeight: pageHeight,
+		fontScale:  fontScale,
 		marginLeft: left, marginRight: right, marginTop: top, marginBottom: bottom,
 		anchors: make(map[string]pdfAnchor), links: make(map[string]int),
 	}
@@ -405,7 +414,7 @@ func (layout *pdfDocumentLayout) renderNode(node *html.Node, indent float64) {
 		}
 		style := pdfTextStyle{size: size, bold: true, red: 23, green: 52, blue: 77}
 		layout.verticalSpace(before)
-		layout.ensureSpace(size*25.4/72*1.35 + after)
+		layout.ensureSpace(size*layout.fontScale*25.4/72*1.35 + after)
 		if anchor := htmlAttribute(node, "id"); anchor != "" {
 			layout.registerAnchor(anchor, layout.y)
 		}
@@ -492,7 +501,7 @@ func (layout *pdfDocumentLayout) renderBoxedEnvironment(node *html.Node, indent 
 		}
 		if child.Type == html.ElementNode && child.Data == "h3" {
 			style := pdfTextStyle{size: 11.5, bold: true, red: 23, green: 52, blue: 77}
-			layout.ensureSpace(style.size*25.4/72*1.35 + 3.7)
+			layout.ensureSpace(style.size*layout.fontScale*25.4/72*1.35 + 3.7)
 			if anchor := htmlAttribute(child, "id"); anchor != "" {
 				layout.registerAnchor(anchor, layout.y)
 			}
@@ -579,7 +588,7 @@ func (layout *pdfDocumentLayout) renderNumberedEquation(node *html.Node, indent 
 	if len(numbers) == 0 {
 		return
 	}
-	style := pdfTextStyle{size: 9, red: 68, green: 84, blue: 106}
+	style := pdfTextStyle{size: 9 * layout.fontScale, red: 68, green: 84, blue: 106}
 	fontMM := style.size * 25.4 / 72
 	for index, number := range numbers {
 		layout.setStyle(style, number)
@@ -654,11 +663,13 @@ func (layout *pdfDocumentLayout) renderTableOfContents(node *html.Node, indent f
 		for index := range runs {
 			runs[index].linkTarget = target
 		}
-		lineMetric := layout.measureInline(pdfInline{text: "0", style: style})
-		layout.ensureSpace(lineMetric.ascent + lineMetric.descent + style.size*25.4/72*0.5)
+		metricStyle := style
+		metricStyle.size *= layout.fontScale
+		lineMetric := layout.measureInline(pdfInline{text: "0", style: metricStyle})
+		layout.ensureSpace(lineMetric.ascent + lineMetric.descent + metricStyle.size*25.4/72*0.5)
 		page, baseline := layout.pdf.PageNo(), layout.y+lineMetric.ascent
 		previousInset := layout.rightInset
-		layout.rightInset = math.Max(layout.rightInset, 13)
+		layout.rightInset = math.Max(layout.rightInset, 13*layout.fontScale)
 		layout.drawParagraph(runs, entryIndent, 0, 1.1)
 		layout.rightInset = previousInset
 		layout.tocEntries = append(layout.tocEntries, pdfTOCEntry{
@@ -673,7 +684,7 @@ func (layout *pdfDocumentLayout) drawTOCPageNumbers() {
 		return
 	}
 	lastPage := layout.pdf.PageNo()
-	style := pdfTextStyle{size: 9.5, red: 68, green: 84, blue: 106}
+	style := pdfTextStyle{size: 9.5 * layout.fontScale, red: 68, green: 84, blue: 106}
 	for _, entry := range layout.tocEntries {
 		destination, ok := layout.anchors[entry.target]
 		label := "?"
@@ -768,7 +779,7 @@ func (layout *pdfDocumentLayout) drawDisplayFormula(wrapper *html.Node, indent f
 		layout.drawParagraph([]pdfInline{{text: fallback, style: style}}, indent, 0, 2)
 		return
 	}
-	fontMM := 12.0 * 25.4 / 72.0
+	fontMM := 12.0 * layout.fontScale * 25.4 / 72.0
 	exMM := fontMM * 0.5
 	width := formula.widthEx * exMM
 	if width <= 0 {
@@ -959,6 +970,9 @@ func (layout *pdfDocumentLayout) drawTextDecoration(style pdfTextStyle, x1, x2, 
 func (layout *pdfDocumentLayout) breakInlineRuns(runs []pdfInline) []pdfLineItem {
 	items := make([]pdfLineItem, 0, len(runs)*2)
 	for _, run := range runs {
+		// Scale once, before measuring/wrapping. Line items retain the resolved
+		// size so text, inline math, baselines, links and decorations agree.
+		run.style.size *= layout.fontScale
 		if run.lineBreak || run.formula != nil {
 			items = append(items, layout.measureInline(run))
 			continue

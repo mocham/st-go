@@ -15,6 +15,7 @@ import (
 )
 
 const maxPreviewDocumentSize = 32 << 20
+const previewFontScale = 1.7
 
 var pdfPageObject = regexp.MustCompile(`/Type\s*/Page\b`)
 
@@ -52,6 +53,7 @@ func (previewer *documentPreviewer) render(ctx context.Context, corpus *corpus, 
 		corpus.file, fmt.Sprintf("%d", metadata.ID), metadata.SHA256,
 		metadata.Title, fmt.Sprintf("%d", metadata.ModTimeNS),
 		fmt.Sprintf("%.6f", pageWidth), fmt.Sprintf("%.6f", pageHeight),
+		fmt.Sprintf("%g", previewFontScale),
 	}, "\x00")
 	digest := sha256.Sum256([]byte(keySource))
 	key := hex.EncodeToString(digest[:])
@@ -97,7 +99,7 @@ func (previewer *documentPreviewer) render(ctx context.Context, corpus *corpus, 
 	modified := time.Unix(0, document.ModTimeNS)
 	pdfResult, err := previewer.renderer.RenderPDFResultWithOptions(latexpdf.Document{
 		Source: source, Title: title, Author: author, Modified: modified,
-	}, latexpdf.PDFOptions{PageWidth: pageWidth, PageHeight: pageHeight})
+	}, latexpdf.PDFOptions{PageWidth: pageWidth, PageHeight: pageHeight, FontScale: previewFontScale})
 	if err != nil {
 		return renderedPreview{}, err
 	}

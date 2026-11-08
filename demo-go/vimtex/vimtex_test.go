@@ -97,11 +97,34 @@ func TestSourceIncludesAndAtomicSaves(t *testing.T) {
 func TestSourceSeekMapsRootLinesPastIncludes(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "main.tex")
-	writeSource(t, filepath.Join(dir, "part.tex"), "first\nsecond\nthird\n")
+	writeSource(t, filepath.Join(dir, "part.tex"), "first\nsecond %cursor\nthird\n")
 	writeSource(t, root, "before\n\\input{part}\nafter\n")
 	s := loadSource(root)
 	if s.err != nil || s.expandedLine(3) != 6 {
 		t.Fatalf("root line mapping: %v, expanded=%d, text=%q", s.err, s.expandedLine(3), s.text)
+	}
+	if s.cursorLine != 3 || s.previewPosition(s.cursorLine) != 333333 {
+		t.Fatalf("included cursor marker used root-file coordinates: line=%d, position=%d", s.cursorLine, s.previewPosition(s.cursorLine))
+	}
+}
+
+func TestSourceCursorMarkerComments(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		line   int
+	}{
+		{"Plain source.\n", 0},
+		{"First.\n%cursor\nSecond.", 2},
+		{"First.\nSecond. %cursor", 2},
+		{"First.\r\n  % cursor\tcurrent work\r\n", 2},
+		{`Literal \%cursor`, 0},
+		{`Line break \\%cursor`, 1},
+		{"% Notes about %cursor\n%cursors\n%cursor\n", 3},
+		{"%cursor\nText.\n%cursor", 1},
+	} {
+		if got := sourceCursorLine(tc.source); got != tc.line {
+			t.Errorf("sourceCursorLine(%q) = %d, want %d", tc.source, got, tc.line)
+		}
 	}
 }
 

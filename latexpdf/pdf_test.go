@@ -96,6 +96,87 @@ func TestPDFCompactPreviewMarginsAndCrop(t *testing.T) {
 	}
 }
 
+func TestPDFFontScaleKeepsTextMathAndPaginationTogether(t *testing.T) {
+	document := Document{Source: "\\begin{document}Text $x$ text.\\[x\\]\n\n" +
+		strings.Repeat("A paragraph of wrapping text for the scaled preview, with several words on each line.\n\n", 45) + "\\end{document}"}
+	renderer := NewRenderer()
+	fontPattern := regexp.MustCompile(`/F\w+ ([0-9.]+) Tf`)
+	pagePattern := regexp.MustCompile(`/Type\s*/Page\b`)
+	boxPattern := regexp.MustCompile(`/MediaBox\s*\[[^]]+\]`)
+	var baseWidths []float64
+	var baseBox []byte
+	basePages := 0
+	for _, factor := range []float64{1, 1.7, 0.8, 0} {
+		pdf, err := renderer.RenderPDFWithOptions(document, PDFOptions{PageWidth: 120, PageHeight: 90, Compact: true, FontScale: factor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		scale := factor
+		if scale == 0 {
+			scale = 1
+		}
+		content := inflatedPDFStreams(pdf)
+		foundSize := false
+		for _, match := range fontPattern.FindAllSubmatch(content, -1) {
+			size, _ := strconv.ParseFloat(string(match[1]), 64)
+			if math.Abs(size-11.2*scale) < 0.005 {
+				foundSize = true
+			}
+		}
+		if !foundSize {
+			t.Fatalf("scale %g: missing scaled body font (or reused another scale's cached PDF)", factor)
+		}
+		// Measure actual emitted outlines for the inline and display x glyphs.
+		// Font operators alone cannot catch unscaled math or double scaling.
+		var widths []float64
+		left, right := math.Inf(1), math.Inf(-1)
+		for _, line := range strings.Split(string(content), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			switch fields[len(fields)-1] {
+			case "m", "l", "c":
+				for i := 0; i+1 < len(fields)-1; i += 2 {
+					x, err := strconv.ParseFloat(fields[i], 64)
+					if err != nil {
+						t.Fatal(err)
+					}
+					left, right = math.Min(left, x), math.Max(right, x)
+				}
+			case "f", "f*":
+				if right > left {
+					widths = append(widths, right-left)
+				}
+				left, right = math.Inf(1), math.Inf(-1)
+			}
+			if len(widths) == 2 {
+				break
+			}
+		}
+		if len(widths) != 2 {
+			t.Fatalf("scale %g: missing inline/display math paths", factor)
+		}
+		pages := len(pagePattern.FindAll(pdf, -1))
+		box := boxPattern.Find(pdf)
+		if factor == 1 {
+			baseWidths, basePages, baseBox = widths, pages, box
+			continue
+		}
+		for i, width := range widths {
+			if math.Abs(width-baseWidths[i]*scale) > 0.03 {
+				t.Fatalf("scale %g: math path %d width=%g, want %g", factor, i, width, baseWidths[i]*scale)
+			}
+		}
+		if !bytes.Equal(box, baseBox) {
+			t.Fatal("font scale changed the page dimensions")
+		}
+		if (scale > 1 && pages <= basePages) || (scale < 1 && pages >= basePages) {
+			t.Fatalf("scale %g: paragraph wrapping/pagination did not adjust (pages=%d, base=%d)", factor, pages, basePages)
+		}
+	}
+}
+
 func TestPDFFontsLoadLazilyAndRemainEmbedded(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -86,16 +86,18 @@ type Browser struct {
 	visible             int
 	compact             bool
 
-	corpora []*corpus
-	view    viewState
-	history []viewSnapshot
-	entries []browserEntry
-	idx     int
-	viewTop int
-	page    int
-	pages   int
-	status  string
-	navOpen bool
+	corpora        []*corpus
+	recentMode     bool
+	recentRecorder func([]string) error
+	view           viewState
+	history        []viewSnapshot
+	entries        []browserEntry
+	idx            int
+	viewTop        int
+	page           int
+	pages          int
+	status         string
+	navOpen        bool
 
 	openedDocumentID int64
 	openedPreview    renderedPreview
@@ -321,6 +323,11 @@ func (browser *Browser) enterSelected() {
 		browser.goBack()
 	case entryDatabase:
 		browser.status = "Corpora in " + entry.label
+		if browser.recentRecorder != nil {
+			if err := browser.recentRecorder([]string{browser.corpora[entry.corpusIndex].file}); err != nil {
+				browser.status = "Could not update recent databases: " + err.Error()
+			}
+		}
 		browser.setView(viewState{kind: viewCourses, corpusIndex: entry.corpusIndex})
 	case entryCourse:
 		browser.status = "Documents in " + entry.label

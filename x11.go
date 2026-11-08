@@ -552,6 +552,7 @@ func (t *Terminal) Close() {
 	if t.done != nil {
 		close(t.done)
 	}
+	t.closeRegionPresenter()
 	if t.webpCache != nil {
 		t.webpCache.close()
 	}

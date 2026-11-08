@@ -28,21 +28,27 @@ func (c *previewNavigation) navigate(kind string, value int) {
 func (c previewNavigation) command(source *sourceSnapshot) string {
 	var commands []string
 	if c.line > 0 {
-		first, last := 1, 1+strings.Count(source.text, "\n")
-		if begin := strings.Index(source.text, `\begin{document}`); begin >= 0 {
-			first = 1 + strings.Count(source.text[:begin], "\n")
-		}
-		if end := strings.LastIndex(source.text, `\end{document}`); end >= 0 {
-			last = 1 + strings.Count(source.text[:end], "\n")
-		}
-		line := max(first, min(source.expandedLine(c.line), last))
-		position := int(int64(line-first) * 1000000 / int64(max(1, last-first)))
+		position := source.previewPosition(source.expandedLine(c.line))
 		commands = append(commands, fmt.Sprintf("region secondary position %d", position))
 	}
 	if c.step != 0 {
 		commands = append(commands, fmt.Sprintf("region secondary scroll %d", c.step))
 	}
 	return strings.Join(commands, "; ")
+}
+
+// previewPosition takes an expanded source line, so markers inside includes
+// and explicit seeks from root-file lines use the same approximate mapping.
+func (s *sourceSnapshot) previewPosition(line int) int {
+	first, last := 1, 1+strings.Count(s.text, "\n")
+	if begin := strings.Index(s.text, `\begin{document}`); begin >= 0 {
+		first = 1 + strings.Count(s.text[:begin], "\n")
+	}
+	if end := strings.LastIndex(s.text, `\end{document}`); end >= 0 {
+		last = 1 + strings.Count(s.text[:end], "\n")
+	}
+	line = max(first, min(line, last))
+	return int(int64(line-first) * 1000000 / int64(max(1, last-first)))
 }
 
 // Region event frames are removed before relaying input to Vim. All other

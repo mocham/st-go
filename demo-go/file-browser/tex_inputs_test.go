@@ -93,6 +93,29 @@ func TestExpandLocalTeXDocumentAddsUsedTableCompanion(t *testing.T) {
 	}
 }
 
+func TestExpandLocalTeXDocumentAddsBibliographyAuxiliary(t *testing.T) {
+	directory := t.TempDir()
+	root := filepath.Join(directory, "paper.tex")
+	writeLocalTeXTestFile(t, root, `\documentclass{article}
+\bibliography{references}
+\begin{document}See \cite{entry}.\printbibliography\end{document}`)
+	writeLocalTeXTestFile(t, filepath.Join(directory, "references.bbl"), `\begin{thebibliography}{E}
+\bibitem[E]{entry}Expanded auxiliary entry.
+\end{thebibliography}`)
+	source, err := os.ReadFile(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expanded, err := expandLocalTeXDocument(root, source, maxPreviewDocumentSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(expanded)
+	if !strings.Contains(text, `\bibitem[E]{entry}`) || strings.Contains(text, `\printbibliography`) {
+		t.Fatalf("bibliography auxiliary was not attached: %s", text)
+	}
+}
+
 func writeLocalTeXTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

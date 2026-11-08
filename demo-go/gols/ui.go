@@ -126,6 +126,10 @@ func (browser *Browser) drawText(row, column, width int, style, text string) {
 
 func (browser *Browser) viewLabel() string {
 	switch browser.view.kind {
+	case viewDatabases:
+		if browser.recentMode {
+			return "recent databases"
+		}
 	case viewCourses:
 		if corpus := browser.currentCorpus(); corpus != nil {
 			return corpus.label
@@ -343,6 +347,10 @@ func (browser *Browser) renderPreview() {
 	}
 	entry := browser.selectedEntry()
 	if entry == nil {
+		if browser.view.kind == viewDatabases && browser.recentMode {
+			browser.drawPreviewMessage("RECENT DATABASES", "No recent databases.", "Run gols DATABASE to add one.")
+			return
+		}
 		browser.drawPreviewMessage("EMPTY", "No entries in this view.", "")
 		return
 	}
