@@ -97,7 +97,7 @@ func (b *Browser) drawHeader() {
 }
 
 func (b *Browser) drawInfo() {
-	if !b.navigationVisible {
+	if !b.navigation.Visible {
 		return
 	}
 	b.drawText(2, b.listX, b.listW, infoStyle, " SELECTED")
@@ -118,7 +118,7 @@ func (b *Browser) drawInfo() {
 }
 
 func (b *Browser) drawListRow(slot int) {
-	if !b.navigationVisible {
+	if !b.navigation.Visible {
 		return
 	}
 	row := b.listTop + slot
@@ -143,7 +143,7 @@ func (b *Browser) drawListRow(slot int) {
 }
 
 func (b *Browser) drawList() {
-	if !b.navigationVisible {
+	if !b.navigation.Visible {
 		return
 	}
 	for slot := 0; slot < b.visible; slot++ {
@@ -152,7 +152,7 @@ func (b *Browser) drawList() {
 }
 
 func (b *Browser) drawDivider() {
-	if !b.navigationVisible {
+	if !b.navigation.Visible {
 		return
 	}
 	col := b.listX - 1
@@ -180,7 +180,7 @@ func (b *Browser) drawOverlay() {
 }
 
 func (b *Browser) drawNavigationSidebar() {
-	if !b.navigationVisible {
+	if !b.navigation.Visible {
 		return
 	}
 	b.drawInfo()
@@ -196,7 +196,7 @@ func (b *Browser) toggleNavigationSidebar() {
 	if b.compact {
 		return
 	}
-	b.navigationVisible = !b.navigationVisible
+	b.navigation.Toggle()
 	b.renderAll()
 }
 

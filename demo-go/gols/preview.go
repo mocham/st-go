@@ -15,7 +15,7 @@ import (
 )
 
 const maxPreviewDocumentSize = 32 << 20
-const previewFontScale = 1.7
+const previewFontScale = 1.7 * 1.9 // 90% larger than the previous GoLS preview.
 const maxPreviewVariants = 4
 const maxDocumentPreviews = 32
 const previewCacheVersion = "gols-preview-v2-expanded-source"

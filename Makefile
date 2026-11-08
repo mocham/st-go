@@ -55,9 +55,10 @@ FILE_BROWSER = file-browser
 LATEXPDF_SRC = $(wildcard latexpdf/*.go) \
 	       $(wildcard latexpdf/pdf_assets/*)
 SEMHTML_SRC = $(wildcard semhtml/*.go)
+TUI_NAV_SRC = $(wildcard tui/navigation/*.go)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
-	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC)
-GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC)
+	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC)
+GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) go.mod go.sum

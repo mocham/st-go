@@ -21,11 +21,14 @@ With no arguments, the recently opened databases from ~/.cache/gols.json are
 shown. Opening a database moves it to the front of that list.
 
 Hierarchy: database -> corpus -> documents -> PDF/LaTeX contents
+Selecting a document previews it fit-height; Enter shows its table of contents
+in the navigation pane. Section entries jump to their rendered PDF pages.
 
 Keys: arrows navigate, Enter/right opens a level, Backspace/left goes back,
 PgUp/PgDn scroll, / searches, r reopens databases, [ and ] change rendered TeX
-pages, and Tab hides or focuses the navigation pane. Mouse clicks and wheel
-scrolling are supported.
+pages, and Tab hides or focuses the navigation pane. Navigation floats by
+default; Shift+Tab toggles pinning for future preview paints without repainting.
+Mouse clicks and wheel scrolling are supported.
 `)
 }
 

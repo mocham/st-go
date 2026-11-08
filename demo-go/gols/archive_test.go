@@ -343,7 +343,7 @@ func TestDocumentContentsUsePinnedOpenedPDF(t *testing.T) {
 	}
 }
 
-func TestDocumentRendersOnlyWhenOpenedAndNavigationAutoHides(t *testing.T) {
+func TestDocumentSelectionPreviewsAndEnterShowsContents(t *testing.T) {
 	opened, err := openCorpus(writeTestCorpus(t))
 	if err != nil {
 		t.Fatal(err)
@@ -355,31 +355,51 @@ func TestDocumentRendersOnlyWhenOpenedAndNavigationAutoHides(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer browser.cleanup()
-	if !browser.navOpen {
+	if !browser.navigation.Visible || !browser.navigation.Floating() {
 		t.Fatal("navigation is hidden at startup")
 	}
 	browser.terminalSize()
 	browser.view = viewState{kind: viewDocuments, corpusIndex: 0, course: "AA"}
 	browser.idx = 1
 	browser.buildEntries()
-	if len(browser.previewer.cache) != 0 {
-		t.Fatal("selecting a document rendered a PDF before it was opened")
+	browser.selectIndex(2) // Lecture one, including a real rendered section.
+	if len(browser.previewer.cache) != 1 || browser.view.kind != viewDocuments || !browser.navigation.Visible || browser.pages < 1 {
+		t.Fatalf("selected preview: view=%d nav=%v cache=%d pages=%d", browser.view.kind, browser.navigation, len(browser.previewer.cache), browser.pages)
 	}
+	if !strings.Contains(output.String(), "fit-height page 1\x1b\\") {
+		t.Fatal("selection did not emit a fit-height PDF preview")
+	}
+	selectedPath, err := os.Readlink(browser.previewLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
 	browser.enterSelected()
-	if browser.view.kind != viewTOC || browser.navOpen || len(browser.previewer.cache) != 1 {
-		t.Fatalf("open state: view=%d nav=%v cache=%d", browser.view.kind, browser.navOpen, len(browser.previewer.cache))
+	if browser.view.kind != viewTOC || !browser.navigation.Floating() || len(browser.previewer.cache) != 1 {
+		t.Fatalf("open state: view=%d nav=%v cache=%d", browser.view.kind, browser.navigation, len(browser.previewer.cache))
 	}
 	openedPath := browser.openedPreview.path
+	if openedPath != selectedPath || !strings.Contains(output.String(), "First topic") {
+		t.Fatalf("Enter did not reuse the preview and display its TOC: selected=%q opened=%q", selectedPath, openedPath)
+	}
+	if len(browser.entries) != 3 || browser.entries[2].kind != entryTOC {
+		t.Fatalf("contents entries = %#v", browser.entries)
+	}
+	output.Reset()
+	browser.selectIndex(2)
+	if browser.page != browser.entries[2].toc.Page || !strings.Contains(output.String(), fmt.Sprintf("fit-height page %d\x1b\\", browser.page)) {
+		t.Fatal("selecting a TOC section did not jump to its rendered PDF page")
+	}
 	browser.renderAll() // same path is redrawn after a resize/event, not regenerated
 	if browser.openedPreview.path != openedPath || len(browser.previewer.cache) != 1 {
 		t.Fatalf("redraw regenerated PDF: path=%q cache=%d", browser.openedPreview.path, len(browser.previewer.cache))
 	}
 	browser.toggleNavigation()
-	if !browser.navOpen {
-		t.Fatal("Tab did not show and focus navigation")
+	if browser.navigation.Visible {
+		t.Fatal("Tab did not hide navigation")
 	}
 	browser.toggleNavigation()
-	if browser.navOpen {
-		t.Fatal("second Tab did not hide navigation")
+	if !browser.navigation.Visible || browser.view.kind != viewTOC {
+		t.Fatal("second Tab did not restore the table of contents")
 	}
 }

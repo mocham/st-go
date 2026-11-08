@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
+	"st-go/tui/navigation"
 )
 
 const (
@@ -97,7 +98,7 @@ type Browser struct {
 	page           int
 	pages          int
 	status         string
-	navOpen        bool
+	navigation     navigation.Panel
 
 	openedDocumentID int64
 	openedPreview    renderedPreview
@@ -128,7 +129,7 @@ func (browser *Browser) setup() error {
 	browser.page = 1
 	browser.lastClickIdx = -1
 	browser.status = "Ready"
-	browser.navOpen = true
+	browser.navigation = navigation.DefaultPanel()
 	browser.buildEntries()
 	return nil
 }
@@ -233,12 +234,6 @@ func (browser *Browser) buildEntries() {
 		browser.idx = -1
 		browser.viewTop = 0
 		return
-	}
-	if browser.idx < 0 {
-		browser.idx = 0
-	}
-	if browser.idx >= len(browser.entries) {
-		browser.idx = len(browser.entries) - 1
 	}
 	browser.ensureVisible()
 }
@@ -373,8 +368,8 @@ func (browser *Browser) enterSelected() {
 		}
 		browser.openedDocumentID = entry.document.ID
 		browser.openedPreview = preview
-		browser.navOpen = false
-		browser.status = "Opened " + entry.document.Title + " — Tab shows contents"
+		browser.navigation.Visible = true
+		browser.status = "Contents: " + entry.document.Title
 		browser.setView(viewState{
 			kind: viewTOC, corpusIndex: entry.corpusIndex, course: entry.document.Course,
 			documentID: entry.document.ID,
@@ -387,45 +382,26 @@ func (browser *Browser) enterSelected() {
 }
 
 func (browser *Browser) ensureVisible() {
-	if browser.idx < browser.viewTop {
-		browser.viewTop = browser.idx
-	}
-	if browser.idx >= browser.viewTop+browser.visible {
-		browser.viewTop = browser.idx - browser.visible + 1
-	}
-	maximum := len(browser.entries) - browser.visible
-	if maximum < 0 {
-		maximum = 0
-	}
-	if browser.viewTop > maximum {
-		browser.viewTop = maximum
-	}
-	if browser.viewTop < 0 {
-		browser.viewTop = 0
-	}
+	selection := navigation.Selection{Index: browser.idx, Top: browser.viewTop}
+	selection.Normalize(len(browser.entries), browser.visible)
+	browser.idx, browser.viewTop = selection.Index, selection.Top
 }
 
 func (browser *Browser) selectIndex(index int) {
 	if len(browser.entries) == 0 {
 		return
 	}
-	if index < 0 {
-		index = 0
-	}
-	if index >= len(browser.entries) {
-		index = len(browser.entries) - 1
-	}
-	if index == browser.idx {
+	selection := navigation.Selection{Index: browser.idx, Top: browser.viewTop}
+	if !selection.Select(index, len(browser.entries), browser.visible) {
 		return
 	}
-	browser.idx = index
+	browser.idx, browser.viewTop = selection.Index, selection.Top
 	if entry := browser.selectedEntry(); entry != nil && entry.kind == entryTOC {
 		browser.page = entry.toc.Page
 	} else {
 		browser.page = 1
 		browser.pages = 0
 	}
-	browser.ensureVisible()
 	browser.renderAll()
 }
 
@@ -461,13 +437,19 @@ func (browser *Browser) changePage(delta int) {
 }
 
 func (browser *Browser) toggleNavigation() {
-	browser.navOpen = !browser.navOpen
-	if browser.navOpen {
+	browser.navigation.Toggle()
+	if browser.navigation.Visible {
 		browser.status = "Navigation focused"
 	} else {
 		browser.status = "Preview focused"
 	}
 	browser.renderAll()
+}
+
+// Pinning changes future placement only, matching file-browser's Shift+Tab.
+func (browser *Browser) toggleNavigationPin() {
+	browser.navigation.TogglePin()
+	browser.previewW = browser.navigation.PreviewWidth(browser.cols, browser.listX)
 }
 
 func (browser *Browser) searchPrompt() {
@@ -554,7 +536,7 @@ func (browser *Browser) handleKey(character byte) {
 		}
 		browser.handleCSI(first)
 	default:
-		if !browser.navOpen {
+		if !browser.navigation.Visible {
 			return
 		}
 		browser.handleNavigationKey(character)
@@ -581,6 +563,10 @@ func (browser *Browser) handleNavigationKey(character byte) {
 }
 
 func (browser *Browser) handleCSI(first byte) {
+	if first == 'Z' {
+		browser.toggleNavigationPin()
+		return
+	}
 	if first == '<' {
 		sequence := browser.readCSI(first)
 		match := sgrMousePattern.FindStringSubmatch(strings.TrimPrefix(sequence, "<"))
@@ -589,7 +575,7 @@ func (browser *Browser) handleCSI(first byte) {
 		}
 		return
 	}
-	if !browser.navOpen {
+	if !browser.navigation.Visible {
 		switch first {
 		case 'A', 'D':
 			browser.changePage(-1)
@@ -603,6 +589,8 @@ func (browser *Browser) handleCSI(first byte) {
 			if first >= '0' && first <= '9' {
 				sequence := browser.readCSI(first)
 				switch sequence {
+				case "1;2Z":
+					browser.toggleNavigationPin()
 				case "1~", "5~", "7~":
 					browser.changePage(-1)
 				case "4~", "6~", "8~":
@@ -629,6 +617,8 @@ func (browser *Browser) handleCSI(first byte) {
 		if first >= '0' && first <= '9' {
 			sequence := browser.readCSI(first)
 			switch sequence {
+			case "1;2Z":
+				browser.toggleNavigationPin()
 			case "1~", "7~":
 				browser.selectIndex(0)
 			case "4~", "8~":
@@ -648,7 +638,7 @@ func (browser *Browser) mouseEvent(code, x, y int, final byte) {
 	}
 	button := code & 3
 	if code&64 != 0 {
-		if (!browser.navOpen || x < browser.listX) && browser.pages > 1 {
+		if (!browser.navigation.Visible || x < browser.listX) && browser.pages > 1 {
 			if button == 0 {
 				browser.changePage(-1)
 			} else if button == 1 {
@@ -661,7 +651,7 @@ func (browser *Browser) mouseEvent(code, x, y int, final byte) {
 		}
 		return
 	}
-	if !browser.navOpen {
+	if !browser.navigation.Visible {
 		return
 	}
 	if button == 2 {

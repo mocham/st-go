@@ -10,6 +10,7 @@ import (
 
 	"st-go/config"
 	"st-go/term"
+	"st-go/tui/navigation"
 )
 
 type animationHooks struct {
@@ -44,8 +45,8 @@ func TestAnimatedPreviewSurvivesSidebar(t *testing.T) {
 			var output bytes.Buffer
 			b := &Browser{out: bufio.NewWriter(&output), rows: 24, cols: 80,
 				listX: 47, listW: 34, listTop: 8, listBottom: 23, visible: 16,
-				navigationVisible: mode != "hidden", navigationPinned: mode == "pinned",
-				files: []string{path}, previewLink: filepath.Join(dir, "preview")}
+				navigation: navigation.Panel{Visible: mode != "hidden", Pinned: mode == "pinned"},
+				files:      []string{path}, previewLink: filepath.Join(dir, "preview")}
 			b.updatePreviewWidth()
 			b.renderPreview()
 			b.drawOverlay()

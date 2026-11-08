@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"st-go/tui/navigation"
 )
 
 func TestDisplayTextSanitizes(t *testing.T) {
@@ -63,10 +65,10 @@ func TestShorten(t *testing.T) {
 func TestNavigationSidebarLayoutModes(t *testing.T) {
 	var output bytes.Buffer
 	browser := &Browser{
-		out:               bufio.NewWriter(&output),
-		cols:              80,
-		listX:             47,
-		navigationVisible: true,
+		out:        bufio.NewWriter(&output),
+		cols:       80,
+		listX:      47,
+		navigation: navigation.DefaultPanel(),
 	}
 	browser.updatePreviewWidth()
 	if browser.previewW != 80 {
@@ -74,40 +76,40 @@ func TestNavigationSidebarLayoutModes(t *testing.T) {
 	}
 
 	browser.handleCSI('Z')
-	if !browser.navigationPinned || browser.previewW != 45 {
-		t.Fatalf("pinned navigation = %t, preview width = %d; want true, 45", browser.navigationPinned, browser.previewW)
+	if !browser.navigation.Pinned || browser.previewW != 45 {
+		t.Fatalf("pinned navigation = %t, preview width = %d; want true, 45", browser.navigation.Pinned, browser.previewW)
 	}
 	if output.Len() != 0 {
 		t.Fatalf("Shift+Tab repainted the current screen: %q", output.String())
 	}
 
-	browser.navigationVisible = false
+	browser.navigation.Visible = false
 	browser.updatePreviewWidth()
 	if browser.previewW != 80 {
 		t.Fatalf("hidden navigation preview width = %d, want 80", browser.previewW)
 	}
 	browser.handleCSI('Z')
-	if browser.navigationPinned || browser.previewW != 80 {
-		t.Fatalf("floating hidden navigation = %t, preview width = %d; want false, 80", browser.navigationPinned, browser.previewW)
+	if browser.navigation.Pinned || browser.previewW != 80 {
+		t.Fatalf("floating hidden navigation = %t, preview width = %d; want false, 80", browser.navigation.Pinned, browser.previewW)
 	}
 }
 
 func TestTabRedrawsCompleteFrameWithNavigationVisibility(t *testing.T) {
 	var output bytes.Buffer
 	browser := &Browser{
-		out:               bufio.NewWriter(&output),
-		rows:              24,
-		cols:              80,
-		listW:             34,
-		listX:             47,
-		listTop:           8,
-		listBottom:        22,
-		visible:           15,
-		navigationVisible: true,
+		out:        bufio.NewWriter(&output),
+		rows:       24,
+		cols:       80,
+		listW:      34,
+		listX:      47,
+		listTop:    8,
+		listBottom: 22,
+		visible:    15,
+		navigation: navigation.DefaultPanel(),
 	}
 	browser.updatePreviewWidth()
 	browser.handleKey('\t')
-	if browser.navigationVisible {
+	if browser.navigation.Visible {
 		t.Fatal("Tab did not hide navigation")
 	}
 	if browser.previewW != 80 {
@@ -123,7 +125,7 @@ func TestTabRedrawsCompleteFrameWithNavigationVisibility(t *testing.T) {
 	browser.toggleNavigationPin()
 	before := output.Len()
 	browser.handleKey('\t')
-	if !browser.navigationVisible {
+	if !browser.navigation.Visible {
 		t.Fatal("second Tab did not show navigation")
 	}
 	if browser.previewW != 45 {

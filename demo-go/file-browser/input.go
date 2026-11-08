@@ -205,7 +205,7 @@ func (b *Browser) mouseEvent(cb, x, y int, final byte) {
 	}
 	if cb&64 != 0 { // wheel
 		b.resetClick()
-		previewArea := !b.navigationVisible || x < b.listX
+		previewArea := !b.navigation.Visible || x < b.listX
 		if previewArea && b.idx >= 0 && (b.isPDF(b.files[b.idx]) || isRenderedDocument(b.files[b.idx])) {
 			if button == 0 {
 				b.changePreviewPage(-1)
@@ -229,7 +229,7 @@ func (b *Browser) mouseEvent(cb, x, y int, final byte) {
 		b.goParent()
 		return
 	}
-	if !(b.navigationVisible && button == 0 && x >= b.listX && y >= b.listTop && y <= b.listBottom) {
+	if !(b.navigation.Visible && button == 0 && x >= b.listX && y >= b.listTop && y <= b.listBottom) {
 		return
 	}
 	index := b.viewTop + y - b.listTop

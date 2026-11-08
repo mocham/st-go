@@ -78,7 +78,7 @@ func (browser *Browser) terminalSize() {
 	}
 	browser.listW = listWidth
 	browser.listX = columns - listWidth + 1
-	browser.previewW = columns
+	browser.previewW = browser.navigation.PreviewWidth(columns, browser.listX)
 	browser.listTop = 9
 	browser.listBottom = rows - 2
 	browser.visible = browser.listBottom - browser.listTop + 1
@@ -287,9 +287,9 @@ func (browser *Browser) drawDivider() {
 }
 
 func (browser *Browser) drawStatus() {
-	help := " Tab navigation  [ ] page  q"
-	if browser.navOpen {
-		help = " Tab hide  arrows Enter Backspace / search"
+	help := " Tab navigation  S-Tab pin  [ ] page  q"
+	if browser.navigation.Visible {
+		help = " Tab hide  S-Tab pin  arrows Enter Backspace / search"
 	}
 	fmt.Fprintf(browser.out, "\x1b[%d;1H%s%*s\x1b[%d;2H", browser.rows, statusStyle, browser.cols, "", browser.rows)
 	fmt.Fprint(browser.out, shorten(browser.status, browser.cols-len(help)-3))
@@ -366,7 +366,12 @@ func (browser *Browser) renderPreview() {
 	case entryCourse:
 		browser.drawPreviewMessage("CORPUS", entry.label, fmt.Sprintf("%d documents. Press Enter to browse.", entry.count))
 	case entryDocument:
-		browser.drawPreviewMessage("DOCUMENT", entry.document.Title, "Press Enter to render and open its PDF / LaTeX contents.")
+		preview, err := browser.previewDocument(entry.corpusIndex, entry.document)
+		if err != nil {
+			browser.drawPreviewMessage("PREVIEW FAILED", entry.document.Title, err.Error())
+			return
+		}
+		browser.displayDocumentPreview(entry.document, preview)
 	}
 }
 
@@ -392,7 +397,7 @@ func (browser *Browser) displayDocumentPreview(document documentMeta, preview re
 			title += fmt.Sprintf("  (%d math errors)", preview.mathErrors)
 		}
 		browser.drawPreviewTitle(title)
-		browser.dcs(fmt.Sprintf("open '%s' rect 1 3 %d %d page %d", browser.previewLink, browser.previewW, heightCells, browser.page))
+		browser.dcs(fmt.Sprintf("open '%s' rect 1 3 %d %d fit-height page %d", browser.previewLink, browser.previewW, heightCells, browser.page))
 	} else {
 		browser.drawPreviewTitle("SOURCE  " + document.Title)
 		browser.dcs(fmt.Sprintf("open '%s' rect 2 3 %d %d", browser.previewLink, browser.previewW-3, heightCells))
@@ -412,7 +417,7 @@ func (browser *Browser) renderAll() {
 	fmt.Fprint(browser.out, "\x1b[2J")
 	browser.renderPreview()
 	browser.drawHeader()
-	if browser.navOpen {
+	if browser.navigation.Visible {
 		browser.drawInfo()
 		browser.drawList()
 		browser.drawDivider()

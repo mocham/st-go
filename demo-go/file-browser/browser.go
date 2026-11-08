@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+	"st-go/tui/navigation"
 )
 
 // Terminal styles shared with the shell browser.
@@ -74,8 +75,7 @@ type Browser struct {
 	listTop, listBottom int
 	visible             int
 	compact             bool
-	navigationVisible   bool
-	navigationPinned    bool
+	navigation          navigation.Panel
 
 	// browsing state
 	dir        string
@@ -256,8 +256,7 @@ func (b *Browser) setup() {
 	b.page = 1
 	b.previewPageTotal = 0
 	b.status = "Ready"
-	b.navigationVisible = true
-	b.navigationPinned = false
+	b.navigation = navigation.DefaultPanel()
 	b.atlasClean = true
 	b.lastClickIdx = -1
 	b.doubleClickMS = parseDoubleClickMS()
@@ -375,20 +374,14 @@ func (b *Browser) terminalSize() {
 // A floating or hidden navigation sidebar leaves the full terminal width to
 // the preview; a pinned visible sidebar reserves its right-hand columns.
 func (b *Browser) updatePreviewWidth() {
-	b.previewW = b.cols
-	if b.navigationVisible && b.navigationPinned {
-		b.previewW = b.listX - 2
-	}
-	if b.previewW < 1 {
-		b.previewW = 1
-	}
+	b.previewW = b.navigation.PreviewWidth(b.cols, b.listX)
 }
 
 // toggleNavigationPin changes only future preview geometry. The current
 // preview and sidebar are intentionally left untouched until another file or
 // page is painted.
 func (b *Browser) toggleNavigationPin() {
-	b.navigationPinned = !b.navigationPinned
+	b.navigation.TogglePin()
 	b.updatePreviewWidth()
 }
 
@@ -497,34 +490,9 @@ func (b *Browser) buildArchiveList(ctx *archiveCtx) {
 }
 
 func (b *Browser) ensureVisible() {
-	count := len(b.files)
-	if count == 0 {
-		b.idx = -1
-		b.viewTop = 0
-		return
-	}
-	if b.idx < 0 {
-		b.idx = 0
-	}
-	if b.idx >= count {
-		b.idx = count - 1
-	}
-	if b.idx < b.viewTop {
-		b.viewTop = b.idx
-	}
-	if b.idx >= b.viewTop+b.visible {
-		b.viewTop = b.idx - b.visible + 1
-	}
-	maxTop := count - b.visible
-	if maxTop < 0 {
-		maxTop = 0
-	}
-	if b.viewTop > maxTop {
-		b.viewTop = maxTop
-	}
-	if b.viewTop < 0 {
-		b.viewTop = 0
-	}
+	selection := navigation.Selection{Index: b.idx, Top: b.viewTop}
+	selection.Normalize(len(b.files), b.visible)
+	b.idx, b.viewTop = selection.Index, selection.Top
 }
 
 func (b *Browser) updateInfo() {
@@ -765,21 +733,15 @@ func (b *Browser) selectIndex(target int) {
 	if len(b.files) == 0 {
 		return
 	}
-	if target < 0 {
-		target = 0
-	}
-	if target >= len(b.files) {
-		target = len(b.files) - 1
-	}
-	if target == b.idx {
+	selection := navigation.Selection{Index: b.idx, Top: b.viewTop}
+	if !selection.Select(target, len(b.files), b.visible) {
 		return
 	}
 	old := b.idx
 	oldTop := b.viewTop
-	b.idx = target
+	b.idx, b.viewTop = selection.Index, selection.Top
 	b.page = 1
 	b.previewPageTotal = 0
-	b.ensureVisible()
 	b.updateInfo()
 	b.renderPreview()
 	if b.previewFullRedraw {
@@ -1240,7 +1202,7 @@ func (b *Browser) renderAll() {
 func (b *Browser) renderPreview() {
 	// A full-width floating preview overwrites the sidebar's cells. Redraw the
 	// complete sidebar after the preview so it remains visually on top.
-	b.previewFullRedraw = b.navigationVisible && !b.navigationPinned
+	b.previewFullRedraw = b.navigation.Floating()
 	if b.idx < 0 || b.idx >= len(b.files) {
 		b.clearPreview()
 		b.drawPreviewMessage("EMPTY DIRECTORY", "No entries to preview.", "")
@@ -1332,9 +1294,7 @@ func (b *Browser) renderPreview() {
 			anim = " anim"
 			// Writes over an animation cancel playback. Keep its live rectangle
 			// out of the floating sidebar, including the divider column.
-			if b.navigationVisible {
-				width = max(1, min(width, b.listX-2))
-			}
+			width = b.navigation.LivePreviewWidth(width, b.listX)
 		}
 		b.drawPreviewTitle(title + displayText(baseName(path)))
 		h := b.rows - 3

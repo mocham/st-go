@@ -548,8 +548,9 @@ Saved field results are shown without field instructions;
 formatting, images, headers, footnotes, and embedded documents are omitted.
 Encrypted files, older Word formats, and RTF/HTML files renamed to `.doc` are
 not supported. No `antiword`, `catdoc`, or Office installation is required.
-The file-browser and gols use a **1.7× font scale** for their LaTeX/Markdown
-previews; vimtex uses its own **0.8× font scale** for the fit-width editor pane.
+The file-browser uses a **1.7× font scale** for LaTeX/Markdown previews; GoLS
+uses **3.23×** (90% larger than its previous 1.7× scale). Vimtex uses its own
+**0.8× font scale** for the fit-width editor pane.
 Generated document previews are session-temporary. A changed source digest
 deletes all variants of the superseded revision, and each current revision keeps
 at most four pane-size variants. Least-recently-used previews are removed after
@@ -573,18 +574,33 @@ make gols
 ./st -e ./gols                              # choose a recent database
 ```
 
-The navigation pane is focused and visible at startup. Arrow keys and Enter
-move down the hierarchy, and Backspace or Left moves up. Opening a document
-automatically hides the pane for a full-width preview; Tab shows/focuses it and
-Tab again hides it. `/` searches document paths/titles/content,
-`[` and `]` change rendered document pages, and `q` exits. PDFs are generated only
-when a document is opened. The selected page-size variant remains pinned while
-the window is resized; reopening at another size creates or reuses that cached
-variant. `r` reopens the immutable databases; changed record digests invalidate
+The navigation pane is focused, visible and **floating** at startup, overlaid
+on a full-width preview. Shift+Tab switches between floating and pinned-right
+navigation for future paints without repainting the current frame. Arrow keys
+and Enter move down the hierarchy, and Backspace or Left moves up. Selecting a document
+renders a fit-height preview; Enter keeps navigation visible and replaces the
+document list with its table of contents, whose entries jump to rendered pages.
+Tab hides the pane for a full-width preview, or shows/focuses it again.
+`/` searches document paths/titles/content, `[` and `]` change rendered document
+pages, and `q` exits. Selection previews are cached and reused on entry. The
+opened page-size variant remains pinned while the window is resized; selecting
+or reopening at another size creates or reuses that cached variant.
+`r` reopens the immutable databases; changed record digests invalidate
 and remove their old session previews. Successfully opened databases are kept
 in most-recently-used order in `$HOME/.cache/gols.json`. Starting `gols` without
 a path displays that recent database list; selecting an entry moves it to the
 front for the next launch.
+
+### Shared TUI navigation
+
+The Go demos share the reusable `st-go/tui/navigation` package. `Panel` owns
+visibility, floating/pinned mode and preview-width calculations;
+`DefaultPanel()` starts visible and floating. `Selection` owns index clamping
+and scrolling to keep the selected row visible. Both GoLS and file-browser use
+these components while retaining their own entries, TOC/filesystem actions and
+redraw policies. The package does no terminal I/O, so other Go TUIs can reuse
+it without depending on either demo. `Panel.LivePreviewWidth` also preserves
+the file-browser's animation/sidebar non-overlap invariant.
 
 ## License
 
