@@ -21,7 +21,7 @@ func TestFragmentedInputAndReplies(t *testing.T) {
 	for _, b := range []byte(input) {
 		p.feed([]byte{b}, now, key, reply)
 	}
-	want := []string{"1", "2", "G", "up", ":", "o", "p", "e", "n", " ", "c", "a", "f", "é", ".", "p", "d", "f", "\r", "pagedown"}
+	want := []string{"1", "2", "G", "up", ":", "o", "p", "e", "n", " ", "c", "a", "f", "é", ".", "p", "d", "f", "\r", "mouse:<64;3;4M", "pagedown"}
 	if !reflect.DeepEqual(keys, want) || len(replies) != 1 || len(p.pending) != 0 {
 		t.Fatalf("keys=%q replies=%q pending=%q", keys, replies, p.pending)
 	}

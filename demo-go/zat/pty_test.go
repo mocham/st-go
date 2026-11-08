@@ -2,8 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -11,6 +15,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+	"st-go/pdfmeta"
 	"st-go/ptyutil"
 )
 
@@ -52,6 +57,8 @@ func TestZatPTYNavigationAndCleanup(t *testing.T) {
 			go func() { exit <- cmd.Wait() }()
 			var mu sync.Mutex
 			var output bytes.Buffer
+			var inputMu sync.Mutex
+			send := func(s string) { inputMu.Lock(); defer inputMu.Unlock(); master.Write([]byte(s)) }
 			go func() {
 				var pending []byte
 				var buf [4096]byte
@@ -82,13 +89,41 @@ func TestZatPTYNavigationAndCleanup(t *testing.T) {
 							}
 							if strings.Contains(command, "region query") {
 								ptyutil.SetWinSizePixels(master, 1, 80, 640, 16)
-								master.Write([]byte("\x1bPregion layout main 1 1 80 1 secondary 1 2 80 23\x1b\\"))
+								send("\x1bPregion layout main 1 1 80 1 secondary 1 2 80 23\x1b\\")
+							}
+							if strings.HasPrefix(command, "region split ") {
+								// Match the terminal's actual split: its percentage is
+								// the right PDF width, leaving the PTY on the left.
+								percent, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(command, "region split "), "%"))
+								cols := 80 - 80*percent/100
+								ptyutil.SetWinSizePixels(master, 24, cols, cols*8, 384)
 							}
 							if command == "region secondary info" {
-								master.Write([]byte("\x1bPregion secondary status 2 5 250000 100 0 0\x1b\\"))
+								send("\x1bPregion secondary status 2 5 250000 100 0 0\x1b\\")
 							}
 							if strings.HasPrefix(command, "region secondary find") {
-								master.Write([]byte("\x1bPregion secondary found 3\x1b\\"))
+								send("\x1bPregion secondary found 3\x1b\\")
+							}
+							fields := strings.Fields(command)
+							if len(fields) >= 5 && fields[0] == "region" && fields[1] == "secondary" && (fields[2] == "toc" || (fields[2] == "text" && len(fields) == 6)) {
+								page, offset := 0, 0
+								if fields[2] == "text" {
+									page, _ = strconv.Atoi(fields[4])
+									offset, _ = strconv.Atoi(fields[5])
+								} else {
+									offset, _ = strconv.Atoi(fields[4])
+								}
+								payload := pdfmeta.Payload{TOC: []pdfmeta.Entry{{Title: "First chapter", Page: 1}, {Title: "Second chapter", Page: 3}}}
+								if fields[2] == "text" {
+									payload = pdfmeta.Payload{Text: fmt.Sprintf("Selectable text for page %d\n", page) + strings.Repeat("More page text.\n", 300)}
+								}
+								data, _ := json.Marshal(payload)
+								end := min(len(data), offset+pdfmeta.ChunkBytes)
+								next := end
+								if end == len(data) {
+									next = -1
+								}
+								send(fmt.Sprintf("\x1bPregion secondary data %s %s %d %d %d %s\x1b\\", fields[3], fields[2], page, offset, next, base64.StdEncoding.EncodeToString(data[offset:end])))
 							}
 						}
 					}
@@ -113,13 +148,25 @@ func TestZatPTYNavigationAndCleanup(t *testing.T) {
 			}
 			if mode != "unsupported" {
 				await("2/5")
-				master.Write([]byte("3j7G+/needle\r"))
+				send("3j7G+/needle\r")
 				await("region secondary scroll 3")
 				await("region secondary page 7")
 				await("region secondary zoom 110")
 				await("Text found on page 3")
+				send("\t")
+				await("CONTENTS")
+				await("Second chapter")
+				send("\x1b[B\r")
+				await("region secondary page 3")
+				send("\x1b[Z")
+				await("region split 40%")
+				await("Selectable text for page 2")
+				await("Ctrl+Shift+C copies")
+				// Resize reflows the real text pane without another extraction.
+				ptyutil.SetWinSizePixels(master, 30, 36, 288, 480)
+				send("\x1b[6~\x1b[5~")
 				if mode == "quit" {
-					master.Write([]byte(":q\r"))
+					send(":q\r")
 				} else {
 					cmd.Process.Signal(syscall.SIGTERM)
 				}
@@ -136,6 +183,7 @@ func TestZatPTYNavigationAndCleanup(t *testing.T) {
 				t.Fatal("zat did not exit")
 			}
 			await("region reset")
+			await("\x1b[?1000l\x1b[?1006l")
 			await("\x1b[?1049l")
 			after, err := unix.IoctlGetTermios(int(master.Fd()), unix.TCGETS)
 			if err != nil || *before != *after {

@@ -61,7 +61,8 @@ FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
-ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) go.mod go.sum
+ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) $(wildcard pdfmeta/*.go) \
+	       $(wildcard term/*.go) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # Static C++/Splash rendering, including embedded JPEG images through libjpeg.
@@ -343,6 +344,7 @@ WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:lib
 GC_EXTRA   = -Wl,--gc-sections
 
 GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
+	  $(wildcard pdfmeta/*.go) \
 	  $(wildcard limits/*.go) \
           $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard terminfo/*.go) \
           $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h) \
@@ -429,6 +431,13 @@ test-webp-x11: st file-browser
 	go test -tags '$(FULL_GO_TAGS)' . -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' \
 		-run '^TestWebPAnimationX11FileBrowserPlayback$$' -count=1 -v
 
+# Built terminal + zat, real Shift-Tab/mouse/Ctrl-Shift-C and X clipboard, with
+# host UTF-16 conversion modules deliberately unavailable.
+test-zat-x11: st zat
+	ST_TEST_ZAT_X11=1 ST_TEST_BINARY=./st ST_TEST_ZAT=./zat \
+	go test -tags '$(FULL_GO_TAGS)' . -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' \
+		-run '^TestZatPageTextX11$$' -count=1 -v
+
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
 	rm -f "$(DESTDIR)$(TERMINFO_DIR)/s/st-256color" \
@@ -440,4 +449,4 @@ clean:
 distclean:
 	rm -rf third_party st st-min st-stb st-pdf file-browser gols vimtex zat
 
-.PHONY: all install uninstall clean distclean test test-webp-x11
+.PHONY: all install uninstall clean distclean test test-webp-x11 test-zat-x11

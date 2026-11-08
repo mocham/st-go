@@ -10,10 +10,11 @@ import (
 
 type regionTestHooks struct {
 	mockHooks
-	regions []DisplayRegion
-	images  []RegionImage
-	targets []RegionID
-	cleared RegionID
+	regions  []DisplayRegion
+	images   []RegionImage
+	targets  []RegionID
+	cleared  RegionID
+	metadata []RegionDocumentQuery
 }
 
 func (h *regionTestHooks) SetRegions(regions []DisplayRegion) error {
@@ -27,6 +28,29 @@ func (h *regionTestHooks) OpenRegion(id RegionID, req RegionImage) error {
 	return nil
 }
 func (h *regionTestHooks) ClearRegion(id RegionID) error { h.cleared = id; return nil }
+func (h *regionTestHooks) QueryRegionDocument(id RegionID, query RegionDocumentQuery) error {
+	h.targets = append(h.targets, id)
+	h.metadata = append(h.metadata, query)
+	return nil
+}
+
+func TestRegionDocumentMetadataProtocol(t *testing.T) {
+	h := &regionTestHooks{}
+	core := NewTerm(config.Default(), h)
+	core.Twrite([]byte("\x1bPregion secondary toc 17 0; region secondary text 18 3 3072\x1b\\"), false)
+	want := []RegionDocumentQuery{{Kind: "toc", Token: 17}, {Kind: "text", Token: 18, Page: 3, Offset: 3072}}
+	if !reflect.DeepEqual(h.metadata, want) {
+		t.Fatalf("metadata queries = %#v", h.metadata)
+	}
+	for _, command := range []string{"secondary toc", "secondary toc 0 0", "secondary toc 1 -1", "secondary text 1 0 0", "secondary text 1 2", "secondary toc 1 999999999", "secondary text 999999999999999999999 1 0"} {
+		if err := core.dslRegion(dslTokenize(command)); err == nil {
+			t.Fatalf("accepted %q", command)
+		}
+	}
+	if len(h.metadata) != len(want) {
+		t.Fatal("malformed metadata command reached frontend")
+	}
+}
 
 func TestDisplayRegionProtocol(t *testing.T) {
 	h := &regionTestHooks{regions: []DisplayRegion{{MainRegion, CellRect{Width: 100, Height: 30}}}}

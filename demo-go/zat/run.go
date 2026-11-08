@@ -28,7 +28,7 @@ func run(o options, in *os.File, out io.Writer) error {
 		return err
 	}
 	defer func() {
-		fmt.Fprint(out, "\x18\x1bPregion reset\x1b\\\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l")
+		fmt.Fprint(out, "\x18\x1b[?1000l\x1b[?1006l\x1bPregion reset\x1b\\\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l")
 		_ = unix.IoctlSetTermios(fd, unix.TCSETS, old)
 	}()
 	signals := make(chan os.Signal, 8)
@@ -38,8 +38,11 @@ func run(o options, in *os.File, out io.Writer) error {
 	resize := func() {
 		if ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ); err == nil {
 			v.cols = max(1, int(ws.Col))
+			v.rows = max(1, int(ws.Row))
 		}
 		v.lastStatus = ""
+		v.reflowText()
+		v.panelDirty = true
 	}
 	resize()
 	v.write("\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J\x1bPregion stack 1; region query\x1b\\")
@@ -74,6 +77,7 @@ func run(o options, in *os.File, out io.Writer) error {
 		}
 		now := time.Now()
 		parser.expire(now, key)
+		v.expireMetadata(now)
 		if !ready && now.After(deadline) {
 			return fmt.Errorf("no stacked-region reply; run zat inside the updated st-go with PDF support (at least two rows)")
 		}

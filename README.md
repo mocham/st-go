@@ -175,6 +175,8 @@ discarded. Input/bitmap limits apply, and failures are logged under `/tmp/`.
 | `region secondary pan N` | Pan horizontally by signed steps when zoomed in |
 | `region secondary find forward\|backward\|next\|previous 'text'` | Asynchronous case-insensitive, page-wise PDF text search; wraps once |
 | `region secondary info` | Reply with `DCS region secondary status PAGE PAGES POSITION ZOOM LOADING FAILED ST` |
+| `region secondary toc TOKEN OFFSET` | Request one bounded PDF outline metadata chunk |
+| `region secondary text TOKEN PAGE OFFSET` | Request one bounded chunk of extracted page text |
 | `region query` | Reply on terminal input with `DCS region layout … ST` |
 | `region reset` | Release the preview and restore the full-window PTY |
 
@@ -212,11 +214,24 @@ locally. Keyboard input stays with the main terminal. The split persists across
 terminal resets and alternate-screen changes until `region reset`; applications
 should send that command during cleanup.
 
+Continuous PDF metadata queries reply with
+`DCS region secondary data TOKEN KIND PAGE OFFSET NEXT BASE64 ST`. Decode each
+base64 chunk, append its JSON bytes in offset order, then request `NEXT` until
+it is `-1`. TOC replies use page 0; destinations inside their `toc` entries are
+one-based (0 means no local destination). The final JSON payload is defined in
+[`pdfmeta`](pdfmeta/metadata.go): `toc` entries have `title`, `page`, and `level`;
+page text uses `text`; `truncated` and `error` report limits/failures. Use a fresh
+positive token for each request and discard stale replies. Replies are limited
+to 1 MiB total, with 3072 JSON bytes per chunk; extracted page text is limited
+to 256 KiB, and outlines to 4096 entries and 32 levels. Extraction runs in the
+existing native worker and never follows external links or executes PDF actions.
+
 The optional Go interface is `term.RegionHooks` in
 [`term/display_regions.go`](term/display_regions.go): stable `RegionID`s,
 `DisplayRegion` rectangles (zero-based in Go), `SetRegions`, `Regions`,
 `OpenRegion`, and `ClearRegion`. Navigation and asynchronous search are optional
-`RegionNavigationHooks` / `RegionSearchHooks` capabilities.
+`RegionNavigationHooks` / `RegionSearchHooks` capabilities; PDF metadata uses
+`RegionDocumentHooks`.
 
 ### Vim + live LaTeX demo
 
@@ -255,6 +270,9 @@ make st zat
 Use `j/k` or the wheel to scroll, `J/K` for pages, `gg/G` or `42G` to jump,
 `+/-` to zoom, `s` for fit-width, `a` for best-fit, `/text` to search, and `q`
 to quit. `:help` shows the quick reference. The command/status row is at the top;
+Tab opens a navigable TOC; Shift+Tab shows the current page's extracted text
+beside the PDF. Drag to select text, then Ctrl+Shift+C copies it through the
+terminal's clipboard shortcut. Press the same pane key again or Escape to close.
 PDF rendering and caching stay in st-go. See the demo's
 [performance notes](demo-go/zat/PERFORMANCE.md) for the zathura/Poppler comparison.
 

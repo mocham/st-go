@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"st-go/limits"
+	"st-go/pdfmeta"
+	"st-go/tui/navigation"
 )
 
 type viewer struct {
@@ -24,6 +26,18 @@ type viewer struct {
 	previous                                   int
 	search                                     string
 	searchBackward                             bool
+	rows                                       int
+	panel                                      panelMode
+	panelDirty                                 bool
+	panelError                                 string
+	toc                                        []pdfmeta.Entry
+	tocLoaded                                  bool
+	tocSelection                               navigation.Selection
+	pageText                                   string
+	textPage, textTop                          int
+	textLines                                  []string
+	metadataToken                              int
+	pendingMetadata                            *metadataRequest
 }
 
 func quoteDSL(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -40,6 +54,8 @@ func (v *viewer) open(path string) {
 	v.file = path
 	v.command("open " + quoteDSL(path) + " background " + quoteDSL(v.background) + " fit-width continuous")
 	v.loading, v.failed = true, false
+	v.toc, v.tocLoaded, v.pageText, v.textPage = nil, false, "", 0
+	v.pendingMetadata, v.panelError, v.panelDirty = nil, "", true
 	// Zoom is kept by the terminal across reloads and file changes.
 }
 
@@ -88,6 +104,21 @@ func (v *viewer) key(key string) {
 	}
 	if key == "escape" || key == "\x03" {
 		v.prefix, v.count, v.message = "", "", ""
+		if v.panel != panelNone {
+			v.showPanel(panelNone)
+		}
+		return
+	}
+	if key == "\t" {
+		v.togglePanel(panelTOC)
+		return
+	}
+	if key == "backtab" {
+		v.togglePanel(panelText)
+		return
+	}
+	if v.panelKey(key) {
+		v.count, v.prefix = "", ""
 		return
 	}
 	v.message = ""
@@ -142,7 +173,7 @@ func (v *viewer) key(key string) {
 		v.jump("pages", -repeat)
 	case " ", "\x06", "pagedown":
 		v.navigate("view", 1000000*min(repeat, limits.MaxBytes/1000000))
-	case "\x02", "pageup", "backtab":
+	case "\x02", "pageup":
 		v.navigate("view", -1000000*min(repeat, limits.MaxBytes/1000000))
 	case "\x15":
 		v.navigate("view", -500000*min(repeat, limits.MaxBytes/1000000))
@@ -208,7 +239,7 @@ func (v *viewer) key(key string) {
 }
 
 func (v *viewer) help() {
-	v.message = "j/k scroll | J/K page | gg/G jump | +/- zoom | s/a fit | / search | n/N next | q quit"
+	v.message = "Tab contents | S-Tab selectable text | j/k scroll | J/K page | +/- zoom | / search | q quit"
 }
 
 func (v *viewer) find(next, reverse bool) {
@@ -295,6 +326,10 @@ func (v *viewer) execute(command string) {
 
 // Replies are framed independently of keystrokes, even when fragmented by a PTY.
 func (v *viewer) reply(payload string) {
+	if strings.HasPrefix(payload, "region secondary data ") {
+		v.metadataReply(payload)
+		return
+	}
 	f := strings.Fields(payload)
 	if len(f) == 4 && strings.Join(f[:3], " ") == "region secondary found" {
 		if page, err := strconv.Atoi(f[3]); err == nil && page >= 0 {
@@ -320,11 +355,20 @@ func (v *viewer) reply(payload string) {
 	if nums[3] < 10 || nums[3] > 500 || nums[2] > 1000000 || nums[4] > 1 || nums[5] > 1 {
 		return
 	}
+	previousNotice := v.panelNotice()
+	if v.panel == panelText && v.page != nums[0] {
+		v.panelDirty = true
+	}
 	v.page, v.pages, v.position, v.zoom = nums[0], nums[1], nums[2], nums[3]
 	v.loading, v.failed = nums[4] != 0, nums[5] != 0
+	v.syncPanel()
+	if v.panelNotice() != previousNotice {
+		v.panelDirty = true
+	}
 }
 
 func (v *viewer) draw() {
+	v.drawPanel()
 	text := fmt.Sprintf(" %d/%d  %d%%  [%d%%]  %s", v.page, v.pages, v.position/10000, v.zoom, filepath.Base(v.file))
 	if v.loading {
 		text += "  loading..."

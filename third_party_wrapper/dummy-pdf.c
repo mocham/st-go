@@ -41,6 +41,10 @@ int pdf_scroll_page_tops(void *view, int *tops, int capacity)
 { (void)view; (void)tops; (void)capacity; return 0; }
 int pdf_scroll_search_page(void *view, int page, const char *text)
 { (void)view; (void)page; (void)text; return 0; }
+int pdf_scroll_text(void *view, int page, char *out, int capacity, int *truncated)
+{ (void)view; (void)page; (void)out; (void)capacity; (void)truncated; return -1; }
+int pdf_scroll_outline(void *view, char *out, int capacity, int *truncated)
+{ (void)view; (void)out; (void)capacity; (void)truncated; return -1; }
 int pdf_scroll_height(void *view, int width, int max_height)
 { (void)view; (void)width; (void)max_height; return 0; }
 int pdf_scroll_render(void *view, int width, int top, int height, unsigned char *out, unsigned int background)

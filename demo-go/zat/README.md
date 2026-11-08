@@ -4,6 +4,8 @@ A zathura-style keyboard-driven TUI reusing vimtex's continuous PDF region.
 The terminal owns Poppler, page geometry, cached pixels, and smooth scrolling;
 zat is a small pure-Go protocol client. No PDF conversion or external viewer
 process runs while viewing a document.
+Text extraction and search use Poppler's built-in Unicode handling, not host
+`iconv`/`gconv` modules; they remain usable with the standalone static terminal.
 
 ```sh
 make st zat
@@ -28,7 +30,10 @@ in the PDF for complete glyph coverage in the minimal Poppler build.
 | `h/l`, Left/Right | Horizontal panning at larger zoom |
 | `J/K` | Next/previous PDF page |
 | Space, Ctrl-F, PageDown | One screen down |
-| Ctrl-B, PageUp, Shift-Tab | One screen up |
+| Ctrl-B, PageUp | One screen up |
+| Tab | Toggle the table of contents; j/k/arrows select, Enter/click jumps |
+| Shift-Tab | Toggle extracted text for the current PDF page |
+| Ctrl-Shift-C | Copy a mouse selection in the page-text pane (terminal shortcut) |
 | Ctrl-D / Ctrl-U | Half a screen down/up |
 | `gg`, Home | Beginning |
 | `G`, End | End |
@@ -44,13 +49,21 @@ in the PDF for complete glyph coverage in the minimal Poppler build.
 | `r`, `R` | Reload the PDF, preserving position |
 | `o` | Start an `:open` prompt |
 | `:` | Command prompt |
-| Escape, Ctrl-C | Cancel prompt, count, or key prefix |
+| Escape, Ctrl-C | Cancel prompt/count/prefix, or close the open pane |
 | Ctrl-L | Repaint status |
 | `q`, `:q` | Quit |
 
 Counts work with scrolling/page/zoom-step keys, e.g. `5j`, `3J`, `2+`.
-Mouse input over the PDF is handled directly by st-go. Text input remains with
-zat's one-row terminal header, isolated from the retained PDF surface.
+Mouse input over the PDF is handled directly by st-go. Normally zat uses a
+one-row terminal header. Tab opens a left-hand TOC/navigation pane; Shift-Tab
+opens selectable page text alongside the PDF. Press the same key again, or
+Escape, to close a pane. In the text pane, j/k/arrows and PageUp/PageDown scroll
+the extracted text; J/K still change PDF pages and refresh the text. Drag to
+select and press Ctrl+Shift+C to copy using st-go's normal clipboard shortcut.
+Application mouse reporting is disabled in text mode, and periodic PDF status
+polls do not repaint its body or clear the selection.
+Loading, metadata errors, and confirmed empty-page results are distinct: an
+unqueried or still-loading PDF is never reported as lacking a text layer.
 
 Commands: `:open path.pdf`, `:page 12` (or `:12`), `:zoom 150`, `:zoom width`,
 `:zoom fit`, `:reload`, `:help`, `:quit`. Paths can contain spaces, semicolons,
@@ -65,7 +78,12 @@ temporarily hides and returns when the window grows.
 This is a usable first viewer, not full zathura feature parity. Search jumps to
 the first occurrence on each matching page without highlighting; `n/N` advance
 between pages, not occurrences on the same page. Image-only scans need embedded
-searchable text. Rotation, outlines, link following, text selection, annotations,
+searchable text. The TOC uses embedded PDF bookmarks, including nested and named
+local destinations; PDFs without bookmarks show an empty-TOC message. Only the
+extracted-text pane supports selection, not the rendered PDF surface. Extraction
+does not perform OCR; scanned pages without a text layer show a message instead.
+Text/TOC replies are bounded, with truncation reported in the status row.
+Rotation, link following, annotations,
 password entry, two-page layouts, persistent bookmarks, and automatic file
 watching are not implemented. Use `r` after an external update. The status row
 uses ASCII-safe filename display; actual paths and search text support UTF-8.
@@ -82,10 +100,21 @@ view and use st-go's bounded diagnostic log.
 - `run.go`: raw terminal lifecycle, region negotiation, polling and resize.
 - `input.go`: fragmented UTF-8, keys, and framed terminal replies.
 - `viewer.go`: bindings, commands, marks, and incremental header drawing.
+- `panels.go`: shared TOC navigation, bounded metadata replies, selectable text.
 - Shared implementation: `term/display_regions.go`, `display_regions.go`,
-  `pdf_cgo.go`, `third_party_wrapper/pdf_bridge.cpp`.
+  `display_metadata.go`, `pdfmeta`, `pdf_cgo.go`, `third_party_wrapper/pdf_bridge.cpp`.
 
 Run `make test st zat st-min`. Tests cover PTY navigation/cleanup, unsupported
 terminals, input fragmentation, layout isolation, tiny-window restoration,
-actual mixed-page PDF offsets, zoom, and native text search. See
+actual mixed-page PDF offsets, zoom, native text search, TOC destinations,
+chunked page text, and terminal-cell selection that survives status updates.
+`TestZatNativePageTextPTY` also drives the real client through the terminal's
+parser and native worker without canned replies or X11. For local regression
+documents, set `ST_TEST_ZAT_PDF` and `ST_TEST_ZAT_TEXT` (text expected on each
+page) when running that test with the repository's native linker flags.
+`TestNativePDFTextWithoutHostModules` disables external UTF-16 conversion modules
+to cover minimal hosts. With an isolated X server, run
+`DISPLAY=:N make test-zat-x11` to exercise the built binaries, Shift+Tab, mouse selection, and the
+actual Ctrl+Shift+C clipboard transfer under the same missing-module condition.
+The optional PDF/text variables also select a sample for this X11 test. See
 [PERFORMANCE.md](PERFORMANCE.md) for the renderer comparison and measurement plan.

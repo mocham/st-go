@@ -289,8 +289,17 @@ func (t *Terminal) flushRegionReplies() {
 	default:
 	}
 	current := reply.text != "" && reply.generation == s.generation && s.secondary != nil
+	var metadata regionMetadataReply
+	select {
+	case metadata = <-s.metadataReplies:
+	default:
+	}
+	metadataCurrent := metadata.text != "" && metadata.revision == s.documentRevision && s.secondary != nil
 	s.mu.Unlock()
 	if current && t.termCore != nil {
 		t.termCore.WriteToTTY([]byte(reply.text), false)
+	}
+	if metadataCurrent && t.termCore != nil {
+		t.termCore.WriteToTTY([]byte(metadata.text), false)
 	}
 }

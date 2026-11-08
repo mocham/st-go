@@ -34,6 +34,8 @@ type displayRegionState struct {
 	paused                bool
 	wake                  chan struct{}
 	replies               chan regionReply
+	metadataJobs          chan regionMetadataJob
+	metadataReplies       chan regionMetadataReply
 	presenter             regionPresenter
 }
 
@@ -166,6 +168,7 @@ func (t *Terminal) SetRegions(regions []term.DisplayRegion) error {
 	s.mu.Lock()
 	if mainWidth == cols {
 		s.generation++ // invalidate both pending and in-flight decode results
+		s.documentRevision++
 		s.secondary = nil
 		t.cancelRegionDecode()
 		s.mainWidth, s.totalWidth = 0, 0
@@ -284,6 +287,7 @@ func (t *Terminal) ClearRegion(id term.RegionID) error {
 		return err
 	}
 	t.displayRegions.generation++
+	t.displayRegions.documentRevision++
 	t.cancelRegionDecode()
 	surface.request = nil
 	surface.bitmap = regionBitmap{}
@@ -359,7 +363,8 @@ func (t *Terminal) enqueueRegionJob(job regionJob) {
 		if t.done == nil {
 			t.done = make(chan struct{})
 		}
-		go t.regionDecoder(s.jobs, t.done)
+		s.metadataJobs = make(chan regionMetadataJob, 1)
+		go t.regionDecoder(s.jobs, s.metadataJobs, t.done)
 	}
 	if s.secondary != nil {
 		s.secondary.loading = job.request.Path != ""
@@ -373,14 +378,17 @@ func (t *Terminal) enqueueRegionJob(job regionJob) {
 	s.jobs <- job
 }
 
-func (t *Terminal) regionDecoder(jobs <-chan regionJob, done <-chan struct{}) {
+func (t *Terminal) regionDecoder(jobs <-chan regionJob, metadata <-chan regionMetadataJob, done <-chan struct{}) {
 	var document *scrollPDF
 	var documentRevision uint64
+	var metadataCache regionMetadataCache
 	defer func() { document.close() }()
 	for {
 		select {
 		case <-done:
 			return
+		case query := <-metadata:
+			t.processRegionMetadata(query, &document, &documentRevision, &metadataCache)
 		case job := <-jobs:
 			select {
 			case <-done:
@@ -396,6 +404,7 @@ func (t *Terminal) regionDecoder(jobs <-chan regionJob, done <-chan struct{}) {
 			if job.request.Path == "" {
 				document.close()
 				document = nil
+				metadataCache = regionMetadataCache{}
 				continue
 			}
 			var bitmap regionBitmap

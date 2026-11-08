@@ -2,6 +2,8 @@ package term
 
 import (
 	"fmt"
+	"st-go/limits"
+	"st-go/pdfmeta"
 	"strconv"
 	"strings"
 )
@@ -70,6 +72,17 @@ type RegionNavigationHooks interface {
 // Direction is -1/1; next skips the current page (page-wise text search).
 type RegionSearchHooks interface {
 	FindRegion(RegionID, string, int, bool) error
+}
+
+// RegionDocumentQuery requests a chunk of bounded, base64-encoded PDF metadata.
+// Tokens let clients reject replies to a previous page/document/panel request.
+type RegionDocumentQuery struct {
+	Kind                string
+	Token, Page, Offset int
+}
+
+type RegionDocumentHooks interface {
+	QueryRegionDocument(RegionID, RegionDocumentQuery) error
 }
 
 func (t *Term) dslRegion(args []string) error {
@@ -167,6 +180,34 @@ func (t *Term) dslRegion(args []string) error {
 	}
 	id := RegionID(args[0])
 	switch args[1] {
+	case "toc", "text":
+		want := 4
+		if args[1] == "text" {
+			want = 5
+		}
+		if len(args) != want {
+			return fmt.Errorf("region toc/text requires token, optional page, and byte offset")
+		}
+		hooks, ok := t.hooks.(RegionDocumentHooks)
+		if !ok {
+			return fmt.Errorf("PDF metadata is not supported by this frontend")
+		}
+		query := RegionDocumentQuery{Kind: args[1]}
+		values := []*int{&query.Token, &query.Offset}
+		if query.Kind == "text" {
+			values = []*int{&query.Token, &query.Page, &query.Offset}
+		}
+		for i, value := range values {
+			n, err := strconv.Atoi(args[i+2])
+			if err != nil || n < 0 {
+				return fmt.Errorf("invalid PDF metadata query")
+			}
+			*value = n
+		}
+		if query.Token < 1 || query.Token > 1<<30 || query.Offset > pdfmeta.MaxBytes || (query.Kind == "text" && (query.Page < 1 || query.Page > limits.PreviewPages)) {
+			return fmt.Errorf("invalid PDF metadata query bounds")
+		}
+		return hooks.QueryRegionDocument(id, query)
 	case "find":
 		if len(args) != 4 {
 			return fmt.Errorf("region find requires forward/backward/next/previous and text")

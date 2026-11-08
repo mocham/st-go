@@ -13,10 +13,12 @@ package main
 import "C"
 
 import (
+	"encoding/binary"
 	"fmt"
 	"unsafe"
 
 	"st-go/limits"
+	"st-go/pdfmeta"
 )
 
 // scrollPDF's native document is confined to the region decoder goroutine.
@@ -46,6 +48,47 @@ func (p *scrollPDF) close() {
 		p.handle = nil
 		p.cache = regionBitmap{}
 	}
+}
+
+// Text is streamed as UTF-8 by the native worker, without host iconv modules.
+func (p *scrollPDF) metadata(kind string, page int) (pdfmeta.Payload, error) {
+	var result pdfmeta.Payload
+	if kind != "toc" && kind != "text" {
+		return result, fmt.Errorf("unknown PDF metadata kind")
+	}
+	var truncated C.int
+	capacity := pdfmeta.TextBytes
+	if kind == "toc" {
+		capacity = pdfmeta.MaxBytes / 2
+	}
+	data := make([]byte, capacity)
+	var count C.int
+	if kind == "text" {
+		count = C.pdf_scroll_text(p.handle, C.int(page-1), (*C.char)(unsafe.Pointer(&data[0])), C.int(len(data)), &truncated)
+	} else {
+		count = C.pdf_scroll_outline(p.handle, (*C.char)(unsafe.Pointer(&data[0])), C.int(len(data)), &truncated)
+	}
+	if count < 0 || int(count) > len(data) {
+		return result, fmt.Errorf("cannot extract PDF %s", kind)
+	}
+	data = data[:int(count)]
+	result.Truncated = truncated != 0
+	if kind == "text" {
+		result.Text = string(data)
+		return result, nil
+	}
+	for len(data) > 0 {
+		if len(data) < 12 || len(result.TOC) >= pdfmeta.MaxEntries {
+			return result, fmt.Errorf("invalid native PDF outline")
+		}
+		page, level, length := binary.LittleEndian.Uint32(data), binary.LittleEndian.Uint32(data[4:]), binary.LittleEndian.Uint32(data[8:])
+		if uint64(length) > uint64(len(data)-12) || level > 31 {
+			return result, fmt.Errorf("invalid native PDF outline record")
+		}
+		result.TOC = append(result.TOC, pdfmeta.Entry{Title: string(data[12 : 12+int(length)]), Page: int(page), Level: int(level)})
+		data = data[12+int(length):]
+	}
+	return result, nil
 }
 
 func (p *scrollPDF) render(width, height, position int, background uint32) (regionBitmap, error) {

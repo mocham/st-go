@@ -28,7 +28,7 @@ func parseOptions(args []string, out io.Writer) (options, error) {
 	f.IntVar(&o.zoom, "zoom", 100, "zoom relative to fit-width (10..500 percent)")
 	f.StringVar(&o.background, "bg", "#f7f5ef", "paper/canvas color (#RRGGBB)")
 	f.Usage = func() {
-		fmt.Fprintln(out, "Usage: zat [options] document.pdf\n\nRun inside st-go. j/k scroll, J/K change page, gg/G jump, +/- zoom, :help, q quit.")
+		fmt.Fprintln(out, "Usage: zat [options] document.pdf\n\nRun inside st-go. Tab: TOC; Shift+Tab: selectable page text (Ctrl+Shift+C copies).\nj/k scroll, J/K change page, gg/G jump, +/- zoom, :help, q quit.")
 		f.PrintDefaults()
 	}
 	if err := f.Parse(args); err != nil {

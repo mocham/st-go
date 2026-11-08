@@ -6,6 +6,10 @@ import (
 	"st-go/limits"
 )
 
+// CellWidth exposes the terminal's width approximation to text-only clients
+// that must wrap ordinary selectable terminal cells without crossing a pane.
+func CellWidth(r rune) int { return runeWidthTbl(r) }
+
 // runeWidthTbl: wcwidth approximation.
 // wide == East Asian Wide/Fullwidth + common wide symbols.
 func runeWidthTbl(u rune) int {

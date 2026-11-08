@@ -50,10 +50,13 @@ func (p *inputParser) feed(data []byte, now time.Time, key func(string), reply f
 				break
 			}
 			sequence := string(b[1 : end+1])
-			if name := map[string]string{"[A": "up", "[B": "down", "[C": "right", "[D": "left", "[H": "home", "[F": "end", "OH": "home", "OF": "end", "[1~": "home", "[4~": "end", "[5~": "pageup", "[6~": "pagedown", "[Z": "backtab"}[sequence]; name != "" {
+			if strings.HasPrefix(sequence, "[<") {
+				key("mouse:" + strings.TrimPrefix(sequence, "["))
+			}
+			if name := map[string]string{"[A": "up", "[B": "down", "[C": "right", "[D": "left", "[H": "home", "[F": "end", "OH": "home", "OF": "end", "[1~": "home", "[4~": "end", "[5~": "pageup", "[6~": "pagedown", "[Z": "backtab", "[1;2Z": "backtab"}[sequence]; name != "" {
 				key(name)
 			}
-			// Unknown CSI, including mouse/focus/paste delimiters, is consumed whole.
+			// Unknown CSI, including focus/paste delimiters, is consumed whole.
 			p.pending = b[end+1:]
 			continue
 		}

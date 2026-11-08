@@ -10,6 +10,10 @@
 #include "cpp/poppler-page-private.h"
 #include "cpp/poppler-document-private.h"
 #include "SplashOutputDev.h"
+#include "Outline.h"
+#include "Link.h"
+#include "TextOutputDev.h"
+#include "UTF.h"
 #include "splash/SplashBitmap.h"
 
 #include <vector>
@@ -18,6 +22,7 @@
 #include <cmath>
 #include <memory>
 #include <algorithm>
+#include <set>
 
 int pdf_font_support(void) { return 1; }
 
@@ -182,6 +187,102 @@ try {
     return view->tops.back();
 } catch (...) { return 0; }
 
+namespace {
+struct bounded_pdf_text {
+    char *out;
+    int capacity;
+    int used = 0;
+    bool truncated = false;
+};
+
+void collect_pdf_text(void *context, const char *text, int length) {
+    auto &buffer = *static_cast<bounded_pdf_text *>(context);
+    if (buffer.truncated || length <= 0) return;
+    int count = std::min(length, buffer.capacity - buffer.used);
+    // Poppler emits complete UTF-8 fragments. Trim only a budget-cut suffix;
+    // once truncated, do not append later fragments past the missing text.
+    while (count < length && count > 0 && ((unsigned char)text[count] & 0xc0) == 0x80) --count;
+    if (count > 0) std::memcpy(buffer.out + buffer.used, text, count);
+    buffer.used += count;
+    buffer.truncated = count < length;
+}
+}
+
+int pdf_scroll_text(void *handle, int index, char *out, int capacity, int *truncated)
+try {
+    auto *view = static_cast<scroll_pdf *>(handle);
+    if (!view || !view->native || !out || !truncated || capacity < 1 || index < 0 || index >= (int)view->pages.size()) return -1;
+    // The C++ page::text()/ustring API round-trips UTF-8 through iconv's
+    // dynamically loaded UTF-16 modules. On a minimal host a static binary
+    // silently gets an empty string, despite rendering/counting pages normally.
+    // TextOutputDev already emits UTF-8 using Poppler's built-in Unicode map.
+    if (globalParams->getTextEncodingName() != "UTF-8") return -1;
+    bounded_pdf_text buffer{out, capacity};
+    TextOutputDev text(&collect_pdf_text, &buffer, true, 0, false);
+    if (!text.isOk()) return -1;
+    view->native->displayPage(&text, index + 1, 72, 72, 0, false, true, false);
+    *truncated = buffer.truncated;
+    return buffer.used;
+} catch (...) { return -1; }
+
+namespace {
+void outline_u32(char *out, unsigned int value) {
+    for (int i = 0; i < 4; ++i) out[i] = (char)(value >> (8 * i));
+}
+void outline_utf8(std::string &out, unsigned int c) {
+    if (c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) c = 0xfffd;
+    if (c < 0x80) out += (char)c;
+    else if (c < 0x800) { out += (char)(0xc0 | (c >> 6)); out += (char)(0x80 | (c & 63)); }
+    else if (c < 0x10000) { out += (char)(0xe0 | (c >> 12)); out += (char)(0x80 | ((c >> 6) & 63)); out += (char)(0x80 | (c & 63)); }
+    else { out += (char)(0xf0 | (c >> 18)); out += (char)(0x80 | ((c >> 12) & 63)); out += (char)(0x80 | ((c >> 6) & 63)); out += (char)(0x80 | (c & 63)); }
+}
+}
+
+int pdf_scroll_outline(void *handle, char *out, int capacity, int *truncated)
+try {
+    auto *view = static_cast<scroll_pdf *>(handle);
+    if (!view || !view->native || !out || !truncated || capacity < 1) return -1;
+    *truncated = 0;
+    auto *outline = view->native->getOutline();
+    if (!outline || !outline->getItems()) return 0;
+    struct frame { const std::vector<OutlineItem *> *items; size_t index; int level; };
+    std::vector<frame> stack{{outline->getItems(), 0, 0}};
+    std::set<int> seen;
+    int written = 0, entries = 0;
+    while (!stack.empty()) {
+        auto &frame = stack.back();
+        if (frame.index >= frame.items->size()) { stack.pop_back(); continue; }
+        auto *item = (*frame.items)[frame.index++];
+        if (!item || !seen.insert(item->getRefNum()).second) continue;
+        if (++entries > 4096) { *truncated = 1; break; }
+        int page = 0, level = frame.level;
+        const auto *action = item->getAction();
+        if (action && action->getKind() == actionGoTo) {
+            const auto *go = static_cast<const LinkGoTo *>(action);
+            std::unique_ptr<LinkDest> named;
+            const auto *dest = go->getDest();
+            if (!dest && go->getNamedDest()) { named = view->native->findDest(go->getNamedDest()); dest = named.get(); }
+            if (dest && dest->isOk()) page = dest->isPageRef() ? view->native->findPage(dest->getPageRef()) : dest->getPageNum();
+            if (page < 1 || page > (int)view->pages.size()) page = 0;
+        }
+        std::string title;
+        for (auto c : item->getTitle()) {
+            if (title.size() >= 4096) { *truncated = 1; break; }
+            outline_utf8(title, c);
+        }
+        if ((size_t)(capacity - written) < 12 + title.size()) { *truncated = 1; break; }
+        outline_u32(out + written, page); outline_u32(out + written + 4, level); outline_u32(out + written + 8, title.size());
+        std::memcpy(out + written + 12, title.data(), title.size());
+        written += 12 + title.size();
+        if (item->hasKids()) {
+            if (level >= 31) { *truncated = 1; continue; }
+            item->open();
+            if (auto *kids = item->getKids()) stack.push_back({kids, 0, level + 1});
+        }
+    }
+    return written;
+} catch (...) { return -1; }
+
 int pdf_scroll_render(void *handle, int width, int top, int height, unsigned char *out, unsigned int background)
 try {
     auto *view = static_cast<scroll_pdf *>(handle);
@@ -228,9 +329,11 @@ int pdf_scroll_search_page(void *handle, int index, const char *text)
 try {
     auto *view = static_cast<scroll_pdf *>(handle);
     if (!view || !text || index < 0 || index >= (int)view->pages.size()) return 0;
-    std::unique_ptr<poppler::page> page(view->doc->create_page(index));
-    if (!page) return 0;
-    poppler::rectf rect;
-    if (!page->search(poppler::ustring::from_utf8(text), rect, poppler::page::search_from_top, poppler::case_insensitive)) return 0;
-    return 1 + (int)(1000000 * std::max(0.0, std::min(1.0, rect.top() / view->pages[index].height)));
+    const auto needle = utf8ToUCS4(text);
+    if (needle.empty()) return 0;
+    TextOutputDev page(nullptr, true, 0, false, false);
+    view->native->displayPage(&page, index + 1, 72, 72, 0, false, true, false);
+    double left = 0, top = 0, right = 0, bottom = 0;
+    if (!page.findText(needle.data(), needle.size(), true, true, false, false, false, false, false, &left, &top, &right, &bottom)) return 0;
+    return 1 + (int)(1000000 * std::max(0.0, std::min(1.0, top / view->pages[index].height)));
 } catch (...) { return 0; }
