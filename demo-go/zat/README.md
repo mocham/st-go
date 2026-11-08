@@ -42,8 +42,8 @@ in the PDF for complete glyph coverage in the minimal Poppler build.
 | `+`, `=`, `zi` / `-`, `zo` | Increase/decrease zoom by ten percentage points |
 | `z0`, `s` | Fit width |
 | `a` | Best-fit the current page |
-| `/text`, `?text`, Enter | Case-insensitive text search forward/backward |
-| `n/N` | Next/previous matching **page**, wrapping at document ends |
+| `/text`, `?text`, Enter | Case-insensitive search; highlight all matches, jump forward/backward |
+| `n/N` | Next/previous **occurrence**, including on the same page; wraps |
 | `ma`, `'a` | Set/go to session mark a (any single-character mark) |
 | `''` | Return to the position before the last jump |
 | `r`, `R` | Reload the PDF, preserving position |
@@ -66,19 +66,41 @@ Loading, metadata errors, and confirmed empty-page results are distinct: an
 unqueried or still-loading PDF is never reported as lacking a text layer.
 
 Commands: `:open path.pdf`, `:page 12` (or `:12`), `:zoom 150`, `:zoom width`,
-`:zoom fit`, `:reload`, `:help`, `:quit`. Paths can contain spaces, semicolons,
+`:zoom fit`, `:nohlsearch` (or `:noh`), `:reload`, `:help`, `:quit`. Paths can contain spaces, semicolons,
 and quotes; `~/` is expanded. Relative paths use zat's working directory.
 Backspace edits the prompt and Ctrl-U clears it. The header displays the
 topmost visible page, total pages, scroll percentage, fit-width zoom percentage,
 and filename. It also reports loading and rendering errors. At one row the PDF
 temporarily hides and returns when the window grows.
 
+### Search shortcuts
+
+Type `/`, enter a query, and press Enter. Matches are yellow; the current match
+is orange. `n` advances in the search direction and `N` reverses it, including
+between occurrences on the same page. `?` starts a backward search. An empty
+`/` or `?` repeats the previous query. Search also highlights selectable page
+text and scrolls its current occurrence into view. `:noh` clears highlights;
+`n` can restore the last search. Only explicit searches repaint text highlights,
+not the periodic status updates used while selecting/copying text.
+
+- `/{alpha}` searches for **α**; `/{Gamma}` searches for **Γ**. All 24 Greek
+  letter names and `varepsilon`, `vartheta`, `varpi`, `varrho`, `varsigma`, and
+  `varphi` are accepted inside braces.
+- `/caf\'e` searches for **café**; `\'{e}` is also accepted. Other accents include
+  grave (`` \`a ``), circumflex (`\^o`), diaeresis (`\"u`), and tilde (`\~n`).
+  Braced letter commands include `\v{c}`, `\c{c}`, `\u{g}`, `\H{o}`, `\r{a}`, and
+  `\k{a}`. Input is normalized to NFC Unicode.
+- Unknown names/commands stay literal. Escape braces as `\{alpha\}` to search
+  for the literal `{alpha}`, or double a backslash to search for a backslash.
+
+Queries are literal, not regular expressions, and are limited to 1024 UTF-8
+bytes after expansion (4096 typed bytes). At most 4096 document occurrences are
+retained; reaching that limit is reported in the status row.
+
 ## Scope
 
-This is a usable first viewer, not full zathura feature parity. Search jumps to
-the first occurrence on each matching page without highlighting; `n/N` advance
-between pages, not occurrences on the same page. Image-only scans need embedded
-searchable text. The TOC uses embedded PDF bookmarks, including nested and named
+This is a usable first viewer, not full zathura feature parity. Image-only scans
+need embedded searchable text. The TOC uses embedded PDF bookmarks, including nested and named
 local destinations; PDFs without bookmarks show an empty-TOC message. Only the
 extracted-text pane supports selection, not the rendered PDF surface. Extraction
 does not perform OCR; scanned pages without a text layer show a message instead.
@@ -101,8 +123,10 @@ view and use st-go's bounded diagnostic log.
 - `input.go`: fragmented UTF-8, keys, and framed terminal replies.
 - `viewer.go`: bindings, commands, marks, and incremental header drawing.
 - `panels.go`: shared TOC navigation, bounded metadata replies, selectable text.
+- `search.go`: Greek/accent shortcuts and selectable text-pane highlights.
 - Shared implementation: `term/display_regions.go`, `display_regions.go`,
-  `display_metadata.go`, `pdfmeta`, `pdf_cgo.go`, `third_party_wrapper/pdf_bridge.cpp`.
+  `display_search.go`, `display_metadata.go`, `pdfmeta`, `pdf_search.go`,
+  `pdf_cgo.go`, `third_party_wrapper/pdf_bridge.cpp`.
 
 Run `make test st zat st-min`. Tests cover PTY navigation/cleanup, unsupported
 terminals, input fragmentation, layout isolation, tiny-window restoration,
@@ -116,5 +140,7 @@ page) when running that test with the repository's native linker flags.
 to cover minimal hosts. With an isolated X server, run
 `DISPLAY=:N make test-zat-x11` to exercise the built binaries, Shift+Tab, mouse selection, and the
 actual Ctrl+Shift+C clipboard transfer under the same missing-module condition.
+It also types Greek/accent search shortcuts, checks occurrence navigation and
+server-side highlight pixels, and verifies highlight clearing.
 The optional PDF/text variables also select a sample for this X11 test. See
 [PERFORMANCE.md](PERFORMANCE.md) for the renderer comparison and measurement plan.

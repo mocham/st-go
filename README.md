@@ -173,7 +173,8 @@ discarded. Input/bitmap limits apply, and failures are logged under `/tmp/`.
 | `region secondary view N` | Animate by millionths of the viewport height (500000 = half a screen) |
 | `region secondary zoom N` | Set 10–500% of fit-width; 0 best-fits the current page |
 | `region secondary pan N` | Pan horizontally by signed steps when zoomed in |
-| `region secondary find forward\|backward\|next\|previous 'text'` | Asynchronous case-insensitive, page-wise PDF text search; wraps once |
+| `region secondary find forward\|backward\|next\|previous 'text'` | Case-insensitive PDF search with retained highlights; next/previous moves by occurrence, wrapping |
+| `region secondary find clear` | Cancel pending search and clear highlights |
 | `region secondary info` | Reply with `DCS region secondary status PAGE PAGES POSITION ZOOM LOADING FAILED ST` |
 | `region secondary toc TOKEN OFFSET` | Request one bounded PDF outline metadata chunk |
 | `region secondary text TOKEN PAGE OFFSET` | Request one bounded chunk of extracted page text |
@@ -200,8 +201,12 @@ Adding `continuous` stacks all PDF pages and scrolls cached strips immediately,
 independently of application refresh timing. A three-pixel divider occupies the
 left edge of side-by-side preview panes. Continuous PDFs retain the native
 document across zoom/resize; a new `open` reloads the file. Search replies with
-`DCS region secondary found PAGE ST` (0 means no match); `next`/`previous` start
-on the adjacent page. Status positions use millionths, zoom uses percent, and
+`DCS region secondary found PAGE ST` (0 means no match), followed by
+`DCS region secondary matches PAGE INDEX TOTAL LOCAL_INDEX TRUNCATED ST`.
+Indexes are one-based; `LOCAL_INDEX` identifies the occurrence on that page.
+`next`/`previous` include other occurrences on the same page. Up to 4096 hits
+are retained as zoom-independent rectangles; `TRUNCATED` reports that limit.
+Status positions use millionths, zoom uses percent, and
 loading/failed are 0 or 1. Background prefetch does not report loading when the
 visible area is cached. A failed reload retains the previous pixels. Preview
 state has its own mutex; a dedicated painter uses a private framebuffer and
@@ -268,7 +273,8 @@ make st zat
 ```
 
 Use `j/k` or the wheel to scroll, `J/K` for pages, `gg/G` or `42G` to jump,
-`+/-` to zoom, `s` for fit-width, `a` for best-fit, `/text` to search, and `q`
+`+/-` to zoom, `s` for fit-width, `a` for best-fit, `/text` to highlight matches,
+`n/N` for individual occurrences, and `q`
 to quit. `:help` shows the quick reference. The command/status row is at the top;
 Tab opens a navigable TOC; Shift+Tab shows the current page's extracted text
 beside the PDF. Drag to select text, then Ctrl+Shift+C copies it through the

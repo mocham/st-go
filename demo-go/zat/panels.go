@@ -141,6 +141,7 @@ func (v *viewer) metadataReply(payload string) {
 	} else {
 		v.pageText, v.textPage, v.textTop = cleanPanelText(result.Text), r.page, 0
 		v.reflowText()
+		v.updateTextSearch(true)
 	}
 	if result.Truncated {
 		v.message = "PDF metadata truncated at the preview limit"
@@ -153,6 +154,11 @@ func (v *viewer) metadataFailure(message string) {
 }
 
 func (v *viewer) expireMetadata(now time.Time) {
+	// The native worker also scans document occurrences. A metadata request
+	// queued behind a long search is not evidence of an unsupported terminal.
+	if v.searchPending {
+		return
+	}
 	if v.pendingMetadata != nil && now.Sub(v.pendingMetadata.started) > 3*time.Second {
 		v.metadataFailure("PDF metadata unavailable; use updated st-go with PDF support")
 	}
@@ -252,15 +258,22 @@ func cleanPanelText(text string) string {
 }
 
 func panelLines(text string, columns int) []string {
+	lines, _ := wrapPanelLines(text, columns)
+	return lines
+}
+
+func wrapPanelLines(text string, columns int) ([]string, []int) {
 	columns = max(1, columns)
 	var lines []string
+	offsets := []int{0}
 	var line strings.Builder
 	width := 0
-	for _, r := range text {
+	for offset, r := range text {
 		if r == '\n' {
 			lines = append(lines, line.String())
 			line.Reset()
 			width = 0
+			offsets = append(offsets, offset+1)
 			continue
 		}
 		cells := term.CellWidth(r)
@@ -271,17 +284,19 @@ func panelLines(text string, columns int) []string {
 			lines = append(lines, line.String())
 			line.Reset()
 			width = 0
+			offsets = append(offsets, offset)
 		}
 		line.WriteRune(r)
 		width += cells
 	}
 	lines = append(lines, line.String())
-	return lines
+	return lines, offsets
 }
 
 func (v *viewer) reflowText() {
-	v.textLines = panelLines(v.pageText, max(1, v.cols-1))
+	v.textLines, v.textLineOffsets = wrapPanelLines(v.pageText, max(1, v.cols-1))
 	v.textTop = max(0, min(v.textTop, max(0, len(v.textLines)-v.panelRows())))
+	v.revealTextSearch()
 }
 
 func (v *viewer) panelLine(row int, text, style string) {
@@ -348,7 +363,8 @@ func (v *viewer) drawPanel() {
 					text = "No text returned for this page."
 				}
 			} else if index < len(v.textLines) {
-				text = v.textLines[index]
+				v.drawTextSearchLine(slot+3, index)
+				continue
 			}
 		}
 		v.panelLine(slot+3, text, style)

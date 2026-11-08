@@ -214,6 +214,7 @@ func TestZatMalformedMetadataIsBounded(t *testing.T) {
 }
 
 func TestZatTextPaneDoesNotMistakeLoadingForMissingText(t *testing.T) {
+	const pageText = "Synthetic page: 示例文本"
 	var output bytes.Buffer
 	v := &viewer{out: &output, cols: 60, rows: 24, loading: true, options: options{page: 1, zoom: 100}}
 	v.key("backtab")
@@ -227,16 +228,16 @@ func TestZatTextPaneDoesNotMistakeLoadingForMissingText(t *testing.T) {
 	if v.pendingMetadata == nil || strings.Contains(output.String(), "No text returned") {
 		t.Fatal("ready PDF was not queried before deciding whether it has text")
 	}
-	metadataFrames(t, v, pdfmeta.Payload{Text: "第一讲：自由模、核与余核"})
+	metadataFrames(t, v, pdfmeta.Payload{Text: pageText})
 	output.Reset()
 	v.draw()
-	if !strings.Contains(output.String(), "自由模") || strings.Contains(output.String(), "No text returned") {
+	if !strings.Contains(output.String(), pageText) || strings.Contains(output.String(), "No text returned") {
 		t.Fatal("completed extraction did not replace the loading placeholder")
 	}
 	v.open("updated.pdf")
 	output.Reset()
 	v.draw()
-	if strings.Contains(output.String(), "No text returned") || strings.Contains(output.String(), "自由模") {
+	if strings.Contains(output.String(), "No text returned") || strings.Contains(output.String(), pageText) {
 		t.Fatal("reload displayed stale text or a premature missing-text message")
 	}
 	output.Reset()

@@ -114,3 +114,34 @@ func TestDisplayRegionParserRejectsMalformedCommands(t *testing.T) {
 		t.Fatal("explicit rectangles were not converted from one-based coordinates")
 	}
 }
+
+type regionSearchCall struct {
+	id        RegionID
+	text      string
+	direction int
+	next      bool
+}
+type regionSearchTestHooks struct {
+	regionTestHooks
+	calls []regionSearchCall
+}
+
+func (h *regionSearchTestHooks) FindRegion(id RegionID, text string, direction int, next bool) error {
+	h.calls = append(h.calls, regionSearchCall{id, text, direction, next})
+	return nil
+}
+
+func TestRegionOccurrenceSearchProtocol(t *testing.T) {
+	h := &regionSearchTestHooks{}
+	core := NewTerm(config.Default(), h)
+	core.Twrite([]byte("\x1bPregion secondary find forward 'café α'; region secondary find next 'café α'; region secondary find previous 'café α'; region secondary find clear\x1b\\"), false)
+	want := []regionSearchCall{{SecondaryRegion, "café α", 1, false}, {SecondaryRegion, "café α", 1, true}, {SecondaryRegion, "café α", -1, true}, {SecondaryRegion, "", 1, false}}
+	if !reflect.DeepEqual(h.calls, want) {
+		t.Fatalf("search calls = %+v", h.calls)
+	}
+	for _, command := range []string{"secondary find", "secondary find clear extra", "secondary find sideways text"} {
+		if err := core.dslRegion(dslTokenize(command)); err == nil {
+			t.Fatalf("accepted %q", command)
+		}
+	}
+}

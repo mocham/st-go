@@ -55,7 +55,10 @@ type regionSurface struct {
 	viewWidth             int
 	seekPosition          *int
 	seekPage              *int
-	zoom, pan             int // zoom percent of fit-width; zero means 100
+	zoom, pan             int         // zoom percent of fit-width; zero means 100
+	search                *pdfMatches // immutable painter snapshot
+	pendingSearch         *regionSearch
+	searchAnchored        bool // selected occurrence remains current at short-page boundaries
 }
 
 type regionBitmap struct {
@@ -80,6 +83,7 @@ type regionJob struct {
 type regionSearch struct {
 	text            string
 	page, direction int
+	y               int // page-relative millionths for a new search's anchor
 }
 
 var _ term.RegionHooks = (*Terminal)(nil)
@@ -263,6 +267,9 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 		surface.seekPage = nil
 	}
 	surface.request = &request
+	surface.search, surface.pendingSearch = nil, nil
+	surface.searchAnchored = false
+	surface.dirty = true
 	t.displayRegions.documentRevision++
 	if initialPage {
 		page := request.Options.Page + 1
@@ -290,6 +297,8 @@ func (t *Terminal) ClearRegion(id term.RegionID) error {
 	t.displayRegions.documentRevision++
 	t.cancelRegionDecode()
 	surface.request = nil
+	surface.search, surface.pendingSearch = nil, nil
+	surface.searchAnchored = false
 	surface.bitmap = regionBitmap{}
 	surface.scrollY, surface.targetY = 0, 0
 	surface.seekPosition = nil
@@ -323,7 +332,7 @@ func (t *Terminal) queueRegionImage() {
 	surface.pan = clampInt(surface.pan, 0, max(0, width-r.Dx()))
 	surface.scrollFailed = false
 	t.enqueueRegionJob(regionJob{generation: s.generation, revision: s.documentRevision, request: *surface.request,
-		width: width, height: r.Dy(), background: surface.background(s.background), position: int(surface.scrollY)})
+		width: width, height: r.Dy(), background: surface.background(s.background), position: int(surface.scrollY), search: surface.pendingSearch})
 }
 
 func (s *regionSurface) zoomPercent() int {
@@ -410,6 +419,7 @@ func (t *Terminal) regionDecoder(jobs <-chan regionJob, metadata <-chan regionMe
 			var bitmap regionBitmap
 			var err error
 			found := 0
+			var matches *pdfMatches
 			visibleFirst := false
 			if job.request.Continuous {
 				if document == nil || documentRevision != job.revision {
@@ -426,11 +436,16 @@ func (t *Terminal) regionDecoder(jobs <-chan regionJob, metadata <-chan regionMe
 				}
 				if err == nil {
 					if job.search != nil {
-						found, job.position, err = document.find(job.width, job.search, func() bool {
+						var tops []int
+						matches, tops, err = document.matches(job.width, job.search.text, func() bool {
 							t.displayRegions.mu.Lock()
 							defer t.displayRegions.mu.Unlock()
 							return !t.closed() && job.generation == t.displayRegions.generation
 						})
+						if matches != nil {
+							matches.choose(job.search.page, job.search.y, job.search.direction)
+							found, job.position = matches.destination(tops, job.height)
+						}
 					}
 					if err == nil && (job.search == nil || found > 0) {
 						// Publish the visible area first on open/zoom/jump, then
@@ -454,10 +469,18 @@ func (t *Terminal) regionDecoder(jobs <-chan regionJob, metadata <-chan regionMe
 			if job.search != nil && !t.closed() && job.generation == t.displayRegions.generation && t.displayRegions.secondary != nil {
 				s := t.displayRegions.secondary
 				s.loading = false
+				s.search, s.pendingSearch, s.dirty = matches, nil, true
 				if err == nil && found > 0 {
+					s.searchAnchored = true
 					s.scrollY, s.targetY = float64(job.position), float64(job.position)
+					x := int(int64(matches.hits[matches.active].box.Min.X) * int64(job.width) / 1e6)
+					s.pan = clampInt(x-t.displayRegions.viewport.Dx()/4, 0, max(0, job.width-t.displayRegions.viewport.Dx()))
 				}
-				t.queueRegionReply(regionReply{job.generation, fmt.Sprintf("\x1bPregion secondary found %d\x1b\\", found)})
+				t.publishSearchReply(matches)
+				t.requestRegionPaint()
+			} else if job.search != nil {
+				t.displayRegions.mu.Unlock()
+				continue
 			}
 			if job.search != nil && found == 0 && err == nil {
 				t.queueRegionScroll()
@@ -602,10 +625,17 @@ func (t *Terminal) FindRegion(id term.RegionID, text string, direction int, next
 	if err != nil {
 		return err
 	}
-	if s.request == nil || !s.request.Continuous || len(s.bitmap.pageTops) < 2 {
+	if s.request == nil || !s.request.Continuous {
 		return fmt.Errorf("search requires a loaded continuous PDF")
 	}
-	if text == "" || len(text) > limits.PreviewSearchBytes || (direction != 1 && direction != -1) {
+	if text == "" {
+		s.search, s.pendingSearch, s.dirty = nil, nil, true
+		s.searchAnchored = false
+		t.queueRegionImage()
+		t.requestRegionPaint()
+		return nil
+	}
+	if len(s.bitmap.pageTops) < 2 || len(text) > limits.PreviewSearchBytes || (direction != 1 && direction != -1) {
 		return fmt.Errorf("invalid PDF search")
 	}
 	for _, r := range text {
@@ -614,15 +644,29 @@ func (t *Terminal) FindRegion(id term.RegionID, text string, direction int, next
 		}
 	}
 	page := s.currentPage() - 1
-	if next {
-		page += direction
+	if next && s.pendingSearch == nil && s.search != nil && s.search.query == text {
+		matches := *s.search
+		if len(matches.hits) > 0 {
+			matches.active = (matches.active + direction + len(matches.hits)) % len(matches.hits)
+			s.search = &matches
+			t.revealSearchMatch()
+		}
+		t.publishSearchReply(s.search)
+		return nil
 	}
+	logicalY := int(s.scrollY * float64(s.bitmap.width) / float64(max(1, s.viewWidth)))
+	y := clampInt(int(int64(logicalY-s.bitmap.pageTops[page])*1e6/int64(max(1, s.bitmap.pageTops[page+1]-s.bitmap.pageTops[page]))), 0, 1000000)
 	s.seekPage, s.seekPosition = nil, nil
+	s.search = nil
+	s.searchAnchored = false
+	s.pendingSearch = &regionSearch{text: text, page: page, direction: direction, y: y}
+	s.dirty = true
 	t.displayRegions.generation++
 	r := t.secondaryPixels()
 	t.enqueueRegionJob(regionJob{generation: t.displayRegions.generation, revision: t.displayRegions.documentRevision,
 		request: *s.request, width: s.renderWidth(r.Dx()), height: r.Dy(), background: s.background(t.colorAt(ColDefaultBg)),
-		search: &regionSearch{text: text, page: page, direction: direction}})
+		search: s.pendingSearch})
+	t.requestRegionPaint()
 	return nil
 }
 
@@ -688,6 +732,7 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 			if event.Kind == "pages" {
 				page += surface.currentPage()
 			}
+			surface.searchAnchored = false
 			if page < 1 {
 				page = 1
 			}
@@ -706,6 +751,7 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 		return nil
 	}
 	if event.Kind == "position" {
+		surface.searchAnchored = false
 		if event.Value < 0 || event.Value > 1000000 || surface.request == nil || !surface.request.Continuous {
 			return fmt.Errorf("position requires a continuous PDF and a value from 0 to 1000000")
 		}
@@ -734,6 +780,9 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 }
 
 func (s *regionSurface) currentPage() int {
+	if s.searchAnchored && s.search != nil && s.search.active >= 0 && s.search.active < len(s.search.hits) {
+		return s.search.hits[s.search.active].page + 1
+	}
 	if len(s.bitmap.pageTops) < 2 {
 		return 0
 	}
@@ -747,6 +796,7 @@ func (t *Terminal) scrollRegionBy(steps int) {
 
 func (t *Terminal) scrollRegionPixels(pixels float64) {
 	s := t.displayRegions.secondary
+	s.searchAnchored = false
 	maximum := t.regionScrollMaximum()
 	s.targetY = max(0, min(s.targetY+pixels, maximum))
 	// Give the input event an immediate first frame, then ease at display rate.
@@ -878,6 +928,7 @@ func renderRegionPixels(surface regionSurface, r, pane image.Rectangle, fallback
 			pixels[y*stride+x] = pixel
 		}
 	}
+	paintSearchMatches(surface, r, pixels, stride)
 }
 
 func renderRegionImage(job regionJob) (regionBitmap, error) {

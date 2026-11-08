@@ -29,6 +29,7 @@ const (
 	PreviewPages         = MaxBytes / 4096
 	PreviewHeight        = MaxBytes // total continuous-document height in pixels
 	PreviewSearchBytes   = MaxBytes / 65536
+	PreviewSearchMatches = 4096
 	AnimationFrames      = MaxBytes / 1024
 	LogBytes             = MaxBytes / 64
 )

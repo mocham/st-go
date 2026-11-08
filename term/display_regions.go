@@ -69,7 +69,8 @@ type RegionNavigationHooks interface {
 }
 
 // RegionSearchHooks locates text asynchronously in the native PDF worker.
-// Direction is -1/1; next skips the current page (page-wise text search).
+// Direction is -1/1; next advances an occurrence, including within a page.
+// Empty text clears highlights and cancels a pending search.
 type RegionSearchHooks interface {
 	FindRegion(RegionID, string, int, bool) error
 }
@@ -209,6 +210,13 @@ func (t *Term) dslRegion(args []string) error {
 		}
 		return hooks.QueryRegionDocument(id, query)
 	case "find":
+		if len(args) == 3 && args[2] == "clear" {
+			search, ok := t.hooks.(RegionSearchHooks)
+			if !ok {
+				return fmt.Errorf("PDF text search is not supported by this frontend")
+			}
+			return search.FindRegion(id, "", 1, false)
+		}
 		if len(args) != 4 {
 			return fmt.Errorf("region find requires forward/backward/next/previous and text")
 		}

@@ -337,3 +337,25 @@ try {
     if (!page.findText(needle.data(), needle.size(), true, true, false, false, false, false, false, &left, &top, &right, &bottom)) return 0;
     return 1 + (int)(1000000 * std::max(0.0, std::min(1.0, top / view->pages[index].height)));
 } catch (...) { return 0; }
+
+int pdf_scroll_search_rects(void *handle, int index, const char *text, double *rects, int capacity, int *truncated)
+try {
+    auto *view = static_cast<scroll_pdf *>(handle);
+    if (!view || !view->native || !text || !rects || !truncated || capacity < 1 || index < 0 || index >= (int)view->pages.size()) return -1;
+    const auto needle = utf8ToUCS4(text);
+    if (needle.empty()) return -1;
+    TextOutputDev page(nullptr, true, 0, false, false);
+    view->native->displayPage(&page, index + 1, 72, 72, 0, false, true, false);
+    double left = 0, top = 0, right = 0, bottom = 0;
+    int count = 0;
+    *truncated = 0;
+    while (page.findText(needle.data(), needle.size(), count == 0, true, count != 0, false, false, false, false, &left, &top, &right, &bottom)) {
+        if (count == capacity) { *truncated = 1; break; }
+        rects[4*count] = left / view->pages[index].width;
+        rects[4*count+1] = top / view->pages[index].height;
+        rects[4*count+2] = right / view->pages[index].width;
+        rects[4*count+3] = bottom / view->pages[index].height;
+        ++count;
+    }
+    return count;
+} catch (...) { return -1; }

@@ -26,6 +26,7 @@ func TestZatPageTextX11(t *testing.T) {
 	client := testExecutable(t, "ST_TEST_ZAT", "./zat")
 	dir := t.TempDir()
 	file, expected := os.Getenv("ST_TEST_ZAT_PDF"), os.Getenv("ST_TEST_ZAT_TEXT")
+	generated := file == ""
 	if file == "" {
 		file, expected = filepath.Join(dir, "document.pdf"), "Selectable café 世界 😀"
 		if err := os.WriteFile(file, metadataActualTextPDF(expected), 0600); err != nil {
@@ -98,6 +99,11 @@ func TestZatPageTextX11(t *testing.T) {
 	conn.Sync()
 	await("page-text query", "region secondary text ")
 	await("extracted page text", expected)
+	if generated {
+		typeZatX11(t, conn, setup, "/Selectable\r")
+		await("occurrence search", "Match 1/1 on page 1")
+		await("selectable search highlight", "\x1b[30;48;5;214mSelectable\x1b[0m")
+	}
 	// The tee log precedes PTY parsing/painting. Select real terminal cells,
 	// then use the real shortcut and retrieve CLIPBOARD from a second X client.
 	time.Sleep(200 * time.Millisecond)
@@ -111,6 +117,23 @@ func TestZatPageTextX11(t *testing.T) {
 	xtest.FakeInput(conn, xproto.ButtonPress, 1, 0, root, 0, 0, 0)
 	xtest.FakeInput(conn, xproto.MotionNotify, 0, 0, root, x2, y2, 0)
 	xtest.FakeInput(conn, xproto.ButtonRelease, 1, 0, root, 0, 0, 0)
+	conn.Sync()
+	// Wait for release handling and PRIMARY ownership before sending the copy
+	// shortcut; an X round trip alone only synchronizes the server, not st.
+	selectionDeadline := time.Now().Add(3 * time.Second)
+	for {
+		owner, err := xproto.GetSelectionOwner(conn, xproto.AtomPrimary).Reply()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if owner.Owner == window {
+			break
+		}
+		if time.Now().After(selectionDeadline) {
+			t.Fatal("mouse selection did not claim PRIMARY")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	control, copy := x11Keycode(t, conn, setup, 0xffe3), x11Keycode(t, conn, setup, 'C')
 	xtest.FakeInput(conn, xproto.KeyPress, byte(control), 0, 0, 0, 0, 0)
 	xtest.FakeInput(conn, xproto.KeyPress, byte(shift), 0, 0, 0, 0, 0)

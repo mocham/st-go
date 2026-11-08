@@ -436,7 +436,7 @@ test-webp-x11: st file-browser
 test-zat-x11: st zat
 	ST_TEST_ZAT_X11=1 ST_TEST_BINARY=./st ST_TEST_ZAT=./zat \
 	go test -tags '$(FULL_GO_TAGS)' . -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' \
-		-run '^TestZatPageTextX11$$' -count=1 -v
+		-run '^TestZat(PageText|Search)X11$$' -count=1 -v
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"

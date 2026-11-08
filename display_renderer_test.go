@@ -188,5 +188,10 @@ func TestPreviewScrollCopyMatchesFullFrame(t *testing.T) {
 		if _, ok := regionScrollCopy(&previous, next); ok {
 			t.Fatal("resize reused stale pixmap")
 		}
+		next = previous
+		next.surface.search = &pdfMatches{active: 0}
+		if _, ok := regionScrollCopy(&previous, next); ok {
+			t.Fatal("new search highlights reused an unhighlighted pixmap")
+		}
 	}
 }

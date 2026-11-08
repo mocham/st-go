@@ -29,6 +29,10 @@ int pdf_scroll_height(void *view, int width, int max_height);
 int pdf_scroll_page_tops(void *view, int *tops, int capacity);
 /* First case-insensitive text hit on a page: vertical millionths + 1, 0 if absent. */
 int pdf_scroll_search_page(void *view, int page, const char *text);
+/* All page occurrences as normalized left/top/right/bottom doubles. Capacity
+ * counts rectangles, not doubles; output is bounded and needs no iconv modules. */
+int pdf_scroll_search_rects(void *view, int page, const char *text,
+                            double *rects, int capacity, int *truncated);
 /* Bounded UTF-8 page text and binary outline records (page/level/length u32 LE,
  * then UTF-8 title). Return bytes written, -1 on failure. No actions execute. */
 int pdf_scroll_text(void *view, int page, char *out, int capacity, int *truncated);

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -26,6 +27,9 @@ type viewer struct {
 	previous                                   int
 	search                                     string
 	searchBackward                             bool
+	searchVisible                              bool
+	searchPending                              bool
+	searchPage, searchPageMatch                int
 	rows                                       int
 	panel                                      panelMode
 	panelDirty                                 bool
@@ -36,6 +40,8 @@ type viewer struct {
 	pageText                                   string
 	textPage, textTop                          int
 	textLines                                  []string
+	textLineOffsets                            []int
+	textHits                                   []textHit
 	metadataToken                              int
 	pendingMetadata                            *metadataRequest
 }
@@ -56,6 +62,8 @@ func (v *viewer) open(path string) {
 	v.loading, v.failed = true, false
 	v.toc, v.tocLoaded, v.pageText, v.textPage = nil, false, "", 0
 	v.pendingMetadata, v.panelError, v.panelDirty = nil, "", true
+	v.searchVisible, v.searchPage, v.textHits = false, 0, nil
+	v.searchPending = false
 	// Zoom is kept by the terminal across reloads and file changes.
 }
 
@@ -86,8 +94,11 @@ func (v *viewer) key(key string) {
 			v.prompt = ""
 			if mode == ':' {
 				v.execute(command)
-			} else if command != "" {
-				v.search, v.searchBackward = command, mode == '?'
+			} else {
+				if command != "" {
+					v.search = command
+				}
+				v.searchBackward = mode == '?'
 				v.find(false, false)
 			}
 		case "\x7f", "\b":
@@ -239,7 +250,7 @@ func (v *viewer) key(key string) {
 }
 
 func (v *viewer) help() {
-	v.message = "Tab contents | S-Tab selectable text | j/k scroll | J/K page | +/- zoom | / search | q quit"
+	v.message = "/ search | n/N match | Tab contents | S-Tab text | j/k scroll | J/K page | +/- zoom | q quit"
 }
 
 func (v *viewer) find(next, reverse bool) {
@@ -247,13 +258,23 @@ func (v *viewer) find(next, reverse bool) {
 		v.message = "Use /text or ?text first"
 		return
 	}
-	if len(v.search) > limits.PreviewSearchBytes {
+	if len(v.search) > 4096 {
+		v.message = "Search input is limited to 4096 bytes"
+		return
+	}
+	query := expandSearch(v.search)
+	if len(query) > limits.PreviewSearchBytes {
 		v.message = fmt.Sprintf("Search is limited to %d bytes", limits.PreviewSearchBytes)
 		return
 	}
 	if v.pages == 0 {
 		v.message = "PDF is still loading"
 		return
+	}
+	if !next || !v.searchVisible {
+		v.searchVisible, v.searchPage, v.searchPageMatch = true, 0, 0
+		v.updateTextSearch(false)
+		v.panelDirty = true
 	}
 	back := v.searchBackward != reverse
 	direction := "forward"
@@ -267,7 +288,8 @@ func (v *viewer) find(next, reverse bool) {
 			direction = "next"
 		}
 	}
-	v.command("find " + direction + " " + quoteDSL(v.search))
+	v.command("find " + direction + " " + quoteDSL(query))
+	v.searchPending = true
 	v.message = "Searching..."
 }
 
@@ -280,6 +302,11 @@ func (v *viewer) execute(command string) {
 		v.quit = true
 	case "help", "h":
 		v.help()
+	case "nohlsearch", "noh":
+		v.searchVisible, v.searchPage, v.textHits = false, 0, nil
+		v.completeSearch()
+		v.command("find clear")
+		v.panelDirty = true
 	case "reload", "r":
 		v.open(v.file)
 	case "open", "o":
@@ -331,8 +358,43 @@ func (v *viewer) reply(payload string) {
 		return
 	}
 	f := strings.Fields(payload)
+	if len(f) == 8 && strings.Join(f[:3], " ") == "region secondary matches" {
+		var values [5]int
+		for i := range values {
+			n, err := strconv.Atoi(f[3+i])
+			if err != nil || n < 0 {
+				return
+			}
+			values[i] = n
+		}
+		page, index, total, local, truncated := values[0], values[1], values[2], values[3], values[4]
+		if page > limits.PreviewPages || total > limits.PreviewSearchMatches || index > total || local > index || truncated > 1 || (index > 0 && (page == 0 || local == 0)) {
+			return
+		}
+		if index == 0 && (total != 0 || page != 0 || local != 0) {
+			return
+		}
+		v.completeSearch()
+		v.searchPage, v.searchPageMatch = page, local
+		if index == 0 {
+			v.message = "Text not found"
+		} else {
+			v.message = fmt.Sprintf("Match %d/%d on page %d (n/N: next/previous)", index, total, page)
+			v.page = page
+			v.syncPanel()
+		}
+		if truncated != 0 {
+			v.message += " [match limit reached]"
+		}
+		v.updateTextSearch(true)
+		if v.panel == panelText {
+			v.panelDirty = true
+		}
+		return
+	}
 	if len(f) == 4 && strings.Join(f[:3], " ") == "region secondary found" {
 		if page, err := strconv.Atoi(f[3]); err == nil && page >= 0 {
+			v.completeSearch()
 			if page == 0 {
 				v.message = "Text not found"
 			} else {
@@ -364,6 +426,13 @@ func (v *viewer) reply(payload string) {
 	v.syncPanel()
 	if v.panelNotice() != previousNotice {
 		v.panelDirty = true
+	}
+}
+
+func (v *viewer) completeSearch() {
+	v.searchPending = false
+	if v.pendingMetadata != nil {
+		v.pendingMetadata.started = time.Now()
 	}
 }
 

@@ -85,6 +85,10 @@ func TestNativePDFTextWithoutHostModules(t *testing.T) {
 			if err != nil || page != 1 {
 				t.Fatalf("search %q without host modules = page %d, %v", needle, page, err)
 			}
+			matches, _, err := doc.matches(300, needle, func() bool { return true })
+			if err != nil || matches == nil || len(matches.hits) != 1 {
+				t.Fatalf("occurrence search %q without host modules: %+v, %v", needle, matches, err)
+			}
 		}
 		return
 	}
