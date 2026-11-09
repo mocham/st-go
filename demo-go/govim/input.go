@@ -18,6 +18,7 @@ type keyEvent struct {
 	Mouse     *mouseEvent
 	Err       string
 	Clipboard *clipboardReply
+	Preview   *previewEvent
 }
 type inputParser struct {
 	pending, paste                        []byte
@@ -25,6 +26,8 @@ type inputParser struct {
 	inPaste, discardPaste, discardControl bool
 	osc                                   []byte
 	inOSC, oscEscape, discardOSC          bool
+	dcs                                   []byte
+	inDCS, dcsEscape, discardDCS          bool
 }
 
 func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
@@ -33,6 +36,33 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 	}
 	p.pending = append(p.pending, data...)
 	for len(p.pending) > 0 {
+		if p.inDCS {
+			b := p.pending[0]
+			p.pending = p.pending[1:]
+			if b == 0x18 || b == 0x1a || b == 7 || p.dcsEscape && b == '\\' {
+				if b == '\\' && !p.discardDCS {
+					if event := parsePreviewEvent(string(p.dcs)); event != nil {
+						emit(keyEvent{Preview: event})
+					}
+				}
+				p.dcs = nil
+				p.inDCS, p.dcsEscape, p.discardDCS = false, false, false
+				continue
+			}
+			if p.dcsEscape && !p.discardDCS {
+				p.dcs = append(p.dcs, 0x1b)
+			}
+			p.dcsEscape = b == 0x1b
+			if !p.dcsEscape && !p.discardDCS {
+				if len(p.dcs) >= 8192 {
+					p.dcs = nil
+					p.discardDCS = true
+				} else {
+					p.dcs = append(p.dcs, b)
+				}
+			}
+			continue
+		}
 		if p.inOSC {
 			b := p.pending[0]
 			p.pending = p.pending[1:]
@@ -130,19 +160,8 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 			continue
 		}
 		if b[1] == 'P' {
-			end := bytes.Index(b[2:], []byte("\x1b\\"))
-			bel := bytes.IndexByte(b[2:], 7)
-			if bel >= 0 && (end < 0 || bel < end) {
-				p.pending = b[bel+3:]
-				continue
-			}
-			if end < 0 {
-				if len(b) > 8192 {
-					p.pending = nil
-				}
-				return
-			}
-			p.pending = b[end+4:]
+			p.pending = b[2:]
+			p.inDCS = true
 			continue
 		}
 		if b[1] == '[' || b[1] == 'O' {

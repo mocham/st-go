@@ -13,6 +13,9 @@ belong to st-go (or another host implementing the same capabilities).
 * Images/PDFs, region placement, mouse events, and window geometry are terminal
   protocol requests. The descriptions of X11 surfaces in zat's performance
   notes describe the **st-go frontend**, not the zat application.
+* Govim's LaTeX/Markdown preview uses `tui/preview` and the pure-Go `latexpdf`
+  engine in-process, with save hooks instead of a file watcher. Its retained PDF
+  panel uses the same terminal region protocol as vimtex, without child Vim.
 * External openers are explicitly configured child commands, not a built-in
   dependency on a particular desktop. Vimtex/TeX tools are external programs.
 

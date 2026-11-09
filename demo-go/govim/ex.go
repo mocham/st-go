@@ -146,7 +146,8 @@ func (e *Editor) execute(command string) {
 		return
 	}
 	switch name {
-	case "w", "write", "wq", "x", "xit", "exit", "saveas", "sav":
+	case "w", "write", "wnomove", "wq", "x", "xit", "exit", "saveas", "sav":
+		noMove := name == "wnomove"
 		if args != "" {
 			path, err := exPath(args)
 			if err != nil {
@@ -169,7 +170,7 @@ func (e *Editor) execute(command string) {
 					return
 				}
 				if canonical == b.meta.Path && !explicit {
-					if err := b.save(force); err != nil {
+					if err := e.saveBuffer(b, force, noMove); err != nil {
 						e.error(err)
 						return
 					}
@@ -179,7 +180,7 @@ func (e *Editor) execute(command string) {
 					}
 					return
 				}
-				e.error(e.export(path, first, last, explicit, force))
+				e.error(e.export(path, first, last, explicit, force, noMove))
 				return
 			}
 		}
@@ -188,10 +189,10 @@ func (e *Editor) execute(command string) {
 			return
 		}
 		if explicit {
-			e.error(e.export(b.meta.Path, first, last, true, force))
+			e.error(e.export(b.meta.Path, first, last, true, force, noMove))
 			return
 		}
-		if err := b.save(force); err != nil {
+		if err := e.saveBuffer(b, force, noMove); err != nil {
 			e.error(err)
 			return
 		}
@@ -215,7 +216,7 @@ func (e *Editor) execute(command string) {
 	case "wa", "wall", "wqa", "wqall":
 		for _, buffer := range e.buffers {
 			if buffer.dirty() {
-				if err := buffer.save(force); err != nil {
+				if err := e.saveBuffer(buffer, force, false); err != nil {
 					e.error(err)
 					return
 				}
@@ -603,7 +604,7 @@ func (e *Editor) execute(command string) {
 		e.message = "govim 0.1 — native Go modal editor; no Vimscript"
 	case "Gn":
 		if b.dirty() {
-			if err := b.save(false); err != nil {
+			if err := e.saveBuffer(b, false, false); err != nil {
 				e.error(err)
 				return
 			}
@@ -617,6 +618,27 @@ func (e *Editor) execute(command string) {
 		} else {
 			e.error(e.compile(path, force))
 		}
+	case "Preview", "VimtexPreview", "PreviewScroll", "VimtexScroll":
+		if e.preview != nil {
+			e.preview.observe(e)
+		}
+		if e.preview == nil || !e.preview.ready || !e.preview.published {
+			e.error(fmt.Errorf("preview is not ready (requires st-go)"))
+			return
+		}
+		kind, value := "seek", b.row(e.pos())+1
+		if name == "PreviewScroll" || name == "VimtexScroll" {
+			kind, value = "scroll", 1
+		}
+		if args != "" {
+			n, err := strconv.Atoi(args)
+			if err != nil || n < -maxCount || n > maxCount || kind == "seek" && n < 1 {
+				e.error(fmt.Errorf("invalid preview navigation value"))
+				return
+			}
+			value = n
+		}
+		e.preview.event(e, previewEvent{kind: kind, value: value})
 	default:
 		e.error(fmt.Errorf("unsupported Ex command: %s", rest))
 	}
@@ -669,7 +691,7 @@ func exPath(value string) (string, error) {
 	}
 	return value, nil
 }
-func (e *Editor) export(path string, first, last int, ranged, force bool) error {
+func (e *Editor) export(path string, first, last int, ranged, force bool, noMove ...bool) error {
 	name, err := canonicalPath(path)
 	if err != nil {
 		return err
@@ -699,6 +721,9 @@ func (e *Editor) export(path string, first, last int, ranged, force bool) error 
 	_, err = atomicWrite(name, data, 0600, !force)
 	if err == nil {
 		e.message = "Written " + name
+		if e.preview != nil {
+			e.preview.saved(e, name, nil, len(noMove) > 0 && noMove[0])
+		}
 	}
 	return err
 }
@@ -726,6 +751,10 @@ func (e *Editor) reload(force bool) error {
 		err = b.journal.Sync()
 	}
 	e.setPos(0)
+	if err == nil && e.preview != nil {
+		text := previewText(b)
+		e.preview.saved(e, b.meta.Path, &text, false)
+	}
 	return err
 }
 func (e *Editor) listBuffers() {

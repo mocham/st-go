@@ -19,6 +19,55 @@ uses the pure-Go [Chroma v2](https://github.com/alecthomas/chroma) module.
 `pdflatex`/`bibtex` are needed only when
 you explicitly request TeX compilation.
 
+## Live document preview
+
+Inside st-go, opening a LaTeX (`.tex`, `.latex`, `.ltx`) or Markdown
+(`.md`, `.markdown`, `.mdown`, `.mkd`) file automatically opens the retained
+preview panel: **40% editor / 60% preview**, warm off-white paper, fit-width
+continuous scrolling, selectable PDF text, and vector mathematics. Govim stays
+the editor; no Vim, child editor, external typesetter, or extra font package is
+launched for previewing.
+
+```sh
+make st govim
+./st -e ./govim document.tex
+./st -e ./govim notes.md
+./govim --preview-width 50 --preview-bg '#ffffff' notes.md
+./govim --no-preview document.tex
+```
+
+* The initial preview loads when the terminal confirms region support. Saves
+  trigger refresh through an editor hook; **there is no file-change monitor**.
+  Unsaved typing and external filesystem changes alone do not refresh it.
+  Explicit `:e!` reloads do. Saves of open included files also refresh their
+  active parent document. `\input`/`\include` and fragment `%main=...` directives
+  resolve relative to their files, with recursion/resource limits.
+* On initial display and normal saves, the first **`%cursor`** comment in the
+  expanded source takes precedence. With no marker, the preview seeks to the
+  **govim cursor line captured at save time**, including lines in included files.
+  This is approximate proportional source navigation, not SyncTeX.
+* **`:wnomove[!] [FILE]`** saves and refreshes **without an automatic jump**,
+  suppressing both marker and cursor following and preserving the viewer's scroll
+  offset (clamped if the new document is shorter). It does not change the editor
+  cursor. Ordinary `:w` follows again on the next save.
+* Wheel over the preview to scroll locally without re-rendering. Manual
+  `:Preview [LINE]` and `:PreviewScroll COUNT` commands are also available
+  (`:VimtexPreview` / `:VimtexScroll` aliases are accepted).
+* One background render runs at a time; rapid saves coalesce to the newest saved
+  revision. Changed PDFs are at least **2.1 seconds apart** by default; override
+  with `--preview-gap 500ms` (or `0`). Unchanged saves can navigate without
+  regenerating or reopening the PDF. Failed/stale renders never replace the last
+  successful preview. PDF publication does not repaint the editor document.
+* Switching to a non-preview buffer or exiting restores the full-width terminal.
+  Temporary PDFs are private and cleaned up. On terminals without the st-go
+  region protocol, preview negotiation times out without blocking editing;
+  `--no-preview` skips negotiation entirely.
+
+Rendering reuses the existing `latexpdf` subset through the backend-neutral
+[`tui/preview`](../../tui/preview) component, not a complete TeX distribution or
+browser-based Markdown renderer. The panel itself is owned by the terminal
+frontend; govim communicates using DCS region commands and never assumes X11.
+
 ## Recovery and saving
 
 * Every text edit, undo, and redo is appended to a swap **before** changing the
@@ -151,11 +200,12 @@ reference; unsupported commands produce an error rather than calling Vim.
 | History | `u`, Ctrl-R, line `U`, `.`, registers, `q{reg}` recording, `@{reg}`, `@@` |
 | Search | `/ ? n N * # g* g#`, wrapping, per-occurrence highlights, `:noh` |
 | Substitute | `:[range]s/pattern/replacement/gicn`, `&`, `\1`…`\9`, `\r`, confirmation `y/n/a/q/l` |
-| Files | `:w[!]`, `:wq`, `:x`, `:q[!]`, `:qa[!]`, `:wa`, `:wqa`, `:e[!]`, `:enew`, `:read`, `:saveas`, `:file`, `:cd`, `:pwd` |
+| Files | `:w[!]`, `:wnomove[!]`, `:wq`, `:x`, `:q[!]`, `:qa[!]`, `:wa`, `:wqa`, `:e[!]`, `:enew`, `:read`, `:saveas`, `:file`, `:cd`, `:pwd` |
 | Buffers/arguments | `:args`, `:argadd`, `:next`, `:prev`, `:first`, `:last`, `:ls`, `:b`, `:bn`, `:bp`, `:bd` |
 | Windows/tabs | `:split`, `:vsplit`, `:new`, `:vnew`, `:close`, `:only`, `:tabnew`, `:tabnext`, `:tabprevious`, `:tabclose`, Ctrl-W navigation/splits/resize |
 | Ex edits | ranged `:delete`, `:yank`, `:Y`, `:D`, `:put`, `:join`, `:copy`, `:move`, `:sort`, `:retab`, `:normal`, global/inverse-global delete/print |
 | Other | `:marks`, `:registers`, `:jumps`, `:changes`, `:undo`, `:redo`, `:preserve`, `:swapname`, `:! COMMAND`, `:Gn[!] [FILE]` |
+| Preview | automatic LaTeX/Markdown panel, `%cursor` / editor-cursor save navigation, `:wnomove`, `:Preview [LINE]`, `:PreviewScroll COUNT` |
 
 Ex ranges support line numbers, `.`, `$`, marks, offsets, `%`, comma/semicolon,
 and visual marks. Mouse supports click/drag, double-click word selection,

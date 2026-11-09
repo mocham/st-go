@@ -119,6 +119,7 @@ type Editor struct {
 	dirty                            bool
 	fullRedraw                       bool
 	syntax                           *syntaxHighlighter
+	preview                          *editorPreview
 	clip                             clipboard
 	clipboardError                   string
 	clipboardRead                    *clipboardRead
@@ -374,6 +375,12 @@ func firstNonblank(b *Buffer, row int) int {
 
 func (e *Editor) Feed(event keyEvent) {
 	if e.quit {
+		return
+	}
+	if event.Preview != nil {
+		if e.preview != nil {
+			e.preview.event(e, *event.Preview)
+		}
 		return
 	}
 	if event.Clipboard != nil {
@@ -1042,6 +1049,9 @@ func (e *Editor) close(normalExit bool) error {
 		if err := e.clip.Close(); first == nil {
 			first = err
 		}
+	}
+	if err := e.preview.close(); first == nil {
+		first = err
 	}
 	return first
 }

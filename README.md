@@ -286,6 +286,10 @@ make govim
 Edits are journaled before application and flushed after one second or 64 KiB;
 `:preserve` forces a flush. It supports modal editing, objects, registers,
 undo/redo, macros, search/substitution, splits/tabs, and `:Gn[!]` TeX compilation.
+Inside st-go, LaTeX/Markdown files automatically open an in-process retained PDF
+preview. Successful saves refresh it without file polling; `%cursor` takes
+precedence over govim's saved cursor position. `:wnomove` refreshes without
+jumping, and `--no-preview` disables the panel.
 This is an initial native implementation, not full Vim compatibility; see its
 README for command coverage, durability guarantees, and limits. Existing Vimtex,
 PDF viewers, and file-browser openers are unchanged.

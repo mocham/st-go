@@ -26,11 +26,16 @@ func (c *commandsFlag) Set(value string) error { *c = append(*c, value); return 
 
 func run(args []string) (code int) {
 	options := defaultJournalOptions()
+	previewOptions := defaultPreviewOptions()
 	flags := flag.NewFlagSet("govim", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	recoverFile := flags.Bool("r", false, "recover a govim swap for FILE (without FILE, list swap files)")
 	flags.BoolVar(recoverFile, "recover", false, "recover a govim swap")
 	readonly := flags.Bool("R", false, "open readonly (explicit :w! can write)")
+	noPreview := flags.Bool("no-preview", false, "disable automatic LaTeX/Markdown preview")
+	flags.IntVar(&previewOptions.width, "preview-width", previewOptions.width, "preview width percent (editor uses the remainder)")
+	flags.StringVar(&previewOptions.background, "preview-bg", previewOptions.background, "preview paper/canvas color (#RRGGBB)")
+	flags.DurationVar(&previewOptions.gap, "preview-gap", previewOptions.gap, "minimum background preview render gap (rapid saves coalesce)")
 	flags.StringVar(&options.Directory, "swap-dir", "", "persistent swap directory (default: beside file, falling back to user cache)")
 	flags.DurationVar(&options.Interval, "sync-interval", options.Interval, "fsync changed journals at this interval, even during continuous typing")
 	flags.IntVar(&options.Bytes, "sync-bytes", options.Bytes, "fsync after this many additional journal bytes")
@@ -48,6 +53,11 @@ func run(args []string) (code int) {
 	}
 	if options.Interval < time.Millisecond || options.Interval > time.Minute || options.Bytes < 1 || options.Bytes > maxBufferBytes {
 		fmt.Fprintln(os.Stderr, "govim: invalid sync interval/threshold (1ms..1m; 1..16 MiB)")
+		return 2
+	}
+	_, colorErr := strconv.ParseUint(strings.TrimPrefix(previewOptions.background, "#"), 16, 24)
+	if previewOptions.width < 1 || previewOptions.width > 99 || previewOptions.gap < 0 || previewOptions.gap > time.Minute || len(previewOptions.background) != 7 || previewOptions.background[0] != '#' || colorErr != nil {
+		fmt.Fprintln(os.Stderr, "govim: invalid preview options (width 1..99; gap 0..1m; background #RRGGBB)")
 		return 2
 	}
 	if options.Directory != "" {
@@ -159,6 +169,9 @@ func run(args []string) (code int) {
 	runner := &externalRunner{editor: e, fd: fd, old: old, raw: &raw, signals: signals}
 	e.runCommand = runner.shell
 	e.compile = runner.tex
+	if !*noPreview {
+		e.preview = newEditorPreview(previewOptions, os.Stdout)
+	}
 	fmt.Fprint(os.Stdout, "\x1b[?1049h\x1b[?7l\x1b[?2004h\x1b[?1000h\x1b[?1002h\x1b[?1006h")
 	resize := func() {
 		if size, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ); err == nil {
@@ -190,6 +203,9 @@ func run(args []string) (code int) {
 		now := time.Now()
 		parser.expire(now, e.Feed)
 		e.tick(now)
+		if err := e.preview.tick(e, now); err != nil {
+			return 1
+		}
 		if err := clip.Flush(); err != nil {
 			return 1
 		}
@@ -338,6 +354,11 @@ Ctrl-W s/v/w/h/j/k/l/c/o/= and resize commands navigate windows.
 :normal :g/pattern/d :v/pattern/d :undo :redo :marks :registers
 :jumps :changes :preserve :swapname :recover FILE :! COMMAND
 :Gn[!] [FILE] and F5 run pdflatex/bibtex, honoring %main=.
+
+PREVIEW: LaTeX/Markdown opens st-go's retained right panel automatically.
+Save to refresh; %cursor wins, otherwise follow the cursor saved with :w.
+:wnomove[!] refreshes without jumping. Wheel scrolls the preview locally.
+:Preview [LINE] / :PreviewScroll COUNT navigate manually. --no-preview disables.
 
 RECOVERY: every text change (including undo/redo) is written to a
 checksummed .govim.swp before it is applied. fsync defaults to

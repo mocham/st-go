@@ -77,7 +77,10 @@ func canonicalPath(path string) (string, error) {
 }
 
 func readBounded(path string, limit int64) ([]byte, error) {
-	f, err := os.Open(path)
+	// The stat below refuses non-regular files. Nonblocking open also prevents
+	// a preview include (or a raced replacement) that is a FIFO from hanging
+	// before we get a chance to perform that check.
+	f, err := os.OpenFile(path, os.O_RDONLY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
