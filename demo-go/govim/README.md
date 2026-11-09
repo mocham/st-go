@@ -344,6 +344,11 @@ separate vimtex live-preview demo.
 
 ## Current boundaries and tests
 
+See the [missing-feature roadmap](ROADMAP.md) for the tracked gaps.
+**Full search/Ex behavior and persistent undo are the highest priorities**;
+the remaining features follow, while general Vimscript/plugins/options remain
+deferred. The roadmap describes future work, not current command support.
+
 This is not yet a drop-in Vim replacement. In particular it lacks arbitrary
 Vimscript/options, folds, tags, a full quickfix engine, arbitrary Ex global
 bodies/filters, tag objects, and the complete Vim regular-expression engine.

@@ -1,0 +1,1510 @@
+package stterminal
+
+import (
+	"fmt"
+	"log"
+	"math"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"st-go/limits"
+)
+
+func (t *Term) tdefcolor(attr []int, npar int, l int) (int32, int) {
+	idx := int32(-1)
+	if npar+1 >= l {
+		log.Printf("erresc(38): Incorrect number of parameters (%d)\n", npar)
+		return idx, npar
+	}
+	switch attr[npar+1] {
+	case 2:
+		if npar+4 >= l {
+			log.Printf("erresc(38): Incorrect number of parameters (%d)\n", npar)
+			break
+		}
+		r, g, b := attr[npar+2], attr[npar+3], attr[npar+4]
+		npar += 4
+		if !between(r, 0, 255) || !between(g, 0, 255) || !between(b, 0, 255) {
+			log.Printf("erresc: bad rgb color (%d,%d,%d)\n", r, g, b)
+		} else {
+			idx = int32(TrueColor(uint(r), uint(g), uint(b)))
+		}
+	case 5:
+		if npar+2 >= l {
+			log.Printf("erresc(38): Incorrect number of parameters (%d)\n", npar)
+			break
+		}
+		npar += 2
+		if !between(attr[npar], 0, 255) {
+			log.Printf("erresc: bad fgcolor %d\n", attr[npar])
+		} else {
+			idx = int32(attr[npar])
+		}
+	default:
+		log.Printf("erresc(38): gfx attr %d unknown\n", attr[npar])
+	}
+	return idx, npar
+}
+
+func (t *Term) tsetattr(attr []int, l int) {
+	for i := 0; i < l; i++ {
+		switch attr[i] {
+		case 0:
+			t.c.attr.Mode &^= ATTRBold | ATTRFaint | ATTRItalic | ATTRUnderline |
+				ATTRBlink | ATTRReverse | ATTRInvisible | ATTRStruck
+			t.c.attr.Fg = uint32(t.cfg.DefaultFg)
+			t.c.attr.Bg = uint32(t.cfg.DefaultBg)
+		case 1:
+			t.c.attr.Mode |= ATTRBold
+		case 2:
+			t.c.attr.Mode |= ATTRFaint
+		case 3:
+			t.c.attr.Mode |= ATTRItalic
+		case 4:
+			t.c.attr.Mode |= ATTRUnderline
+		case 5, 6:
+			t.c.attr.Mode |= ATTRBlink
+		case 7:
+			t.c.attr.Mode |= ATTRReverse
+		case 8:
+			t.c.attr.Mode |= ATTRInvisible
+		case 9:
+			t.c.attr.Mode |= ATTRStruck
+		case 22:
+			t.c.attr.Mode &^= ATTRBold | ATTRFaint
+		case 23:
+			t.c.attr.Mode &^= ATTRItalic
+		case 24:
+			t.c.attr.Mode &^= ATTRUnderline
+		case 25:
+			t.c.attr.Mode &^= ATTRBlink
+		case 27:
+			t.c.attr.Mode &^= ATTRReverse
+		case 28:
+			t.c.attr.Mode &^= ATTRInvisible
+		case 29:
+			t.c.attr.Mode &^= ATTRStruck
+		case 38:
+			idx, npar := t.tdefcolor(attr, i, l)
+			if idx >= 0 {
+				t.c.attr.Fg = uint32(idx)
+			}
+			i = npar
+		case 39:
+			t.c.attr.Fg = uint32(t.cfg.DefaultFg)
+		case 48:
+			idx, npar := t.tdefcolor(attr, i, l)
+			if idx >= 0 {
+				t.c.attr.Bg = uint32(idx)
+			}
+			i = npar
+		case 49:
+			t.c.attr.Bg = uint32(t.cfg.DefaultBg)
+		default:
+			switch {
+			case between(attr[i], 30, 37):
+				t.c.attr.Fg = uint32(attr[i] - 30)
+			case between(attr[i], 40, 47):
+				t.c.attr.Bg = uint32(attr[i] - 40)
+			case between(attr[i], 90, 97):
+				t.c.attr.Fg = uint32(attr[i] - 90 + 8)
+			case between(attr[i], 100, 107):
+				t.c.attr.Bg = uint32(attr[i] - 100 + 8)
+			default:
+				log.Printf("erresc(default): gfx attr %d unknown\n", attr[i])
+			}
+		}
+	}
+}
+
+func (t *Term) tsetmode(priv, set bool, args []int, narg int) {
+	for i := 0; i < narg; i++ {
+		a := args[i]
+		if priv {
+			switch a {
+			case 1:
+				t.setWinMode(set, ModeAppCursor)
+			case 5:
+				t.setWinMode(set, ModeReverse)
+			case 6:
+				modbit(&t.c.state, set, cursorOrigin)
+				t.tmoveato(0, 0)
+			case 7:
+				if set {
+					t.mode |= termModeWrap
+				} else {
+					t.mode &^= termModeWrap
+				}
+			case 25:
+				t.setWinMode(!set, ModeHide)
+			case 9:
+				t.xsetpointermotion(false)
+				t.setWinMode(false, ModeMouse)
+				t.setWinMode(set, ModeMouseX10)
+			case 1000:
+				t.xsetpointermotion(false)
+				t.setWinMode(false, ModeMouse)
+				t.setWinMode(set, ModeMouseBtn)
+			case 1002:
+				t.xsetpointermotion(false)
+				t.setWinMode(false, ModeMouse)
+				t.setWinMode(set, ModeMouseMotion)
+			case 1003:
+				t.xsetpointermotion(set)
+				t.setWinMode(false, ModeMouse)
+				t.setWinMode(set, ModeMouseMany)
+			case 1004:
+				t.setWinMode(set, ModeFocus)
+			case 1006:
+				t.setWinMode(set, ModeMouseSgr)
+			case 1034:
+				t.setWinMode(set, Mode8bit)
+			case 1049:
+				if !t.cfg.AllowAltScreen {
+					break
+				}
+				if set {
+					t.tcursor(cursorSave)
+				} else {
+					t.tcursor(cursorLoad)
+				}
+				fallthrough
+			case 47, 1047:
+				if !t.cfg.AllowAltScreen {
+					break
+				}
+				alt := t.isSet(termModeAltScreen)
+				if alt {
+					t.tclearregion(0, 0, t.col-1, t.row-1)
+				}
+				if set != alt {
+					t.tswapscreen()
+				}
+				if a != 1049 {
+					break
+				}
+				fallthrough
+			case 1048:
+				if set {
+					t.tcursor(cursorSave)
+				} else {
+					t.tcursor(cursorLoad)
+				}
+			case 2004:
+				t.setWinMode(set, ModeBrcktPaste)
+			case 2026:
+				t.SetSynchronizedOutput(set)
+			case 1001, 1005, 1015:
+			default:
+				log.Printf("erresc: unknown private set/reset mode %d\n", a)
+			}
+		} else {
+			switch a {
+			case 2:
+				t.setWinMode(set, ModeKbdLock)
+			case 4:
+				if set {
+					t.mode |= termModeInsert
+				} else {
+					t.mode &^= termModeInsert
+				}
+			case 12:
+				if !set {
+					t.mode |= termModeEcho
+				} else {
+					t.mode &^= termModeEcho
+				}
+			case 20:
+				if set {
+					t.mode |= termModeCRLF
+				} else {
+					t.mode &^= termModeCRLF
+				}
+			default:
+				log.Printf("erresc: unknown set/reset mode %d\n", a)
+			}
+		}
+	}
+}
+
+func (t *Term) csihandle() {
+	arg := t.csiescseq.arg
+	narg := t.csiescseq.narg
+	get := func(i, d int) int {
+		// st's DEFAULT(arg, 1) semantics: an absent or zero argument
+		// falls back to the default (used for cursor movements etc.).
+		if i < narg {
+			if arg[i] != 0 || d == 0 {
+				return arg[i]
+			}
+			return d
+		}
+		return d
+	}
+
+	unknown := func() {
+		log.Printf("erresc: unknown csi ")
+		t.csidump()
+	}
+
+	switch t.csiescseq.mode[0] {
+	default:
+		unknown()
+	case '@':
+		t.tinsertblank(get(0, 1))
+	case 'A':
+		t.tmoveto(t.c.x, t.c.y-get(0, 1))
+	case 'B', 'e':
+		t.tmoveto(t.c.x, t.c.y+get(0, 1))
+	case 'i':
+		switch get(0, 0) {
+		case 0:
+			t.dump()
+		case 1:
+			t.dumpLine(t.c.y)
+		case 2:
+			t.printer([]byte(t.GetSel()))
+		case 4:
+			t.mode &^= termModePrint
+		case 5:
+			t.mode |= termModePrint
+		}
+	case 'c':
+		if get(0, 0) == 0 {
+			t.ttywrite([]byte(t.cfg.Vtiden), false)
+		}
+	case 'b':
+		rep := clamp(get(0, 1), 1, 65535)
+		if t.lastc != 0 {
+			for rep > 0 {
+				t.tputc(t.lastc)
+				rep--
+			}
+		}
+	case 'C', 'a':
+		t.tmoveto(t.c.x+get(0, 1), t.c.y)
+	case 'D':
+		t.tmoveto(t.c.x-get(0, 1), t.c.y)
+	case 'E':
+		t.tmoveto(0, t.c.y+get(0, 1))
+	case 'F':
+		t.tmoveto(0, t.c.y-get(0, 1))
+	case 'g':
+		switch get(0, 0) {
+		case 0:
+			t.tabs[t.c.x] = false
+		case 3:
+			for i := range t.tabs {
+				t.tabs[i] = false
+			}
+		default:
+			unknown()
+		}
+	case 'G', '`':
+		t.tmoveto(get(0, 1)-1, t.c.y)
+	case 'H', 'f':
+		t.tmoveato(get(1, 1)-1, get(0, 1)-1)
+	case 'I':
+		t.tputtab(get(0, 1))
+	case 'J':
+		switch get(0, 0) {
+		case 0:
+			t.tclearregion(t.c.x, t.c.y, t.col-1, t.c.y)
+			if t.c.y < t.row-1 {
+				t.tclearregion(0, t.c.y+1, t.col-1, t.row-1)
+			}
+		case 1:
+			if t.c.y > 1 {
+				t.tclearregion(0, 0, t.col-1, t.c.y-1)
+			}
+			t.tclearregion(0, t.c.y, t.c.x, t.c.y)
+		case 2:
+			t.tclearregion(0, 0, t.col-1, t.row-1)
+		default:
+			unknown()
+		}
+	case 'K':
+		switch get(0, 0) {
+		case 0:
+			t.tclearregion(t.c.x, t.c.y, t.col-1, t.c.y)
+		case 1:
+			t.tclearregion(0, t.c.y, t.c.x, t.c.y)
+		case 2:
+			t.tclearregion(0, t.c.y, t.col-1, t.c.y)
+		}
+	case 'S':
+		if t.csiescseq.priv {
+			break
+		}
+		t.tscrollup(t.top, get(0, 1))
+	case 'T':
+		t.tscrolldown(t.top, get(0, 1))
+	case 'L':
+		t.tinsertblankline(get(0, 1))
+	case 'l':
+		t.tsetmode(t.csiescseq.priv, false, arg[:narg], narg)
+	case 'M':
+		t.tdeleteline(get(0, 1))
+	case 'X':
+		t.tclearregion(t.c.x, t.c.y, t.c.x+get(0, 1)-1, t.c.y)
+	case 'P':
+		t.tdeletechar(get(0, 1))
+	case 'Z':
+		t.tputtab(-get(0, 1))
+	case 'd':
+		t.tmoveato(t.c.x, get(0, 1)-1)
+	case 'h':
+		t.tsetmode(t.csiescseq.priv, true, arg[:narg], narg)
+	case 'm':
+		t.tsetattr(arg[:narg], narg)
+	case 'n':
+		switch get(0, 0) {
+		case 5:
+			t.ttywrite([]byte("\x1b[0n"), false)
+		case 6:
+			s := fmt.Sprintf("\x1b[%d;%dR", t.c.y+1, t.c.x+1)
+			t.ttywrite([]byte(s), false)
+		default:
+			unknown()
+		}
+	case 'r':
+		if t.csiescseq.priv {
+			unknown()
+		} else {
+			t.tsetscroll(get(0, 1)-1, get(1, t.row)-1)
+			t.tmoveato(0, 0)
+		}
+	case 's':
+		t.tcursor(cursorSave)
+	case 'u':
+		t.tcursor(cursorLoad)
+	case ' ':
+		if t.csiescseq.mode[1] == 'q' {
+			if t.xsetcursor(get(0, 0)) {
+				unknown()
+			}
+		} else {
+			unknown()
+		}
+	}
+}
+
+func (t *Term) csidump() {
+	log.Printf("ESC[%s\n", string(t.csiescseq.buf))
+}
+
+func (t *Term) oscColorResponse(num, index int, isOsc4 bool) {
+	r, g, b, ok := t.xgetcolor(index)
+	if !ok {
+		name := "osc"
+		if isOsc4 {
+			name = "osc4"
+		}
+		n := index
+		if isOsc4 {
+			n = num
+		}
+		log.Printf("erresc: failed to fetch %s color %d\n", name, n)
+		return
+	}
+	prefix := ""
+	if isOsc4 {
+		prefix = "4;"
+	}
+	s := fmt.Sprintf("\x1b]%s%d;rgb:%02x%02x/%02x%02x/%02x%02x\x07",
+		prefix, num, r, r, g, g, b, b)
+	t.ttywrite([]byte(s), true)
+}
+
+func (t *Term) strhandle() {
+	t.esc &^= escStrEnd | escSTR
+	if t.strescseq.discard {
+		return
+	}
+	t.strparse()
+	par := 0
+	if t.strescseq.narg > 0 {
+		par, _ = strconv.Atoi(t.strescseq.args[0])
+	}
+
+	oscTable := []struct {
+		idx uint
+		str string
+	}{
+		{t.cfg.DefaultFg, "foreground"},
+		{t.cfg.DefaultBg, "background"},
+		{t.cfg.DefaultCs, "cursor"},
+	}
+
+	switch t.strescseq.typ {
+	case ']':
+		switch par {
+		case 0:
+			if t.strescseq.narg > 1 {
+				t.xsettitle(t.strescseq.args[1])
+				t.xseticontitle(t.strescseq.args[1])
+			}
+			return
+		case 1:
+			if t.strescseq.narg > 1 {
+				t.xseticontitle(t.strescseq.args[1])
+			}
+			return
+		case 2:
+			if t.strescseq.narg > 1 {
+				t.xsettitle(t.strescseq.args[1])
+			}
+			return
+		case 52:
+			t.oscClipboard()
+			return
+		case 10, 11, 12:
+			if t.strescseq.narg < 2 {
+				break
+			}
+			p := t.strescseq.args[1]
+			j := par - 10
+			if j < 0 || j >= len(oscTable) {
+				break
+			}
+			if p == "?" {
+				t.oscColorResponse(par, int(oscTable[j].idx), false)
+			} else if !t.xsetcolorname(int(oscTable[j].idx), p) {
+				t.tfulldirt()
+			} else {
+				log.Printf("erresc: invalid %s color: %s\n", oscTable[j].str, p)
+			}
+			return
+		case 4:
+			if t.strescseq.narg < 3 {
+				break
+			}
+			p := t.strescseq.args[2]
+			j := -1
+			if t.strescseq.narg > 1 {
+				j, _ = strconv.Atoi(t.strescseq.args[1])
+			}
+			if p == "?" {
+				t.oscColorResponse(j, 0, true)
+			} else if !t.xsetcolorname(j, p) {
+				t.tfulldirt()
+			} else {
+				log.Printf("erresc: invalid color j=%d, p=%s\n", j, p)
+			}
+			return
+		case 104:
+			j := -1
+			if t.strescseq.narg > 1 {
+				j, _ = strconv.Atoi(t.strescseq.args[1])
+			}
+			if t.strescseq.narg <= 1 {
+				t.xloadcols()
+				return
+			}
+			if !t.xsetcolorname(j, "") {
+				t.tfulldirt()
+			} else {
+				log.Printf("erresc: invalid color j=%d\n", j)
+			}
+			return
+		}
+	case 'k':
+		if t.strescseq.narg > 0 {
+			t.xsettitle(t.strescseq.args[0])
+		}
+		return
+	case '_', '^':
+		// APC / PM: ignored
+		return
+	case 'P':
+		// DCS: image/display DSL (device control string)
+		t.dcs()
+		return
+	}
+	log.Printf("erresc: unknown str ")
+	t.strdump()
+}
+
+func (t *Term) strparse() {
+	t.strescseq.narg = 0
+	t.strescseq.args = t.strescseq.args[:0]
+	if len(t.strescseq.buf) == 0 {
+		return
+	}
+	parts := splitStr(t.strescseq.buf, ';')
+	for _, p := range parts {
+		if t.strescseq.narg == strArgSiz {
+			break
+		}
+		t.strescseq.args = append(t.strescseq.args, p)
+		t.strescseq.narg++
+	}
+}
+
+// dcs handles a DCS (device control string) payload as a small display DSL.
+//
+//	ESC P <statement>; <statement>; ... ESC \
+//
+// Each statement is `command args...`; a statement ends with ';'. Quoted
+// strings ('...' or "...") keep spaces inside a single argument. Unknown
+// commands are ignored, so the DSL is forward-extensible.
+//
+// Supported commands:
+//
+//	open '<path>' [col row]   load and display an image file at the cursor
+//	                          (or at an explicit cell position)
+//	clear                     remove all images and placements
+//	delete <id>               remove one transmitted image
+func (t *Term) dcs() {
+	stmt := string(t.strescseq.buf)
+	// split into statements on ';'
+	for len(stmt) > 0 {
+		i := dslStatementEnd(stmt)
+		var one string
+		if i < 0 {
+			one = stmt
+			stmt = ""
+		} else {
+			one = stmt[:i]
+			stmt = stmt[i+1:]
+		}
+		one = strings.TrimSpace(one)
+		if one == "" {
+			continue
+		}
+		args := dslTokenize(one)
+		if len(args) == 0 {
+			continue
+		}
+		switch args[0] {
+		case "open":
+			t.dslOpen(args[1:])
+		case "setpwd":
+			t.dslSetPwd(args[1:])
+		case "clear":
+			t.dslClear()
+		case "delete":
+			t.dslDelete(args[1:])
+		case "window":
+			t.dslWindow(args[1:])
+		case "region":
+			if err := t.dslRegion(args[1:]); err != nil {
+				log.Printf("dsl: region: %v", err)
+			}
+		case "pdfsearch":
+			if err := t.dslPDFSearch(args[1:]); err != nil {
+				log.Printf("dsl: pdfsearch: %v", err)
+			}
+		default:
+			log.Printf("dsl: unknown command %q\n", args[0])
+		}
+	}
+}
+
+// dslSetPwd records the shell's current working directory so relative image
+// paths in subsequent "open" commands resolve against it (the terminal has
+// no idea what the shell's PWD is). A leading "~" is expanded to $HOME.
+func (t *Term) dslSetPwd(args []string) {
+	if len(args) == 0 {
+		return
+	}
+	p := args[0]
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			if p == "~" {
+				p = home
+			} else {
+				p = home + p[1:]
+			}
+		}
+	}
+	t.pwd = p
+}
+
+// resolveImagePath resolves a path from an "open" command against the pwd set
+// by "setpwd" (falling back to the terminal's own CWD). Handles "~", relative,
+// absolute and glob (wildcard) paths.
+func (t *Term) resolveImagePath(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			if p == "~" {
+				return home
+			}
+			return home + p[1:]
+		}
+	}
+	if !filepath.IsAbs(p) {
+		base := t.pwd
+		if base == "" {
+			if wd, err := os.Getwd(); err == nil {
+				base = wd
+			} else {
+				base = "."
+			}
+		}
+		p = filepath.Join(base, p)
+	}
+	// expand a wildcard if present (like the shell would have done): use the
+	// first match so the DSL accepts a glob path even when passed literally.
+	if strings.ContainsAny(p, "*?[") {
+		if matches, err := filepath.Glob(p); err == nil && len(matches) > 0 {
+			return matches[0]
+		}
+	}
+	return p
+}
+
+// dslOpen loads an image file and displays it. Options (in any order after
+// the path):
+//
+//	fit-width     scale the image to the terminal width
+//	fit-height    clear the screen, then scale to the terminal height
+//
+// Without a fit option the image is shown at its native cell size.
+// The image is written row by row at the cursor, advancing the cursor (and
+// scrolling at the bottom) exactly like text.
+func (t *Term) dslOpen(args []string) {
+	if len(args) == 0 {
+		log.Printf("dsl: open requires a path\n")
+		return
+	}
+	path := t.resolveImagePath(args[0])
+	opts := ImageDecodeOptions{}
+	rectSet := false
+	rx, ry, rw, rh := 0, 0, 0, 0
+	for i := 0; i < len(args[1:]); i++ {
+		a := args[1+i]
+		switch a {
+		case "fit-width":
+			opts.FitWidth = true
+		case "fit-height":
+			opts.FitHeight = true
+		case "fit-contain":
+			opts.FitContain = true
+		case "anim":
+			opts.Animate = true
+		case "pdfsearch":
+			if i+2 >= len(args[1:]) {
+				log.Printf("dsl: pdfsearch requires TOKEN MATCH")
+				return
+			}
+			token, e1 := strconv.Atoi(args[1+i+1])
+			match, e2 := strconv.Atoi(args[1+i+2])
+			if e1 != nil || e2 != nil || token < 1 || token > 1<<30 || match < 0 || match > limits.PreviewSearchMatches {
+				log.Printf("dsl: invalid PDF search paint options")
+				return
+			}
+			opts.SearchToken, opts.SearchMatch = token, match
+			i += 2
+		case "page":
+			// page N (1-based)
+			if i+1 < len(args[1:]) {
+				if n, err := strconv.Atoi(args[1+i+1]); err == nil && n > 0 {
+					opts.Page = n - 1
+					i++
+				}
+			}
+		case "rect":
+			if i+4 >= len(args[1:]) {
+				log.Printf("dsl: rect requires X Y W H\n")
+				return
+			}
+			values := []*int{&rx, &ry, &rw, &rh}
+			for j := range values {
+				n, err := strconv.Atoi(args[1+i+1+j])
+				if err != nil || n < 1 {
+					log.Printf("dsl: invalid rect value %q\n", args[1+i+1+j])
+					return
+				}
+				*values[j] = n
+			}
+			rectSet = true
+			i += 4
+		}
+	}
+	if rectSet {
+		rx--
+		ry--
+		if rx >= t.col || ry >= t.row {
+			return
+		}
+		if rw > t.col-rx {
+			rw = t.col - rx
+		}
+		if rh > t.row-ry {
+			rh = t.row - ry
+		}
+		opts.ViewCols, opts.ViewRows = rw, rh
+	}
+
+	data, err := limits.ReadFile(path)
+	if err != nil {
+		log.Printf("dsl: open %q: %v\n", path, err)
+		return
+	}
+	// Plain text files are rendered as text rows (from the cursor down),
+	// stopping when the last screen row is reached. A file browser can show a
+	// file tree on one side and a text preview on the other. Only the bytes
+	// that can fit on the visible rows are read/rendered (each row up to the
+	// column width; x4 headroom for UTF-8 + newlines + the truncation scan).
+	if t.looksLikeText(data) {
+		availRows := t.row - t.c.y
+		availCols := t.col - t.c.x
+		if rectSet {
+			availRows, availCols = rh, rw
+		}
+		if availRows < 1 {
+			availRows = 1
+		}
+		if availCols < 1 {
+			availCols = 1
+		}
+		need := availRows * availCols * 4
+		if need < 4096 {
+			need = 4096
+		}
+		if len(data) > need {
+			data = data[:need]
+		}
+		if rectSet {
+			t.tclearregion(rx, ry, rx+rw-1, ry+rh-1)
+			t.dslOpenTextBounds(data, rx, ry, rx+rw, ry+rh, false)
+		} else {
+			t.dslOpenText(data)
+		}
+		return
+	}
+	// Animated WebP via the open DSL `anim` option: play all frames in the
+	// rect (bottom row reserved for the terminal-drawn progress line).
+	if opts.Animate && rectSet {
+		animOpts := opts
+		animOpts.ViewRows = rh - 1 // bottom row of the rect shows progress
+		if animOpts.ViewRows < 1 {
+			animOpts.ViewRows = 1
+		}
+		if durations, frameCount, acols, arows, aok := t.hooks.ImageDecodeAnim(data, animOpts); aok && frameCount > 0 {
+			t.SetAnim(data, animOpts, durations, acols, arows, rx, ry, rw, rh)
+			return
+		}
+	}
+	cols, rows, glyphs, ok := t.hooks.ImageDecode(data, opts)
+	if !ok {
+		log.Printf("dsl: failed to decode %q\n", path)
+		return
+	}
+	if cols < 1 {
+		cols = 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+
+	if rectSet {
+		// one placement = one atomic paint batch = one flush for the whole
+		// rect (synchronized update around the placement).
+		t.PaintStop()
+		t.tclearregion(rx, ry, rx+rw-1, ry+rh-1)
+		startX := rx + max(0, (rw-min(cols, rw))/2)
+		startY := ry + max(0, (rh-min(rows, rh))/2)
+		for gy := 0; gy < rows && gy < rh; gy++ {
+			for gx := 0; gx < cols && gx < rw; gx++ {
+				x, y := startX+gx, startY+gy
+				idx := gy*cols + gx
+				if x >= rx+rw || y >= ry+rh || idx >= len(glyphs) {
+					break
+				}
+				t.tsetchar(glyphs[idx].U, &glyphs[idx], x, y)
+			}
+		}
+		t.PaintResume()
+		return
+	}
+
+	// Legacy cursor-stream placement: batch the whole image as one paint.
+	t.PaintStop()
+
+	// Legacy fit-height clears the screen and starts at the top.
+	if opts.FitHeight {
+		t.tclearregion(0, 0, t.col-1, t.row-1)
+		t.tmoveto(0, 0)
+	}
+
+	// write each row of the image at the cursor, advancing like text
+	startX := t.c.x
+	for gy := 0; gy < rows; gy++ {
+		for gx := 0; gx < cols; gx++ {
+			if t.c.x+gx >= t.col {
+				break
+			}
+			// image-cell glyph: plain value with U=ImageRune and the cell's
+			// pixel-block address packed in Fg
+			idx := gy*cols + gx
+			if idx >= len(glyphs) {
+				break
+			}
+			t.tsetchar(glyphs[idx].U, &glyphs[idx], t.c.x+gx, t.c.y)
+		}
+		// advance to the next row, scrolling at the bottom like a newline;
+		// skip the advance after the final row so the last row stays put
+		if gy == rows-1 {
+			break
+		}
+		if t.c.y == t.bot {
+			t.tscrollup(t.top, 1)
+		} else {
+			t.tmoveto(startX, t.c.y+1)
+		}
+	}
+	// leave the cursor at the start of the image's last row
+	t.tmoveto(startX, t.c.y)
+	t.PaintResume()
+}
+
+// looksLikeText reports whether the bytes are plain text (rather than an
+// image or PDF): the first non-whitespace byte is printable ASCII/UTF-8, and
+// the buffer is not a binary-heavy stream. Images/PDFs are sniffed by magic.
+func (t *Term) looksLikeText(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	// image/PDF magic bytes (stb_image/webp/poppler would handle them)
+	if data[0] == 0x89 && len(data) > 3 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' {
+		return false
+	}
+	if len(data) >= 4 && data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F' {
+		return false
+	}
+	if len(data) >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+		data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P' {
+		return false
+	}
+	if data[0] == 0xFF && len(data) > 1 && data[1] == 0xD8 { // JPEG
+		return false
+	}
+	if data[0] == 'G' && len(data) > 3 && data[1] == 'I' && data[2] == 'F' && data[3] == '8' { // GIF
+		return false
+	}
+	if data[0] == 'B' && len(data) > 1 && data[1] == 'M' { // BMP
+		return false
+	}
+	// reject NUL-heavy or high-bit-random buffers
+	nul := 0
+	nonprint := 0
+	for i := 0; i < len(data) && i < 4096; i++ {
+		if data[i] == 0 {
+			nul++
+		} else if data[i] < 0x07 || (data[i] > 0x0d && data[i] < 0x20) {
+			nonprint++
+		}
+	}
+	return nul < 4 && nonprint < 64
+}
+
+// dslOpenText renders a text file into the screen starting at the cursor,
+// row by row, stopping when the last screen row is reached (it does NOT
+// scroll). Lines longer than the visible width are truncated (the rest of the
+// line is dropped, not wrapped). Used by the mini file browser preview.
+func (t *Term) dslOpenText(data []byte) {
+	t.dslOpenTextBounds(data, t.c.x, t.c.y, t.col, t.row, true)
+}
+
+func (t *Term) dslOpenTextBounds(data []byte, startX, startY, rowEnd, rowLimit int, moveCursor bool) {
+	saved := t.c
+	y := startY
+	// default text attribute: current cursor fg/bg, no decorations
+	attr := t.c.attr
+	col := startX
+	truncLine := false
+	render := func(u rune) bool {
+		if truncLine {
+			return false
+		}
+		if col >= rowEnd {
+			truncLine = true // drop the rest of this file line (no wrap)
+			return false
+		}
+		t.tsetchar(u, &attr, col, y)
+		col++
+		return true
+	}
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		if truncLine {
+			// skip to the next newline (line was truncated at the edge)
+			if c == '\n' {
+				truncLine = false
+				if y == rowLimit-1 {
+					break
+				}
+				y++
+				col = startX
+			}
+			continue
+		}
+		switch c {
+		case '\n':
+			if y == rowLimit-1 {
+				truncLine = false
+				goto done // stop at the last row
+			}
+			col = startX
+			y++
+		case '\r':
+			col = startX
+		case '\t':
+			next := col + t.tabspaces() - (col % t.tabspaces())
+			if next > rowEnd {
+				next = rowEnd
+			}
+			for col < next {
+				if !render(' ') {
+					break
+				}
+			}
+		default:
+			if c >= 0x20 && c < 0x7f {
+				render(rune(c))
+			}
+			// other control bytes are ignored
+		}
+	}
+done:
+	if moveCursor {
+		t.tmoveto(col, y)
+	} else {
+		t.c = saved
+	}
+	t.tfulldirt()
+}
+
+// tabspaces returns the configured tab width (>=1).
+func (t *Term) tabspaces() int {
+	if t.cfg == nil {
+		return 8
+	}
+	if t.cfg.Tabspaces < 1 || t.cfg.Tabspaces > limits.MaxBytes {
+		limits.Report("tab spacing", "invalid value %d; using 8", t.cfg.Tabspaces)
+		return 8
+	}
+	return int(t.cfg.Tabspaces)
+}
+
+func (t *Term) dslClear() {
+	// clear the visible screen and drop all cached images
+	t.tclearregion(0, 0, t.col-1, t.row-1)
+	if t.hooks != nil {
+		t.hooks.ImageClearAll()
+	}
+	t.tfulldirt()
+}
+
+func (t *Term) dslDelete(args []string) {
+	// images are broken into glyphs and not retained by id; deleting clears
+	// the screen and atlas
+	t.dslClear()
+}
+
+func (t *Term) dslWindow(args []string) {
+	if t.hooks == nil || t.cfg == nil || !t.cfg.AllowGeometryOps || len(args) < 2 {
+		return
+	}
+	if t.cfg.GeometryToken != "" {
+		if len(args) < 4 || args[0] != "auth" || args[1] != t.cfg.GeometryToken {
+			return
+		}
+		args = args[2:]
+	}
+	action, tag := args[0], args[1]
+	if action != "place" && !validGeometryTag(tag) {
+		log.Printf("dsl: invalid window geometry tag %q\n", tag)
+		return
+	}
+	switch action {
+	case "remember":
+		t.hooks.WindowGeometry(WindowGeometryRequest{Action: GeometryRemember, Tag: tag})
+	case "restore":
+		t.hooks.WindowGeometry(WindowGeometryRequest{Action: GeometryRestore, Tag: tag})
+	case "forget":
+		t.hooks.WindowGeometry(WindowGeometryRequest{Action: GeometryForget, Tag: tag})
+	case "place":
+		if len(args) < 6 || !validGeometryAnchor(tag) {
+			log.Printf("dsl: window place requires ANCHOR X Y W H\n")
+			return
+		}
+		values := make([]GeometryValue, 4)
+		for i := range values {
+			v, ok := parseGeometryValue(args[i+2])
+			if !ok {
+				log.Printf("dsl: invalid geometry value %q\n", args[i+2])
+				return
+			}
+			values[i] = v
+		}
+		if values[2].Value <= 0 || values[3].Value <= 0 ||
+			(values[2].Unit == GeometryRatio && values[2].Value > 1) ||
+			(values[3].Unit == GeometryRatio && values[3].Value > 1) {
+			log.Printf("dsl: window size must be positive and ratios at most 1\n")
+			return
+		}
+		req := WindowGeometryRequest{
+			Action: GeometryPlace, Anchor: tag,
+			X: values[0], Y: values[1], W: values[2], H: values[3],
+		}
+		if len(args) > 6 {
+			if len(args) != 8 || args[6] != "restore" || !validGeometryTag(args[7]) {
+				log.Printf("dsl: window place suffix must be restore TAG\n")
+				return
+			}
+			req.RestoreTag = args[7]
+		}
+		t.hooks.WindowGeometry(req)
+	}
+}
+
+func parseGeometryValue(s string) (GeometryValue, bool) {
+	unit := GeometryPixels
+	number := s
+	switch {
+	case strings.HasSuffix(s, "px"):
+		number = strings.TrimSuffix(s, "px")
+	case strings.HasSuffix(s, "r"):
+		unit = GeometryRatio
+		number = strings.TrimSuffix(s, "r")
+	case strings.HasSuffix(s, "%"):
+		unit = GeometryRatio
+		number = strings.TrimSuffix(s, "%")
+	default:
+		return GeometryValue{}, false
+	}
+	v, err := strconv.ParseFloat(number, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+		return GeometryValue{}, false
+	}
+	if strings.HasSuffix(s, "%") {
+		v /= 100
+	}
+	return GeometryValue{Unit: unit, Value: v}, true
+}
+
+func validGeometryTag(s string) bool {
+	if len(s) < 1 || len(s) > 64 {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
+			(r < '0' || r > '9') && r != '_' && r != '-' && r != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func validGeometryAnchor(s string) bool {
+	switch s {
+	case "absolute", "top-left", "top", "top-right", "right",
+		"bottom-right", "bottom", "bottom-left", "left":
+		return true
+	}
+	return false
+}
+
+// imageCellGlyph returns a plain image-cell glyph whose Fg packs the address
+// of the cell's pixel block in the frontend atlas.
+
+// dslStatementEnd finds the next separator outside quoted arguments.
+func dslStatementEnd(s string) int {
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		switch {
+		case quote != 0:
+			if s[i] == quote {
+				quote = 0
+			}
+		case s[i] == '\'' || s[i] == '"':
+			quote = s[i]
+		case s[i] == ';':
+			return i
+		}
+	}
+	return -1
+}
+
+// dslTokenize splits a statement into arguments, honoring single- and
+// double-quoted strings and skipping runs of whitespace.
+func dslTokenize(s string) []string {
+	var out []string
+	var cur strings.Builder
+	quote := byte(0)
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			} else {
+				cur.WriteByte(c)
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == ' ' || c == '\t':
+			flush()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
+	return out
+}
+
+func indexByteStr(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+func splitStr(b []byte, sep byte) []string {
+	var out []string
+	start := 0
+	for i, c := range b {
+		if c == sep {
+			out = append(out, string(b[start:i]))
+			start = i + 1
+		}
+	}
+	out = append(out, string(b[start:]))
+	return out
+}
+
+func (t *Term) strdump() {
+	log.Printf("ESC%c%s ESC\\\n", t.strescseq.typ, string(t.strescseq.buf))
+}
+
+func (t *Term) strreset() {
+	t.strescseq.discard = false
+	if t.strescseq.buf == nil {
+		t.strescseq.siz = strBufSiz
+		t.strescseq.buf = make([]byte, 0, strBufSiz)
+	} else {
+		t.strescseq.buf = t.strescseq.buf[:0]
+	}
+	t.strescseq.len = 0
+}
+
+func (t *Term) tcontrolcode(ascii rune) {
+	switch ascii {
+	case '\t':
+		t.tputtab(1)
+		return
+	case '\b':
+		t.tmoveto(t.c.x-1, t.c.y)
+		return
+	case '\r':
+		t.tmoveto(0, t.c.y)
+		return
+	case '\f', '\v', '\n':
+		t.tnewline(t.isSet(termModeCRLF))
+		return
+	case '\a':
+		if t.esc&escStrEnd != 0 {
+			t.strhandle()
+		} else {
+			t.xbell()
+		}
+	case '\033':
+		t.csiescseq = CSIEscape{}
+		t.esc &^= escCSI | escAltCharset | escTest
+		t.esc |= escStart
+		return
+	case '\016', '\017':
+		t.charset = 1 - int(ascii-'\016')
+		return
+	case '\032':
+		t.tsetchar('?', &t.c.attr, t.c.x, t.c.y)
+		fallthrough
+	case '\030':
+		t.csiescseq = CSIEscape{}
+	case '\005', '\000', '\021', '\023', 0177:
+		return
+	case 0x85:
+		t.tnewline(true)
+	case 0x88:
+		t.tabs[t.c.x] = true
+	case 0x9a:
+		t.ttywrite([]byte(t.cfg.Vtiden), false)
+	case 0x90, 0x9d, 0x9e, 0x9f:
+		t.tstrsequence(byte(ascii))
+		return
+	}
+	t.esc &^= escStrEnd | escSTR
+}
+
+func (t *Term) eschandle(ascii rune) bool {
+	switch ascii {
+	case '[':
+		t.esc |= escCSI
+		return false
+	case '#':
+		t.esc |= escTest
+		return false
+	case '%':
+		t.esc |= escUTF8
+		return false
+	case 'P', '_', '^', ']', 'k':
+		t.tstrsequence(byte(ascii))
+		return false
+	case 'n', 'o':
+		t.charset = 2 + int(ascii-'n')
+	case '(', ')', '*', '+':
+		t.icharset = int(ascii) - '('
+		t.esc |= escAltCharset
+		return false
+	case 'D':
+		if t.c.y == t.bot {
+			t.tscrollup(t.top, 1)
+		} else {
+			t.tmoveto(t.c.x, t.c.y+1)
+		}
+	case 'E':
+		t.tnewline(true)
+	case 'H':
+		t.tabs[t.c.x] = true
+	case 'M':
+		if t.c.y == t.top {
+			t.tscrolldown(t.top, 1)
+		} else {
+			t.tmoveto(t.c.x, t.c.y-1)
+		}
+	case 'Z':
+		t.ttywrite([]byte(t.cfg.Vtiden), false)
+	case 'c':
+		t.treset()
+		t.ResetTitle()
+		t.xloadcols()
+		t.setWinMode(false, ModeHide)
+	case '=':
+		t.setWinMode(true, ModeAppKeypad)
+	case '>':
+		t.setWinMode(false, ModeAppKeypad)
+	case '7':
+		t.tcursor(cursorSave)
+	case '8':
+		t.tcursor(cursorLoad)
+	case '\\':
+		if t.esc&escStrEnd != 0 {
+			t.strhandle()
+		}
+	default:
+		log.Printf("erresc: unknown sequence ESC 0x%02X '%c'\n", ascii, ascii)
+	}
+	return true
+}
+
+func (t *Term) tputc(u rune) {
+	var c []byte
+	control := t.isControl(u)
+	var width, len_ int
+	if u < 127 || !t.isSet(termModeUTF8) {
+		c = []byte{byte(u)}
+		width, len_ = 1, 1
+	} else {
+		c = utf8encode(u)
+		len_ = len(c)
+		width = runeWidth(u)
+		if width == -1 {
+			width = 1
+		}
+	}
+
+	if t.isSet(termModePrint) {
+		t.printer(c)
+	}
+
+	if t.esc&escSTR != 0 {
+		if u == '\a' || u == 030 || u == 032 || u == 033 || t.isControlC1(u) {
+			t.esc &^= escStart | escSTR
+			t.esc |= escStrEnd
+			goto checkControlCode
+		}
+		if t.strescseq.discard {
+			return
+		}
+		maximum := limits.ControlBytes
+		if t.strescseq.typ == ']' && len(t.strescseq.buf) >= 3 && string(t.strescseq.buf[:3]) == "52;" {
+			maximum = maxClipboardControl
+		}
+		if !limits.Check("control string", int64(len(t.strescseq.buf)+len_), maximum) {
+			t.strescseq.discard = true
+			t.strescseq.buf = nil
+			t.strescseq.args = nil
+			t.strescseq.len = 0
+			return
+		}
+		t.strescseq.buf = append(t.strescseq.buf, c...)
+		t.strescseq.len += len_
+		return
+	}
+
+checkControlCode:
+	if control {
+		if t.isSet(termModeUTF8) && t.isControlC1(u) {
+			return
+		}
+		t.tcontrolcode(u)
+		if t.esc == 0 {
+			t.lastc = 0
+		}
+		return
+	} else if t.esc&escStart != 0 {
+		if t.esc&escCSI != 0 {
+			t.csiescseq.buf = append(t.csiescseq.buf, byte(u))
+			t.csiescseq.len++
+			if between(int(u), 0x40, 0x7E) || t.csiescseq.len >= escBufSiz-1 {
+				t.esc = 0
+				t.csiparse()
+				t.csihandle()
+			}
+			return
+		} else if t.esc&escUTF8 != 0 {
+			t.tdefutf8(u)
+		} else if t.esc&escAltCharset != 0 {
+			t.tdeftran(u)
+		} else if t.esc&escTest != 0 {
+			t.tdectest(u)
+		} else {
+			if !t.eschandle(u) {
+				return
+			}
+		}
+		t.esc = 0
+		return
+	}
+	if t.selected(t.c.x, t.c.y) {
+		t.selclear()
+	}
+
+	gp := &t.line[t.c.y][t.c.x]
+	if t.isSet(termModeWrap) && t.c.state&cursorWrapNext != 0 {
+		gp.Mode |= ATTRWrap
+		t.tnewline(true)
+		gp = &t.line[t.c.y][t.c.x]
+	}
+
+	if t.isSet(termModeInsert) && t.c.x+width < t.col {
+		line := t.line[t.c.y]
+		copy(line[t.c.x+width:], line[t.c.x:])
+		line[t.c.x].Mode &^= ATTRWide
+	}
+
+	if t.c.x+width > t.col {
+		if t.isSet(termModeWrap) {
+			t.tnewline(true)
+		} else {
+			t.tmoveto(t.col-width, t.c.y)
+		}
+		gp = &t.line[t.c.y][t.c.x]
+	}
+
+	t.tsetchar(u, &t.c.attr, t.c.x, t.c.y)
+	t.lastc = u
+
+	if width == 2 {
+		gp.Mode |= ATTRWide
+		if t.c.x+1 < t.col {
+			if t.line[t.c.y][t.c.x+1].Mode == ATTRWide && t.c.x+2 < t.col {
+				t.line[t.c.y][t.c.x+2].U = ' '
+				t.line[t.c.y][t.c.x+2].Mode &^= ATTRWdummy
+			}
+			t.line[t.c.y][t.c.x+1].U = '\x00'
+			t.line[t.c.y][t.c.x+1].Mode = ATTRWdummy
+		}
+	}
+	if t.c.x+width < t.col {
+		t.tmoveto(t.c.x+width, t.c.y)
+	} else {
+		t.c.state |= cursorWrapNext
+	}
+}
+
+// Twrite processes a buffer of bytes; returns count processed.
+func (t *Term) Twrite(buf []byte, showCtrl bool) int {
+	n := 0
+	for n < len(buf) {
+		var u rune
+		var charsize int
+		if t.isSet(termModeUTF8) {
+			u, charsize = utf8decode(buf[n:], len(buf)-n)
+			if charsize == 0 {
+				break
+			}
+		} else {
+			u = rune(buf[n] & 0xFF)
+			charsize = 1
+		}
+		if showCtrl && t.isControl(u) {
+			if u&0x80 != 0 {
+				u &^= 0x80
+				t.tputc('^')
+				t.tputc('[')
+			} else if u != '\n' && u != '\r' && u != '\t' {
+				u ^= 0x40
+				t.tputc('^')
+			}
+		}
+		t.tputc(u)
+		n += charsize
+	}
+	return n
+}
+
+func (t *Term) ResetTitle() { t.xsettitle("") }
+
+// SetWriter sets the function used to send bytes to the pty.
+func (t *Term) SetWriter(w func([]byte)) { t.writer = w }
+
+func (t *Term) ttywrite(s []byte, mayEcho bool) {
+	next := 0
+	if mayEcho && t.isSet(termModeEcho) {
+		t.Twrite(s, true)
+	}
+	if !t.isSet(termModeCRLF) {
+		t.writeRaw(s)
+		return
+	}
+	for len(s) > 0 {
+		if s[0] == '\r' {
+			t.writeRaw([]byte("\r\n"))
+			next = 1
+		} else {
+			nx := len(s)
+			for i, b := range s {
+				if b == '\r' {
+					nx = i
+					break
+				}
+			}
+			t.writeRaw(s[:nx])
+			next = nx
+		}
+		s = s[next:]
+	}
+}
+
+func (t *Term) writeRaw(s []byte) {
+	if t.writer != nil {
+		t.writer(s)
+	}
+}
+
+// WriteToTTY sends user input to the pty.
+func (t *Term) WriteToTTY(s []byte, mayEcho bool) { t.ttywrite(s, mayEcho) }

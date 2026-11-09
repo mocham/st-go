@@ -4,6 +4,13 @@ Design choices, traps and pitfalls encountered while porting suckless `st` to Go
 (`github.com/BurntSushi/xgb` + CGO FreeType2/poppler). Read this before touching
 the X code or the terminal core.
 
+**Source relocation:** terminal-engine references below now live under
+`platform_neutral/stterminal/` (`term/` is a compatibility shim). Shared former
+root files live under `platform_neutral/frontend/`; native X operations live
+under `platform_dependent/x11/`. See the [split notes](platform_neutral/README.md).
+The historical behavior notes still apply. `make test` remains the full suite;
+frontend-only test commands should target `./platform_neutral/frontend`.
+
 ---
 
 ## 1. xgb library traps

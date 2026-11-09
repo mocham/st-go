@@ -62,14 +62,15 @@ SEMHTML_SRC = $(wildcard semhtml/*.go)
 TUI_NAV_SRC = $(wildcard tui/navigation/*.go)
 TUI_SEARCH_SRC = $(wildcard tui/textsearch/*.go)
 TUI_READLINE_SRC = $(wildcard tui/readline/*.go)
+STTERMINAL_SRC = $(wildcard term/*.go platform_neutral/stterminal/*.go)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
 GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) $(wildcard pdfmeta/*.go) $(wildcard limits/*.go)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) $(wildcard pdfmeta/*.go) \
-	       $(wildcard term/*.go) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
-GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* tui/imap/*.go tui/preview/*.go tui/outline/*.go term/*.go config/*.go config/*.json) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard limits/*.go) go.mod go.sum
+	       $(STTERMINAL_SRC) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
+GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* tui/imap/*.go tui/preview/*.go tui/outline/*.go config/*.go config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard limits/*.go) go.mod go.sum
 
 # Google Pinyin decoder only: no SCIM, GTK, X11 or installed IM framework.
 PINYIN_REV = 0b9407ef8e4e5fbf74d5ff4e42ea20025a1483fc
@@ -402,7 +403,8 @@ WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:lib
 # --gc-sections drops unreferenced functions from function-sections objects.
 GC_EXTRA   = -Wl,--gc-sections
 
-GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
+PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go)
+GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) $(PLATFORM_SRC) \
 	  $(wildcard pdfmeta/*.go) \
 	  $(wildcard limits/*.go) \
           $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard terminfo/*.go) \
@@ -499,14 +501,14 @@ test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) 
 # timer and X framebuffer. Point DISPLAY at an isolated X server.
 test-webp-x11: st file-browser
 	ST_TEST_WEBP_X11=1 ST_TEST_BINARY=./$(BIN) ST_TEST_FILE_BROWSER=./$(FILE_BROWSER) \
-	go test -tags '$(FULL_GO_TAGS)' . -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' \
+	go test -tags '$(FULL_GO_TAGS)' ./platform_neutral/frontend -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' \
 		-run '^TestWebPAnimationX11FileBrowserPlayback$$' -count=1 -v
 
 # Built terminal + zat, real Shift-Tab/mouse/Ctrl-Shift-C and X clipboard, with
 # host UTF-16 conversion modules deliberately unavailable.
 test-zat-x11: st zat
 	ST_TEST_ZAT_X11=1 ST_TEST_BINARY=./$(BIN) ST_TEST_ZAT=./$(OUTPUT_DIR)/zat \
-	go test -tags '$(FULL_GO_TAGS)' . -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' \
+	go test -tags '$(FULL_GO_TAGS)' ./platform_neutral/frontend -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' \
 		-run '^TestZat(PageText|Search)X11$$' -count=1 -v
 
 uninstall:

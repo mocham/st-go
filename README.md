@@ -308,8 +308,10 @@ removes both delimiters; Escape/failure preserves them. For example,
 `make govim` also builds `govim-pinyind`; generated data/binaries are gitignored,
 and dictionary embedding is optional. See [helper build and licensing](demo-go/pinyind/README.md).
 This is an initial native implementation, not full Vim compatibility; see its
-README for command coverage, durability guarantees, and limits. Existing Vimtex,
-PDF viewers, and file-browser openers are unchanged.
+README for command coverage, durability guarantees, and limits. The
+[missing-feature roadmap](demo-go/govim/ROADMAP.md) prioritizes **full search/Ex
+behavior and persistent undo** above the remaining gaps. Existing Vimtex, PDF
+viewers, and file-browser openers are unchanged.
 
 ### Zat PDF viewer
 
@@ -339,6 +341,12 @@ PDF rendering and caching stay in st-go. See the demo's
 - A static glibc (`/usr/lib/libc.a`)
 
 ## Build
+
+Source layout: [`platform_neutral/`](platform_neutral/README.md) contains the
+terminal engine (`stterminal`), shared host logic and uniform APIs;
+[`platform_dependent/`](platform_dependent/README.md) contains the X11 event and
+painting implementation. `main.go` wires them together. Existing client
+protocols and build targets are unchanged.
 
 ```sh
 make          # builds ./BINARIES/st (full: all feature libraries) — see targets below
