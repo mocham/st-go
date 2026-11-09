@@ -19,6 +19,7 @@
 # is needed. The result is a fully static binary with no dynamic deps.
 
 VERSION     = 0.9.2
+.DEFAULT_GOAL := all
 FT_VERSION  = 2.13.3
 FT_URL      = https://download-mirror.savannah.gnu.org/releases/freetype/freetype-$(FT_VERSION).tar.xz
 
@@ -37,7 +38,10 @@ STB_O       = $(STB_DIR)/stb_image.o
 STB_C       = third_party_wrapper/stb_image.c
 STB_URL     = https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 
-BIN         = st
+OUTPUT_DIR  = BINARIES
+BIN         = $(OUTPUT_DIR)/st
+BINARY_NAMES = st st-min st-stb st-pdf file-browser gols vimtex zat govim govim-pinyind
+BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 CFG         = config/config.json
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
@@ -51,7 +55,7 @@ FULL_GO_TAGS = webpcache sqlite_omit_load_extension
 # Sources that affect the Go file-browser demo, including the sibling
 # latexpdf module and semantic-HTML renderer. The target links the existing
 # static ALSA wrapper below.
-FILE_BROWSER = file-browser
+FILE_BROWSER = $(OUTPUT_DIR)/file-browser
 LATEXPDF_SRC = $(wildcard latexpdf/*.go) \
 	       $(wildcard latexpdf/pdf_assets/*)
 SEMHTML_SRC = $(wildcard semhtml/*.go)
@@ -66,6 +70,55 @@ VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) $(wildcard pdfmeta/*.go) \
 	       $(wildcard term/*.go) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
 GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* tui/imap/*.go tui/preview/*.go tui/outline/*.go term/*.go config/*.go config/*.json) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard limits/*.go) go.mod go.sum
+
+# Google Pinyin decoder only: no SCIM, GTK, X11 or installed IM framework.
+PINYIN_REV = 0b9407ef8e4e5fbf74d5ff4e42ea20025a1483fc
+PINYIN_TAR = third_party/scim-googlepinyin-$(PINYIN_REV).tar.gz
+PINYIN_SRC = third_party/googlepinyin-src
+PINYIN_LIB = third_party/googlepinyin/libpinyinime.a
+PINYIN_DATA = demo-go/pinyind/internal/pinyinengine/assets/dict_pinyin.dat
+PINYIN_EMBED ?= 1
+ifeq ($(PINYIN_EMBED),1)
+PINYIN_GO_TAGS = googlepinyin
+PINYIN_ASSET_DEP = $(PINYIN_DATA)
+else
+PINYIN_GO_TAGS = googlepinyin,pinyin_external
+PINYIN_ASSET_DEP =
+endif
+PINYIN_NAMES = dictbuilder dictlist dicttrie lpicache matrixsearch mystdlib ngram pinyinime searchutility spellingtable spellingtrie splparser sync userdict utf16char utf16reader
+PINYIN_BUILDER_NAMES = dictbuilder dictlist dicttrie lpicache mystdlib ngram searchutility spellingtable spellingtrie splparser utf16char utf16reader
+
+$(PINYIN_TAR):
+	mkdir -p third_party
+	curl --fail --location --silent --show-error https://codeload.github.com/tchaikov/scim-googlepinyin/tar.gz/$(PINYIN_REV) -o $@.next
+	printf '%s  %s\n' 60f1c4396807e27ba9952611b3ffd523c6773e1ea910b158fee9bccaf6d0327e $@.next | sha256sum -c -
+	mv $@.next $@
+
+$(PINYIN_SRC)/.unpacked: $(PINYIN_TAR)
+	printf '%s  %s\n' 60f1c4396807e27ba9952611b3ffd523c6773e1ea910b158fee9bccaf6d0327e $< | sha256sum -c -
+	mkdir -p $(PINYIN_SRC)
+	tar -xzf $< -C $(PINYIN_SRC) --strip-components=1
+	touch $@
+
+$(PINYIN_LIB): $(PINYIN_SRC)/.unpacked
+	mkdir -p $(@D)
+	set -e; for name in $(PINYIN_NAMES); do $(CXX) -O2 -std=c++11 -pthread -c $(PINYIN_SRC)/src/share/$$name.cpp -o $(@D)/$$name.o; done
+	$(AR) rcs $@ $(addprefix $(@D)/,$(addsuffix .o,$(PINYIN_NAMES)))
+
+third_party/googlepinyin/dictbuilder: $(PINYIN_SRC)/.unpacked
+	mkdir -p $(@D)
+	$(CXX) -O2 -std=c++11 -pthread -D___BUILD_MODEL___ $(PINYIN_SRC)/src/command/pinyinime_dictbuilder.cpp $(addprefix $(PINYIN_SRC)/src/share/,$(addsuffix .cpp,$(PINYIN_BUILDER_NAMES))) -o $@
+
+$(PINYIN_DATA): third_party/googlepinyin/dictbuilder
+	cd $(PINYIN_SRC)/src/command && $(abspath $<)
+	mkdir -p $(@D)
+	cp $(PINYIN_SRC)/src/data/dict_pinyin.dat $@
+	cp $(PINYIN_SRC)/COPYING $(@D)/LICENSE
+
+$(OUTPUT_DIR)/govim-pinyind: $(PINYIN_LIB) $(PINYIN_ASSET_DEP) $(wildcard demo-go/pinyind/*.go demo-go/pinyind/internal/pinyinengine/*.* tui/pinyin/*.go) go.mod go.sum Makefile pinyin-force | $(OUTPUT_DIR)
+	CGO_ENABLED=1 go build -trimpath -tags 'netgo,osusergo,$(PINYIN_GO_TAGS)' -ldflags '-linkmode external -extldflags "-static -pthread"' -o $@ ./demo-go/pinyind
+
+pinyin-assets: $(PINYIN_DATA)
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # Static C++/Splash rendering, including embedded JPEG images through libjpeg.
@@ -358,18 +411,26 @@ GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
 
 # Rebuild when build flags change; trim source and module-cache paths from all
 # distributable Go binaries, including their stack-trace/debug metadata.
-st st-pdf st-stb st-min $(FILE_BROWSER) gols vimtex zat govim: Makefile
+$(BINARY_PATHS): Makefile | $(OUTPUT_DIR)
 
-st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
+$(OUTPUT_DIR):
+	mkdir -p $@
+
+# Keep familiar make target names, but never create executables in the root.
+$(BINARY_NAMES): %: $(OUTPUT_DIR)/%
+
+pinyin-force:
+
+$(OUTPUT_DIR)/st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
-st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
+$(OUTPUT_DIR)/st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
 	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
 
-st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
+$(OUTPUT_DIR)/st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
 	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
 
-st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
+$(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
 	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
 
 # --- Go file-browser demo --------------------------------------------------
@@ -378,28 +439,28 @@ st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
 # are vector PDFs rendered by latexpdf; Markdown previews remain paginated PNGs
 # composed with mathjax-go. The terminal displays them through the DCS DSL.
 # Run it inside the terminal:
-#   ./st -e ./file-browser /path/to/files
-file-browser: $(FB_GO_SRC) $(ALSA_LIB) $(SND_O)
+#   ./BINARIES/st -e ./BINARIES/file-browser /path/to/files
+$(FILE_BROWSER): $(FB_GO_SRC) $(ALSA_LIB) $(SND_O)
 	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(ALSA_EXTRA)"' ./demo-go/file-browser
 
 # --- GoLS static-corpus browser -------------------------------------------
 # Read-only terminal UI over one or more lecture-server corpus databases.
 # It shares latexpdf with lecture-server and asks st-go to display generated
 # vector PDFs through the existing DCS open protocol; no HTTP server is used.
-gols: $(GOLS_GO_SRC)
+$(OUTPUT_DIR)/gols: $(GOLS_GO_SRC)
 	go build -trimpath -tags 'sqlite_omit_load_extension' -o $@ \
 		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' ./demo-go/gols
 
 # Real Vim on a pane-sized PTY, with save-triggered LaTeX PDF previews.
-vimtex: $(VIMTEX_GO_SRC)
+$(OUTPUT_DIR)/vimtex: $(VIMTEX_GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/vimtex
 
 # PDF viewer; Poppler and the pixel cache live in the terminal, not this TUI.
-zat: $(ZAT_GO_SRC)
+$(OUTPUT_DIR)/zat: $(ZAT_GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/zat
 
 # Native Go TUI editor, with terminal clipboard protocol and recovery journal.
-govim: $(GOVIM_GO_SRC)
+$(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC) $(wildcard tui/pinyin/*.go) $(OUTPUT_DIR)/govim-pinyind
 	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/govim
 
 # --- dummy objects (no-op stubs for dropped libraries) --------------------
@@ -422,29 +483,29 @@ $(PDF_BRIDGE_O): third_party_wrapper/pdf_bridge.cpp pdf_bridge.h $(POPPLER_LIB)
 
 install: st
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 st "$(DESTDIR)$(BINDIR)/st"
+	install -m 0755 "$(BIN)" "$(DESTDIR)$(BINDIR)/st"
 	install -m 0644 "$(CFG)" "$(DESTDIR)$(BINDIR)/st.json"
-	TERMINFO="$(DESTDIR)$(TERMINFO_DIR)" ./st -install-terminfo >/dev/null
+	TERMINFO="$(DESTDIR)$(TERMINFO_DIR)" ./$(BIN) -install-terminfo >/dev/null
 
 # go test ./... needs the third-party libs linked too (they moved out of the
 # #cgo LDFLAGS into -extldflags); test against the full build. The ALSA items
 # are needed because the Go file-browser package uses cgo.
 TEST_EXTRA = $(FULL_EXTRA) $(ALSA_EXTRA)
 
-test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O)
+test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O) govim-pinyind
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 # End-to-end animated-WebP playback through the built browser, PTY, terminal
 # timer and X framebuffer. Point DISPLAY at an isolated X server.
 test-webp-x11: st file-browser
-	ST_TEST_WEBP_X11=1 ST_TEST_BINARY=./st ST_TEST_FILE_BROWSER=./file-browser \
+	ST_TEST_WEBP_X11=1 ST_TEST_BINARY=./$(BIN) ST_TEST_FILE_BROWSER=./$(FILE_BROWSER) \
 	go test -tags '$(FULL_GO_TAGS)' . -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' \
 		-run '^TestWebPAnimationX11FileBrowserPlayback$$' -count=1 -v
 
 # Built terminal + zat, real Shift-Tab/mouse/Ctrl-Shift-C and X clipboard, with
 # host UTF-16 conversion modules deliberately unavailable.
 test-zat-x11: st zat
-	ST_TEST_ZAT_X11=1 ST_TEST_BINARY=./st ST_TEST_ZAT=./zat \
+	ST_TEST_ZAT_X11=1 ST_TEST_BINARY=./$(BIN) ST_TEST_ZAT=./$(OUTPUT_DIR)/zat \
 	go test -tags '$(FULL_GO_TAGS)' . -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' \
 		-run '^TestZat(PageText|Search)X11$$' -count=1 -v
 
@@ -454,9 +515,9 @@ uninstall:
 	      "$(DESTDIR)$(TERMINFO_DIR)/s/stterm-256color"
 
 clean:
-	rm -f st st-min st-stb st-pdf file-browser gols vimtex zat govim
+	rm -f $(BINARY_PATHS) $(PINYIN_DATA)
 
-distclean:
-	rm -rf third_party st st-min st-stb st-pdf file-browser gols vimtex zat govim
+distclean: clean
+	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-webp-x11 test-zat-x11
+.PHONY: all install uninstall clean distclean test test-webp-x11 test-zat-x11 $(BINARY_NAMES) pinyin-assets pinyin-force

@@ -9,8 +9,8 @@ Text extraction and search use Poppler's built-in Unicode handling, not host
 
 ```sh
 make st zat
-./st -e ./zat document.pdf
-./st -e ./zat -page 12 -zoom 120 -bg '#ffffff' document.pdf
+./BINARIES/st -e ./BINARIES/zat document.pdf
+./BINARIES/st -e ./BINARIES/zat -page 12 -zoom 120 -bg '#ffffff' document.pdf
 ```
 
 Requires the updated `st` or `st-pdf`, a readable PDF, and initially at least

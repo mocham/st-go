@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"st-go/tui/pinyin"
 	"st-go/tui/readline"
 	"strconv"
 	"strings"
@@ -110,6 +111,10 @@ type Editor struct {
 	lastSubstitute                   string
 	lastEx, lastInsert               string
 	completion                       *completionState
+	cjk                              *cjkInput
+	cjkOpens                         int
+	newPinyinWorker                  func() *pinyin.Worker
+	pinyinClosing                    []*pinyin.Worker
 	substitute                       *substitution
 	message                          string
 	pager                            []string
@@ -243,6 +248,7 @@ func fileLabel(b *Buffer) string {
 	return b.meta.Path
 }
 func (e *Editor) switchBuffer(b *Buffer) {
+	e.stopCJK(nil)
 	w := e.window()
 	if w.buffer == b {
 		return
@@ -378,6 +384,9 @@ func (e *Editor) Feed(event keyEvent) {
 		return
 	}
 	if event.Preview != nil {
+		if event.Preview.kind == "activate" {
+			e.stopCJK(nil)
+		}
 		if e.preview != nil {
 			e.preview.event(e, *event.Preview)
 		}
@@ -385,6 +394,9 @@ func (e *Editor) Feed(event keyEvent) {
 	}
 	if event.Clipboard != nil {
 		e.finishClipboard(event.Clipboard)
+		return
+	}
+	if e.queueCJK(event) {
 		return
 	}
 	if read := e.clipboardRead; read != nil {
@@ -423,6 +435,7 @@ func (e *Editor) Feed(event keyEvent) {
 		return
 	}
 	if event.Mouse != nil {
+		e.stopCJK(nil)
 		e.mouse(*event.Mouse)
 		return
 	}
@@ -1041,6 +1054,7 @@ func (e *Editor) playRegisterMacro(value register, count int) {
 }
 
 func (e *Editor) tick(now time.Time) {
+	e.pollCJK()
 	if read := e.clipboardRead; read != nil && !now.Before(read.deadline) {
 		e.finishClipboard(&clipboardReply{selection: read.selection, err: fmt.Errorf("terminal clipboard query timed out or was denied; internal registers unchanged")})
 	}
@@ -1052,6 +1066,7 @@ func (e *Editor) tick(now time.Time) {
 	}
 }
 func (e *Editor) close(normalExit bool) error {
+	e.closeCJK()
 	e.syntax.close()
 	var first error
 	for _, b := range e.buffers {

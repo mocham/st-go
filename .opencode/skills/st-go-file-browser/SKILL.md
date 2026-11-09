@@ -201,15 +201,15 @@ formats:
 
 ```sh
 make st
-./st -e ./demo/file-browser.sh /path/to/files
+./BINARIES/st -e ./demo/file-browser.sh /path/to/files
 ```
 
 Useful variants:
 
 ```sh
-./st -e ./demo/file-browser.sh --hidden /path
-ST_FILE_BROWSER_ICON_PDF=P ./st -e ./demo/file-browser.sh /path
-./st -e ./demo/file-browser.sh --open '
+./BINARIES/st -e ./demo/file-browser.sh --hidden /path
+ST_FILE_BROWSER_ICON_PDF=P ./BINARIES/st -e ./demo/file-browser.sh /path
+./BINARIES/st -e ./demo/file-browser.sh --open '
   printf "%s\n" "$FILE" >> /tmp/browser-open.log
 ' /path
 ```

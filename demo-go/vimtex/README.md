@@ -5,18 +5,18 @@ inside st-go.
 
 ```sh
 make st vimtex
-./st -e ./vimtex /absolute/path/to/document.tex
+./BINARIES/st -e ./BINARIES/vimtex /absolute/path/to/document.tex
 # Try the bundled source:
-./st -e ./vimtex demo-go/vimtex/example.tex
+./BINARIES/st -e ./BINARIES/vimtex demo-go/vimtex/example.tex
 # Or, from a shell already inside st-go:
-./vimtex document.tex
+./BINARIES/vimtex document.tex
 ```
 
 The source must already exist and be a readable regular file. Vim is launched
 with your usual configuration; extra arguments after the filename go to Vim:
 
 ```sh
-./vimtex -split 1:1 -gap 3s document.tex -u NONE -n
+./BINARIES/vimtex -split 1:1 -gap 3s document.tex -u NONE -n
 ```
 
 The default **Vim:preview split is 4:6** (40% Vim, 60% preview). Use
@@ -30,8 +30,8 @@ Use `-preview-bg '#RRGGBB'` (or its short alias `-bg`) before the filename to
 choose the PDF paper and surrounding canvas color. For example:
 
 ```sh
-./vimtex -preview-bg '#eef4f8' document.tex  # pale blue
-./vimtex -bg '#ffffff' document.tex         # white
+./BINARIES/vimtex -preview-bg '#eef4f8' document.tex  # pale blue
+./BINARIES/vimtex -bg '#ffffff' document.tex         # white
 ```
 
 ## Updating and navigation

@@ -20,14 +20,14 @@ import (
 
 // Exercise the shipped executable, config discovery and PTY/event loop together.
 // Use an isolated X server and ST_TEST_STARTUP_X11=1; ST_TEST_BINARY selects the
-// binary variant (defaults to ./st). The copy has no source-tree resources.
+// binary variant (defaults to ./BINARIES/st). The copy has no source-tree resources.
 func TestRelocatedStartupX11(t *testing.T) {
 	if os.Getenv("ST_TEST_STARTUP_X11") != "1" {
 		t.Skip("requires an isolated X server and a built terminal")
 	}
 	bin := os.Getenv("ST_TEST_BINARY")
 	if bin == "" {
-		bin = "./st"
+		bin = "./BINARIES/st"
 	}
 	src, err := os.Open(bin)
 	if err != nil {

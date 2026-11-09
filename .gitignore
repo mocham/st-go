@@ -1,14 +1,6 @@
-# Binaries
-/st
-/st-min
-/st-stb
-/st-pdf
-/st-go
-/file-browser
-/gols
-/vimtex
-/zat
-/govim
+# Generated executables and input-method data
+/BINARIES/
+/demo-go/pinyind/internal/pinyinengine/assets/*.dat
 
 # Editor swap files
 .*.swp

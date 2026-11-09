@@ -19,7 +19,7 @@
 #   Esc or q            quit
 #
 # The script writes nothing to the terminal except the DCS image payloads,
-# so it can be piped straight into st:  ./st -e ./demo/image-viewer.sh
+# so it can be piped straight into st:  ./BINARIES/st -e ./demo/image-viewer.sh
 
 set -u
 

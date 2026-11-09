@@ -8,9 +8,9 @@ compatibility**; the supported commands and limits are listed below.
 
 ```sh
 make govim                 # pure Go; no native-library builds
-./govim document.tex
-./govim +42 document.tex
-./govim -r document.tex    # recover after a crash
+./BINARIES/govim document.tex
+./BINARIES/govim +42 document.tex
+./BINARIES/govim -r document.tex    # recover after a crash
 ```
 
 It runs inside st-go or another ANSI/SGR-mouse terminal. No new system packages,
@@ -30,10 +30,10 @@ launched for previewing.
 
 ```sh
 make st govim
-./st -e ./govim document.tex
-./st -e ./govim notes.md
-./govim --preview-width 50 --preview-bg '#ffffff' notes.md
-./govim --no-preview document.tex
+./BINARIES/st -e ./BINARIES/govim document.tex
+./BINARIES/st -e ./BINARIES/govim notes.md
+./BINARIES/govim --preview-width 50 --preview-bg '#ffffff' notes.md
+./BINARIES/govim --no-preview document.tex
 ```
 
 * The initial preview loads when the terminal confirms region support. Saves
@@ -135,10 +135,10 @@ take precedence over this timestamp.
 Recover with:
 
 ```sh
-./govim -r document.tex
-./govim -r                              # list local/cache swaps
-./govim -r /path/to/untitled-123.govim.swp
-./govim --swap-dir /persistent/swaps -r document.tex
+./BINARIES/govim -r document.tex
+./BINARIES/govim -r                              # list local/cache swaps
+./BINARIES/govim -r /path/to/untitled-123.govim.swp
+./BINARIES/govim --swap-dir /persistent/swaps -r document.tex
 ```
 
 Review the recovered buffer, then `:w`. Undo history is reconstructed too.
@@ -147,6 +147,35 @@ tail, it durably preserves the **entire original journal** as
 `*.govim.swp.damaged-*`. It does not skip damaged middle records or guess edits.
 Vim's binary `.swp` format is separate and is neither read nor overwritten.
 Copy irreplaceable files/backups before trying a new editor on them.
+
+## CJK input
+
+In **Insert mode**, type **`[[[`** to start Google Pinyin composition. The bottom
+command row displays five numbered candidates; **`+` / `-`** changes candidate
+pages and **`1`–`5`** replaces the current spelling with the selected candidate.
+For example, **`[[[nh++3` → `[[[浓厚`** while composing. Selections can be followed
+immediately by more spelling. Backspace edits the current spelling. **`]]]`**
+ends CJK mode normally and removes **both** delimiter triples, so
+**`[[[nh++3]]]` → `浓厚`**. Escape, navigation, crashes, and other forced or
+accidental exits preserve the delimiters as a recovery trace. Unselected
+spelling remains literal on punctuation, exit, or failure; no save is performed.
+Escape/control/navigation exits CJK mode; paste, registers, and literal input
+do not activate it. Accepted Unicode is journaled and participates in undo,
+recovery, insert repeats, and macros. Candidate-only updates repaint only the
+command row. The saved timestamp returns when composition finishes.
+
+`make govim` builds the separate static **`govim-pinyind`** helper. It is spawned
+**lazily**, only on a live Insert-mode `[[[` trigger, never at editor startup.
+CJK mode does not activate if the helper cannot be found or spawned; all
+subsequent input then stays ordinary text. Native initialization is asynchronous.
+Its native decoder and generated dictionary never run inside govim or st-go. A native
+crash, timeout, or malformed reply cancels CJK mode, preserves typed text, and
+does not kill either application; type a new `[[[` to retry. Inputs/queues are
+bounded (32-byte spelling limit), and helpers are canceled/reaped on exit.
+The helper uses private abstract Unix sockets and anonymous in-memory
+dictionaries on Linux. No SCIM desktop service or extra font package is needed.
+See [`pinyind`](../pinyind/README.md) for optional dictionary bundling, generated
+assets, source provenance, license notices, and packaging both executables.
 
 ## Fixed preferences
 

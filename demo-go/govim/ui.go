@@ -440,6 +440,9 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 	if e.recording != 0 {
 		message += " recording @" + string(e.recording)
 	}
+	if e.cjk != nil && e.mode == insertMode {
+		message = e.cjkStatus(e.cols)
+	}
 	if e.prompt != "" {
 		message, cursorX = e.promptLine(e.cols - 1)
 		cursorY = e.rows - 1

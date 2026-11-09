@@ -266,11 +266,11 @@ and renders a continuous fit-width preview with a minimum 2.1-second save-refres
 
 ```sh
 make st vimtex
-./st -e ./vimtex /path/to/document.tex
+./BINARIES/st -e ./BINARIES/vimtex /path/to/document.tex
 ```
 
 The default Vim:preview width ratio is **4:6**. Set `-split VIM:PREVIEW`, for
-example `./vimtex -split 1:1 document.tex`, to customize it.
+example `./BINARIES/vimtex -split 1:1 document.tex`, to customize it.
 
 The mouse wheel over the right pane scrolls smoothly through cached document
 pixels without waiting for a LaTeX render. Preview padding is trimmed and unused
@@ -290,8 +290,8 @@ font/system dependencies), and checksummed write-ahead swap recovery:
 
 ```sh
 make govim
-./govim document.tex
-./govim -r document.tex  # recover after a crash
+./BINARIES/govim document.tex
+./BINARIES/govim -r document.tex  # recover after a crash
 ```
 
 Edits are journaled before application and flushed after one second or 64 KiB;
@@ -301,6 +301,12 @@ Inside st-go, LaTeX/Markdown files automatically open an in-process retained PDF
 preview. Successful saves refresh it without file polling; `%cursor` takes
 precedence over govim's saved cursor position. `:wnomove` refreshes without
 jumping, and `--no-preview` disables the panel.
+Insert-mode `[[[` lazily starts an isolated Google Pinyin helper: the command
+row shows five candidates, `+/-` changes pages, and `1..5` selects. Normal `]]]`
+removes both delimiters; Escape/failure preserves them. For example,
+`[[[nh++3]]]` produces `浓厚`. Missing/unspawnable helpers leave input literal.
+`make govim` also builds `govim-pinyind`; generated data/binaries are gitignored,
+and dictionary embedding is optional. See [helper build and licensing](demo-go/pinyind/README.md).
 This is an initial native implementation, not full Vim compatibility; see its
 README for command coverage, durability guarantees, and limits. Existing Vimtex,
 PDF viewers, and file-browser openers are unchanged.
@@ -312,7 +318,7 @@ native, smoothly scrolling PDF view as vimtex:
 
 ```sh
 make st zat
-./st -e ./zat /path/to/document.pdf
+./BINARIES/st -e ./BINARIES/zat /path/to/document.pdf
 ```
 
 Use `j/k` or the wheel to scroll, `J/K` for pages, `gg/G` or `42G` to jump,
@@ -335,12 +341,20 @@ PDF rendering and caching stay in st-go. See the demo's
 ## Build
 
 ```sh
-make          # builds ./st (full: all feature libraries) — see targets below
+make          # builds ./BINARIES/st (full: all feature libraries) — see targets below
 make st-min   # minimal: text-only terminal
 make test     # run the test suite (links the full feature set)
 make install  # installs to $(BINDIR), default /usr/local/bin
 make clean    # removes all built binaries
 make distclean  # removes binaries and third_party/
+```
+
+Generated executables are kept in **`BINARIES/`**, which is gitignored; familiar
+targets such as `make st`, `make govim`, and `make file-browser` are unchanged.
+To make the tools available by name (including file-browser's default openers):
+
+```sh
+export PATH="$PWD/BINARIES:$PATH"
 ```
 
 All binary targets use Go's `-trimpath` to omit local source and module-cache
@@ -349,9 +363,9 @@ paths from Go debug information and stack traces.
 Result:
 
 ```
-$ file ./st
-./st: ELF 64-bit LSB executable ... statically linked
-$ ldd ./st
+$ file ./BINARIES/st
+./BINARIES/st: ELF 64-bit LSB executable ... statically linked
+$ ldd ./BINARIES/st
 not a dynamic executable
 ```
 
@@ -378,7 +392,7 @@ right choice when you want a static terminal with no image or PDF features:
 
 ```sh
 make st-min
-./st-min            # full terminal, text only
+./BINARIES/st-min            # full terminal, text only
 ```
 
 Everything still works — VT100/ANSI handling, colors, mouse, selection,
@@ -416,16 +430,16 @@ the stub objects live in `third_party_wrapper/dummy-{stb,webp,pdf}.c`. See
 ## Usage
 
 ```sh
-./st                            # start a terminal with $SHELL
-./st -e bash                    # start bash
-./st -f DejaVuSansMono.ttf      # override the embedded font
-./st --ratio 1.3                # scale the glyph geometry by 1.3
-./st -v                         # print version (st 0.9.2)
-./st -install-terminfo          # generate/install ~/.terminfo/s/st-256color
-./st -config /path/config.json  # alternate config file
-./st -t auto-gtex -e bash       # title/class/instance for WM tiling
-./st vim notes.md               # gvim-like terminal Vim window
-./st vim -c 'set number' notes.md
+./BINARIES/st                            # start a terminal with $SHELL
+./BINARIES/st -e bash                    # start bash
+./BINARIES/st -f DejaVuSansMono.ttf      # override the embedded font
+./BINARIES/st --ratio 1.3                # scale the glyph geometry by 1.3
+./BINARIES/st -v                         # print version (st 0.9.2)
+./BINARIES/st -install-terminfo          # generate/install ~/.terminfo/s/st-256color
+./BINARIES/st -config /path/config.json  # alternate config file
+./BINARIES/st -t auto-gtex -e bash       # title/class/instance for WM tiling
+./BINARIES/st vim notes.md               # gvim-like terminal Vim window
+./BINARIES/st vim -c 'set number' notes.md
 ```
 
 Configuration lookup is `-config <file>`, then `st.json` beside the executable
@@ -441,7 +455,7 @@ back to the **embedded Monaco font** before optional system fallback faces.
 require `tic` or a system terminfo development package. `make install` writes
 the entry and its `stterm-256color` alias beneath
 `$(PREFIX)/share/terminfo`. For a per-user install, run
-`./st -install-terminfo`; `$TERMINFO` overrides the default `~/.terminfo`
+`./BINARIES/st -install-terminfo`; `$TERMINFO` overrides the default `~/.terminfo`
 destination.
 
 Decoded WebP images and animation frames are cached as PNG blobs in a private
@@ -473,9 +487,9 @@ a bottom strip reserved for the collapsed graphical file browser.
 Esc quits):
 
 ```sh
-./st -e ./demo/image-viewer.sh          # view images in the current directory
-./st -e ./demo/image-viewer.sh -d /path/to/images
-./st -e ./demo/image-viewer.sh -p 3 /path/to/docs   # start PDFs at page 3
+./BINARIES/st -e ./demo/image-viewer.sh          # view images in the current directory
+./BINARIES/st -e ./demo/image-viewer.sh -d /path/to/images
+./BINARIES/st -e ./demo/image-viewer.sh -p 3 /path/to/docs   # start PDFs at page 3
 ```
 
 `demo/file-browser.sh` is a graphical, pane-based file browser. The right pane
@@ -484,9 +498,9 @@ text, images, and PDFs using the display DSL. It runs in the alternate screen
 and enables SGR mouse reporting:
 
 ```sh
-./st -e ./demo/file-browser.sh           # browse the current directory
-./st -e ./demo/file-browser.sh /some/path
-./st -e ./demo/file-browser.sh --hidden /some/path
+./BINARIES/st -e ./demo/file-browser.sh           # browse the current directory
+./BINARIES/st -e ./demo/file-browser.sh /some/path
+./BINARIES/st -e ./demo/file-browser.sh --hidden /some/path
 ```
 
 Single-clicking or using the arrow keys selects an entry and updates its info
@@ -568,7 +582,7 @@ extensions fall back to the exact st-go executable that launched the browser:
 and `bar external "$FILE"` in the Go browser.
 
 ```sh
-./st -e ./demo/file-browser.sh --open '
+./BINARIES/st -e ./demo/file-browser.sh --open '
   open_file() {
     case $FILE in
       *.pdf) zathura "$FILE" ;;
@@ -597,7 +611,7 @@ saved geometry.
 
 ```sh
 make file-browser
-./st -e ./file-browser /some/path
+./BINARIES/st -e ./BINARIES/file-browser /some/path
 ```
 
 Its navigation sidebar is visible and floating by default, so previews use the
@@ -648,9 +662,9 @@ final level is an outline whose entries jump to their exact rendered PDF pages.
 
 ```sh
 make gols
-./st -e ./gols /path/to/lectures.sqlite3
-./st -e ./gols /path/to/corpus-directory   # recursively finds corpus DBs
-./st -e ./gols                              # choose a recent database
+./BINARIES/st -e ./BINARIES/gols /path/to/lectures.sqlite3
+./BINARIES/st -e ./BINARIES/gols /path/to/corpus-directory   # recursively finds corpus DBs
+./BINARIES/st -e ./BINARIES/gols                              # choose a recent database
 ```
 
 The navigation pane is focused, visible and **floating** at startup, overlaid

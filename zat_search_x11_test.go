@@ -90,8 +90,8 @@ func TestZatSearchX11(t *testing.T) {
 	defer log.Close()
 	clientLog := filepath.Join(dir, "zat.log")
 	title := fmt.Sprintf("st-zat-search-%d", os.Getpid())
-	process := exec.Command(testExecutable(t, "ST_TEST_BINARY", "./st"), "-config", configPath, "-g", "64x24", "-t", title,
-		"-e", "bash", "-c", `"$1" "$2" | tee "$3"`, "zat-search", testExecutable(t, "ST_TEST_ZAT", "./zat"), file, clientLog)
+	process := exec.Command(testExecutable(t, "ST_TEST_BINARY", "./BINARIES/st"), "-config", configPath, "-g", "64x24", "-t", title,
+		"-e", "bash", "-c", `"$1" "$2" | tee "$3"`, "zat-search", testExecutable(t, "ST_TEST_ZAT", "./BINARIES/zat"), file, clientLog)
 	process.Env = append(envWithout(os.Environ(), "GCONV_PATH"), "GCONV_PATH="+unavailablePDFGconv(t))
 	process.Stdout, process.Stderr = log, log
 	if err := process.Start(); err != nil {

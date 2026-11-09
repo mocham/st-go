@@ -22,8 +22,8 @@ func TestZatPageTextX11(t *testing.T) {
 	if os.Getenv("ST_TEST_ZAT_X11") != "1" {
 		t.Skip("requires an isolated X server and built st/zat binaries")
 	}
-	terminal := testExecutable(t, "ST_TEST_BINARY", "./st")
-	client := testExecutable(t, "ST_TEST_ZAT", "./zat")
+	terminal := testExecutable(t, "ST_TEST_BINARY", "./BINARIES/st")
+	client := testExecutable(t, "ST_TEST_ZAT", "./BINARIES/zat")
 	dir := t.TempDir()
 	file, expected := os.Getenv("ST_TEST_ZAT_PDF"), os.Getenv("ST_TEST_ZAT_TEXT")
 	generated := file == ""

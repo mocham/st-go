@@ -92,7 +92,7 @@ show similar symptoms.
 Build with `make st`, then launch from another terminal:
 
 ```sh
-GOTRACEBACK=all ./st 2>"${TMPDIR:-/tmp}/st-go-crash.log"
+GOTRACEBACK=all ./BINARIES/st 2>"${TMPDIR:-/tmp}/st-go-crash.log"
 ```
 
 After that window disappears, run `echo $?` immediately in the launching shell.

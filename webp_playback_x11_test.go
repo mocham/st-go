@@ -31,8 +31,8 @@ func TestWebPAnimationX11FileBrowserPlayback(t *testing.T) {
 	if err != nil {
 		t.Skip("ffmpeg is unavailable")
 	}
-	terminal := testExecutable(t, "ST_TEST_BINARY", "./st")
-	browser := testExecutable(t, "ST_TEST_FILE_BROWSER", "./file-browser")
+	terminal := testExecutable(t, "ST_TEST_BINARY", "./BINARIES/st")
+	browser := testExecutable(t, "ST_TEST_FILE_BROWSER", "./BINARIES/file-browser")
 
 	dir := t.TempDir()
 	animation := filepath.Join(dir, "animation.webp")

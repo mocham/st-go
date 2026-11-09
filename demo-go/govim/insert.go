@@ -14,6 +14,8 @@ type completionState struct {
 }
 
 func (e *Editor) enterInsert(kind mode, group uint64, count int) {
+	e.stopCJK(nil)
+	e.cjkOpens = 0
 	if group == 0 {
 		group = e.buffer().group()
 	}
@@ -94,6 +96,9 @@ func (e *Editor) insertKey(key string) {
 		if len([]rune(value)) == 1 {
 			e.insertLiteral(value)
 		}
+		return
+	}
+	if e.cjkKey(key) {
 		return
 	}
 	if key != "\x0e" && key != "\x10" {
@@ -245,6 +250,8 @@ func (e *Editor) insertLiteral(text string) {
 	}
 }
 func (e *Editor) finishInsert() {
+	e.stopCJK(nil)
+	e.cjkOpens = 0
 	if e.insertCount > 1 && e.insertText != "" {
 		text, err := repeatText(e.insertSeparator+e.insertText, e.insertCount-1)
 		if err != nil {
@@ -265,6 +272,8 @@ func (e *Editor) finishInsert() {
 }
 
 func (e *Editor) paste(text string) {
+	e.stopCJK(nil)
+	e.cjkOpens = 0
 	if len(text) > maxBufferBytes {
 		e.error(fmt.Errorf("paste exceeds buffer limit"))
 		return
