@@ -233,6 +233,6 @@ func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, ox, oy int, og term.Glyp
 	}
 }
 
-// FinishDraw is a no-op: paint.go submits the completed dirty region after the
+// FinishDraw is a no-op: paint.go submits the completed dirty row spans after the
 // terminal core finishes rasterizing it.
 func (t *Terminal) FinishDraw() {}

@@ -183,10 +183,11 @@ type Term struct {
 	row, col int
 	line     []Line
 	alt      []Line
-	// Queue-based painting: changed cell regions awaiting repaint, application
+	// Row-based painting: changed cell spans awaiting repaint, application
 	// synchronized-output state, nested internal paint batches, and the
 	// frontend's synchronous paint dispatcher.
-	regions            []Region
+	dirtyRows          []Region
+	dirtyCount         int
 	syncOutput         bool
 	internalPaintDepth int
 	paintFn            func()
@@ -628,7 +629,7 @@ func (t *Term) drawAnimFrame(a *animation, idx int, glyphs []Glyph) {
 	}
 }
 
-// --- queue-based painting -------------------------------------------------
+// --- row-based painting ---------------------------------------------------
 // Virtual painting (Twrite, image placement, animation frames, selection)
 // marks changed cell regions. The frontend decides when to drain them: PTY
 // output is latency-batched, while X/input/timer events paint immediately.
@@ -660,9 +661,9 @@ func regionUnion(a, b Region) Region {
 	return a
 }
 
-// markDirty queues a changed cell region for repaint, clamped to the screen.
-// The queue is bounded: once it grows large, entries coalesce into their
-// bounding region.
+// markDirty accumulates one cell span per dirty row. Storage is bounded by the
+// screen height, not the number of writes. Never coalesce across clean rows:
+// an edit and a status-line update must not invalidate the text between them.
 func (t *Term) markDirty(x1, y1, x2, y2 int) {
 	if x1 > x2 {
 		x1, x2 = x2, x1
@@ -670,28 +671,54 @@ func (t *Term) markDirty(x1, y1, x2, y2 int) {
 	if y1 > y2 {
 		y1, y2 = y2, y1
 	}
-	x1 = clamp(x1, 0, t.col-1)
-	x2 = clamp(x2, 0, t.col-1)
-	y1 = clamp(y1, 0, t.row-1)
-	y2 = clamp(y2, 0, t.row-1)
+	x1, x2 = max(x1, 0), min(x2, t.col-1)
+	y1, y2 = max(y1, 0), min(y2, t.row-1)
 	if x1 > x2 || y1 > y2 {
 		return
 	}
-	if len(t.regions) >= 64 {
-		r := t.regions[0]
-		for _, q := range t.regions[1:] {
-			r = regionUnion(r, q)
+	if len(t.dirtyRows) < t.row {
+		first := len(t.dirtyRows)
+		t.dirtyRows = append(t.dirtyRows, make([]Region, t.row-first)...)
+		for y := first; y < len(t.dirtyRows); y++ {
+			t.dirtyRows[y] = emptyRegion()
 		}
-		t.regions = []Region{regionUnion(r, Region{x1, y1, x2, y2})}
-		return
 	}
-	t.regions = append(t.regions, Region{x1, y1, x2, y2})
+	for y := y1; y <= y2; y++ {
+		r := &t.dirtyRows[y]
+		if r.Empty() {
+			*r = Region{x1, y, x2, y}
+			t.dirtyCount++
+		} else {
+			r.X1, r.X2 = min(r.X1, x1), max(r.X2, x2)
+		}
+	}
 }
 
-// TakeRegions drains the pending repaint regions.
+// TakeRegions drains dirty rows in screen order. Only adjacent rows with the
+// same horizontal bounds may form a larger rectangle; clean rows are skipped.
 func (t *Term) TakeRegions() []Region {
-	regs := t.regions
-	t.regions = nil
+	if t.dirtyCount == 0 {
+		return nil
+	}
+	regs := make([]Region, 0, t.dirtyCount)
+	for y, r := range t.dirtyRows {
+		if r.Empty() {
+			continue
+		}
+		t.dirtyRows[y] = emptyRegion()
+		// A resize may leave old damage outside the new screen dimensions.
+		r.X2 = min(r.X2, t.col-1)
+		if y >= t.row || r.Empty() {
+			continue
+		}
+		if n := len(regs); n > 0 && regs[n-1].Y2+1 == y && regs[n-1].X1 == r.X1 && regs[n-1].X2 == r.X2 {
+			regs[n-1].Y2 = y
+		} else {
+			regs = append(regs, r)
+		}
+	}
+	t.dirtyCount = 0
+	t.dirtyRows = t.dirtyRows[:min(len(t.dirtyRows), t.row)]
 	return regs
 }
 
@@ -701,7 +728,7 @@ func (t *Term) TakeRegions() []Region {
 func (t *Term) Invalidate(r Region) { t.markDirty(r.X1, r.Y1, r.X2, r.Y2) }
 
 // HasPendingPaint reports whether regions await repaint.
-func (t *Term) HasPendingPaint() bool { return len(t.regions) > 0 }
+func (t *Term) HasPendingPaint() bool { return t.dirtyCount > 0 }
 
 // IsPaintPaused reports whether application synchronization or an internal
 // atomic update currently defers painting.

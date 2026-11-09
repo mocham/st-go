@@ -63,14 +63,14 @@ func (t *Terminal) paint() {
 		}
 		t.displayRegions.mu.Unlock()
 	}
-	region := t.termCore.Draw()
+	regions := t.termCore.DrawRegions()
 	secondary := t.paintSecondary()
 	if full {
 		t.displayRegions.fullDirty = false
 		t.putFramebufferRegion(0, 0, fbW, fbH)
 		return
 	}
-	if !region.Empty() {
+	for _, region := range regions {
 		px, py, w, h := t.pixelRegion(region)
 		t.putFramebufferRegion(px, py, w, h)
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -500,6 +501,11 @@ func (r *renderer) paint(canvas [][]tile, cursorX, cursorY, shape int, out io.Wr
 		var old []tile
 		if y < len(r.previous) {
 			old = r.previous[y]
+		}
+		// Syntax/layout may be recomputed for the entire viewport. Only the
+		// final displayed row matters: identical text AND styles send no codes.
+		if slices.Equal(old, row) {
+			continue
 		}
 		changed := func(x int) bool { return x >= len(old) || old[x] != row[x] }
 		for x := 0; x < len(row); {

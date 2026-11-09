@@ -1,6 +1,7 @@
 package term
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -520,23 +521,125 @@ func TestSetCharQueuesExactCell(t *testing.T) {
 	trm, hooks := newTermHooks(config.Default())
 	trm.Draw() // discard initialization damage
 	hooks.drawRegions = nil
-	// cursor moves queue the cursor cell, and a written char queues exactly
-	// its own cell (plus the post-write cursor advance)
+	// A written char and the post-write cursor advance share one dirty-row span.
 	trm.Twrite([]byte("\x1b[3;6HX"), false)
 	want := Region{X1: 5, Y1: 2, X2: 5, Y2: 2}
 	regions := trm.TakeRegions()
-	found := false
-	for _, r := range regions {
-		if r == want {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("character cell not damaged: %+v", regions)
+	span := Region{X1: 5, Y1: 2, X2: 6, Y2: 2}
+	if len(regions) != 1 || regions[0] != span {
+		t.Fatalf("character/cursor span = %+v, want [%+v]", regions, span)
 	}
 	trm.markDirty(want.X1, want.Y1, want.X2, want.Y2)
 	trm.Draw()
 	if len(hooks.drawRegions) != 1 || hooks.drawRegions[0] != want {
 		t.Fatalf("rasterized damage = %+v, want [%+v]", hooks.drawRegions, want)
+	}
+}
+
+func TestSeparatedDirtyRowsDoNotRepaintRowsBetween(t *testing.T) {
+	for _, width := range []int{1, 70} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Cols, cfg.Rows = 80, 24
+			trm, hooks := newTermHooks(cfg)
+			trm.Draw()
+			hooks.drawRegions = nil
+			// Model an editor's synchronized edit plus status-line update. The
+			// longer case also exceeds the old 64-entry damage-queue limit.
+			trm.Twrite([]byte("\x1b[?2026h\x1b[3;2H"+strings.Repeat("x", width)+"\x1b[23;2Hmodified\x1b[3;2H\x1b[?2026l"), false)
+			seen := map[int]bool{}
+			for _, r := range hooks.drawRegions {
+				if r.Y1 != 2 && r.Y1 != 22 {
+					t.Fatalf("unchanged row %d repainted: %+v", r.Y1+1, hooks.drawRegions)
+				}
+				seen[r.Y1] = true
+			}
+			if !seen[2] || !seen[22] {
+				t.Fatalf("changed rows not painted: %+v", hooks.drawRegions)
+			}
+		})
+	}
+}
+
+func TestDamageQueueNeverBridgesCleanRows(t *testing.T) {
+	cfg := config.Default()
+	cfg.Cols, cfg.Rows = 80, 24
+	trm, _ := newTermHooks(cfg)
+	trm.Draw()
+	for i := 0; i < 1000; i++ {
+		trm.markDirty(i%80, 2, i%80, 2)
+		trm.markDirty(i%80, 22, i%80, 22)
+	}
+	regions := trm.TakeRegions()
+	if len(regions) > int(cfg.Rows) {
+		t.Fatalf("damage storage is not row-bounded: %d regions", len(regions))
+	}
+	for _, r := range regions {
+		if r.Y1 != r.Y2 || r.Y1 != 2 && r.Y1 != 22 {
+			t.Fatalf("damage queue included clean rows: %+v", regions)
+		}
+	}
+	if trm.HasPendingPaint() {
+		t.Fatal("drained damage still pending")
+	}
+}
+
+func TestDrawRegionsNeverUploadsCleanRows(t *testing.T) {
+	trm, _ := newTermHooks(config.Default())
+	trm.Draw()
+	trm.Twrite([]byte("\x1b[3;2H"), false)
+	trm.Draw() // establish the old cursor on the edited row
+	var uploads []Region
+	trm.SetPaintFn(func() { uploads = trm.DrawRegions() })
+	trm.Twrite([]byte("\x1b[?2026h\x1b[3;2Hx\x1b[23;2Hmodified\x1b[3;2H\x1b[?2026l"), false)
+	seen := map[int]bool{}
+	for _, r := range uploads {
+		if r.Y1 != r.Y2 || r.Y1 != 2 && r.Y1 != 22 {
+			t.Fatalf("upload includes clean rows: %+v", uploads)
+		}
+		seen[r.Y1] = true
+	}
+	if !seen[2] || !seen[22] {
+		t.Fatalf("upload lost changed rows: %+v", uploads)
+	}
+	// A cursor-only jump also needs just its old and new cell, not a tall box.
+	trm.Twrite([]byte("\x1b[12;2H"), false)
+	for _, r := range trm.DrawRegions() {
+		if r.Y1 != r.Y2 || r.Y1 != 2 && r.Y1 != 11 {
+			t.Fatalf("cursor jump uploads intervening rows: %+v", r)
+		}
+	}
+}
+
+func TestDamageCoalescesAdjacentRowsOnly(t *testing.T) {
+	trm, _ := newTermHooks(config.Default())
+	trm.Draw()
+	trm.markDirty(4, 2, 9, 3)
+	trm.markDirty(4, 5, 9, 5)
+	regions := trm.TakeRegions()
+	if len(regions) != 2 || regions[0] != (Region{4, 2, 9, 3}) || regions[1] != (Region{4, 5, 9, 5}) {
+		t.Fatalf("adjacent-row coalescing = %+v", regions)
+	}
+}
+
+func TestDirtySpansCoverBothHalvesOfWideGlyphs(t *testing.T) {
+	trm, hooks := newTermHooks(config.Default())
+	trm.Twrite([]byte("\x1b[3;6H界"), false)
+	trm.Draw()
+	hooks.drawRegions = nil
+	trm.Invalidate(Region{6, 2, 6, 2}) // only the trailing half
+	trm.DrawRegions()
+	if len(hooks.drawRegions) != 1 || hooks.drawRegions[0] != (Region{5, 2, 6, 2}) {
+		t.Fatalf("wide invalidation did not include leading cell: %+v", hooks.drawRegions)
+	}
+	for _, column := range []int{6, 7} {
+		trm.Twrite([]byte("\x1b[3;6H界"), false)
+		trm.Draw()
+		hooks.drawRegions = nil
+		trm.Twrite([]byte(fmt.Sprintf("\x1b[3;%dHx", column)), false)
+		trm.DrawRegions()
+		if len(hooks.drawRegions) != 1 || hooks.drawRegions[0].Y1 != 2 || hooks.drawRegions[0].X1 > 5 || hooks.drawRegions[0].X2 < 6 {
+			t.Fatalf("replacing wide column %d left its partner unpainted: %+v", column, hooks.drawRegions)
+		}
 	}
 }

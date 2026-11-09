@@ -431,17 +431,20 @@ func (t *Term) tsetchar(u rune, attr *Glyph, x, y int) {
 		}
 	}
 
+	first, last := x, x
 	if t.line[y][x].Mode&ATTRWide != 0 {
 		if x+1 < t.col {
 			t.line[y][x+1].U = ' '
 			t.line[y][x+1].Mode &^= ATTRWdummy
+			last++
 		}
 	} else if t.line[y][x].Mode&ATTRWdummy != 0 && x > 0 {
 		t.line[y][x-1].U = ' '
 		t.line[y][x-1].Mode &^= ATTRWide
+		first--
 	}
 
-	t.markDirty(x, y, x, y)
+	t.markDirty(first, y, last, y)
 	t.line[y][x] = *attr
 	t.line[y][x].U = u
 }
@@ -640,31 +643,28 @@ func (t *Term) csiparse() {
 	}
 }
 
-// Draw drains the queued repaint regions and draws them through the hooks.
-// The frontend calls it in the same serialized context as the mutation that
-// triggered painting. It always redraws the cursor and returns the bounding
-// region so the frontend can blit just that area.
+// Draw is the compatibility wrapper returning the bounding box of DrawRegions.
+// Painting still visits only dirty rows. Frontends should use DrawRegions to
+// avoid uploading the unchanged pixels between separate dirty areas.
 func (t *Term) Draw() Region {
-	regions := t.TakeRegions()
 	r := emptyRegion()
-	for _, q := range regions {
+	for _, q := range t.DrawRegions() {
 		if r.Empty() {
 			r = q
 		} else {
 			r = regionUnion(r, q)
 		}
 	}
-	// A resize can shrink the screen while damage from the old dimensions is
-	// still queued (notably during synchronized output). Intersect that damage
-	// with the current screen before indexing lines and cells.
-	if !r.Empty() {
-		r.X1 = max(r.X1, 0)
-		r.Y1 = max(r.Y1, 0)
-		r.X2 = min(r.X2, t.col-1)
-		r.Y2 = min(r.Y2, t.row-1)
-	}
+	return r
+}
+
+// DrawRegions paints dirty row spans and the old/new cursor cells in the same
+// serialized context as terminal mutation. Its returned rectangles cover only
+// those areas, never the clean rows between an edit, status line, or cursor.
+func (t *Term) DrawRegions() []Region {
+	regions := t.TakeRegions()
 	if !t.xstartdraw() {
-		return emptyRegion()
+		return nil
 	}
 	cx := t.c.x
 	t.ocx = clamp(t.ocx, 0, t.col-1)
@@ -675,22 +675,50 @@ func (t *Term) Draw() Region {
 	if cx > 0 && t.line[t.c.y][cx].Mode&ATTRWdummy != 0 {
 		cx--
 	}
-	if !r.Empty() {
+	painted := make([]Region, 0, len(regions)+2)
+	for _, r := range regions {
 		for y := r.Y1; y <= r.Y2; y++ {
-			t.xdrawline(t.line[y], r.X1, y, r.X2+1)
+			first, last := r.X1, r.X2
+			// Partial invalidations can start/end inside a wide glyph.
+			if first > 0 && t.line[y][first].Mode&ATTRWdummy != 0 {
+				first--
+			}
+			if last+1 < t.col && t.line[y][last].Mode&ATTRWide != 0 {
+				last++
+			}
+			t.xdrawline(t.line[y], first, y, last+1)
+			q := Region{first, y, last, y}
+			if n := len(painted); n > 0 && painted[n-1].Y2+1 == y && painted[n-1].X1 == first && painted[n-1].X2 == last {
+				painted[n-1].Y2 = y
+			} else {
+				painted = append(painted, q)
+			}
 		}
 	}
-	cxr := Region{min(cx, t.ocx), min(t.c.y, t.ocy), max(cx, t.ocx), max(t.c.y, t.ocy)}
 	t.xdrawcursor(cx, t.c.y, t.line[t.c.y][cx],
 		t.ocx, t.ocy, t.line[t.ocy][t.ocx])
+	// Cursor painting restores its old cell and overlays its new cell. Keep
+	// these separate too; a cursor jump must not upload all intervening rows.
+	for _, cell := range [][2]int{{t.ocx, t.ocy}, {cx, t.c.y}} {
+		x, y := cell[0], cell[1]
+		last := x
+		if x+1 < t.col && t.line[y][x].Mode&ATTRWide != 0 {
+			last++
+		}
+		covered := false
+		for _, r := range painted {
+			if r.Y1 <= y && y <= r.Y2 && r.X1 <= x && last <= r.X2 {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			painted = append(painted, Region{x, y, last, y})
+		}
+	}
 	t.ocx = cx
 	t.ocy = t.c.y
-	if r.Empty() {
-		r = cxr
-	} else {
-		r = regionUnion(r, cxr)
-	}
-	return r
+	return painted
 }
 
 // Redraw forces a full repaint of the whole screen.

@@ -2,9 +2,11 @@ package main
 
 import (
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"st-go/config"
 	"st-go/term"
@@ -225,5 +227,109 @@ func TestColorChangePaintsOnlyChangedCell(t *testing.T) {
 	r.paint(frame(searchStyle), 0, 0, 2, &out)
 	if out.Len() != 0 {
 		t.Fatalf("identical frame produced output: %q", out.String())
+	}
+}
+
+// Decode the actual renderer output, recording every row receiving text or an
+// erase command, even if it rewrites identical cells or just blank padding.
+// Replaying through the terminal core keeps cursor/Unicode handling real.
+func emittedPaintRows(t *testing.T, screen *term.Term, output string) map[int]bool {
+	t.Helper()
+	written := map[int]bool{}
+	screen.SetPaintFn(func() {})
+	for len(output) > 0 {
+		n := 0
+		if strings.HasPrefix(output, "\x1b[") {
+			n = 2
+			for n < len(output) && (output[n] < 0x40 || output[n] > 0x7e) {
+				n++
+			}
+			if n == len(output) {
+				t.Fatalf("unterminated renderer CSI: %q", output)
+			}
+			switch output[n] {
+			case 'H', 'm', 'q', 'h', 'l':
+			case 'J':
+				for y := 0; y < screen.Rows(); y++ {
+					written[y] = true
+				}
+			default:
+				t.Fatalf("unexpected renderer CSI: %q", output[:n+1])
+			}
+			n++
+		} else {
+			r, size := utf8.DecodeRuneInString(output)
+			if r < 32 || r == 127 {
+				t.Fatalf("unexpected renderer control: %q", output)
+			}
+			n = size
+			written[screen.CursorY()] = true
+		}
+		if got := screen.Twrite([]byte(output[:n]), false); got != n {
+			t.Fatalf("renderer output consumed %d of %d bytes", got, n)
+		}
+		output = output[n:]
+	}
+	screen.TakeRegions()
+	return written
+}
+
+func TestLocalEditsEmitOnlyChangedRows(t *testing.T) {
+	for _, test := range []struct{ path, line string }{
+		{"example.go", "var number = 42 // unchanged tail\n"},
+		{"example.tex", "\\section{Title} $x^2$ % unchanged tail\n"},
+		{"example.md", "A **strong** word and `code`.\n"},
+		{"example.sh", "printf '%s\\n' \"$HOME\" # unchanged tail\n"},
+		{"example.txt", "Plain text with unchanged trailing rows.\n"},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			e := memoryEditor(strings.Repeat(test.line, 30))
+			defer e.close(false)
+			b := e.buffer()
+			b.meta.Path = test.path
+			e.setPos(b.start(2) + 4)
+			awaitSyntax(t, e, b)
+			var r renderer
+			screen := newPaintTerminal(e.cols, e.rows)
+			screen.Twrite([]byte("\x1b[?7l"), false)
+			draw := func(t *testing.T) int {
+				t.Helper()
+				before := r.previous
+				var out strings.Builder
+				if err := e.draw(&r, &out); err != nil {
+					t.Fatal(err)
+				}
+				rows := emittedPaintRows(t, screen, out.String())
+				for y := range rows {
+					if y < len(before) && slices.Equal(before[y], r.previous[y]) {
+						t.Fatalf("unchanged row %d received output: %q", y+1, out.String())
+					}
+					if len(before) > 0 && y < e.rows-2 && y != 2 {
+						t.Fatalf("local edit repainted document row %d: %q", y+1, out.String())
+					}
+				}
+				return out.Len()
+			}
+			draw(t)
+			for _, keys := range []string{"i", "X", "Y", "<BS>", "<Esc>", "x", "u", "<C-R>"} {
+				t.Run("keys_"+keys, func(t *testing.T) {
+					editKeys(e, keys)
+					// Check both the pending-syntax frame and its colored commit.
+					draw(t)
+					awaitSyntax(t, e, b)
+					draw(t)
+					if bytes := draw(t); bytes != 0 {
+						t.Fatal("settled redraw emitted output")
+					}
+				})
+			}
+			// Force a fresh full syntax calculation with identical final colors.
+			// A worker result alone must not cause any output, including spaces.
+			b.syntax = syntaxCache{}
+			awaitSyntax(t, e, b)
+			if bytes := draw(t); bytes != 0 {
+				t.Fatal("identical recomputed colors emitted output")
+			}
+		})
 	}
 }
