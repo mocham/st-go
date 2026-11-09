@@ -425,6 +425,9 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 		}
 	}
 	message := e.message
+	if message == "" {
+		message = savedTimeLabel(b)
+	}
 	if e.mode == insertMode {
 		message = "-- INSERT -- " + message
 	}
@@ -469,6 +472,13 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 	}
 	e.dirty = false
 	return nil
+}
+
+func savedTimeLabel(b *Buffer) string {
+	if b.savedAt.IsZero() {
+		return "Not saved yet"
+	}
+	return "Last saved " + b.savedAt.Local().Format("2006-01-02 15:04:05 MST")
 }
 
 // Compare terminal cells, not ANSI row strings. A color-only change sends only

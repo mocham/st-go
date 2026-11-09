@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func (e *Editor) address(value string) (row int, rest string, ok bool) {
@@ -174,7 +175,7 @@ func (e *Editor) execute(command string) {
 						e.error(err)
 						return
 					}
-					e.message = fileLabel(b) + " written"
+					e.message = ""
 					if name == "wq" || name == "x" || name == "xit" || name == "exit" {
 						e.quitWindow(force)
 					}
@@ -196,7 +197,7 @@ func (e *Editor) execute(command string) {
 			e.error(err)
 			return
 		}
-		e.message = fmt.Sprintf("%s written (%s)", fileLabel(b), b.meta.Encoding)
+		e.message = ""
 		if name == "wq" || name == "x" || name == "xit" || name == "exit" {
 			e.quitWindow(force)
 		}
@@ -222,7 +223,7 @@ func (e *Editor) execute(command string) {
 				}
 			}
 		}
-		e.message = "All buffers written"
+		e.message = ""
 		if name == "wqa" || name == "wqall" {
 			e.quit = true
 		}
@@ -726,7 +727,7 @@ func (e *Editor) export(path string, first, last int, ranged, force bool, noMove
 	}
 	_, err = atomicWrite(name, data, 0600, !force)
 	if err == nil {
-		e.message = "Written " + name
+		e.message = "Exported at " + time.Now().Format("2006-01-02 15:04:05 MST")
 		if e.preview != nil {
 			e.preview.saved(e, name, nil, len(noMove) > 0 && noMove[0])
 		}
@@ -748,6 +749,7 @@ func (e *Editor) reload(force bool) error {
 		return fmt.Errorf("reload failed")
 	}
 	b.meta = fresh.meta
+	b.savedAt = fresh.savedAt
 	b.savedVersion = b.version
 	committed, err := b.append(journalRecord{Kind: "saved", Version: b.version, Meta: &b.meta})
 	if !committed {
@@ -757,6 +759,9 @@ func (e *Editor) reload(force bool) error {
 		err = b.journal.Sync()
 	}
 	e.setPos(0)
+	if err == nil {
+		e.message = ""
+	}
 	if err == nil && e.preview != nil {
 		text := previewText(b)
 		e.preview.saved(e, b.meta.Path, &text, false)

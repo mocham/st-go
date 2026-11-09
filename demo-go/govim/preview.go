@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"st-go/limits"
+	"st-go/tui/outline"
 	"st-go/tui/preview"
 )
 
@@ -46,10 +47,12 @@ type previewResult struct {
 type previewEvent struct {
 	kind              string
 	value, cols, rows int
+	token             int
 	secondary         bool
 }
 
 type editorPreview struct {
+	toc                                            *editorTOC
 	options                                        previewOptions
 	out                                            io.Writer
 	path                                           string
@@ -194,6 +197,9 @@ func (p *editorPreview) toggle(e *Editor, unsaved bool) error {
 	if p.path == "" {
 		return fmt.Errorf("preview requires a named LaTeX/Markdown buffer")
 	}
+	if err := p.restorePreview(); err != nil {
+		return err
+	}
 	var overrides map[string]string
 	if unsaved {
 		// The renderer never reads mutable Editor/Buffer state. Capture all named
@@ -252,6 +258,9 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 	default:
 	}
 	if p.path == "" {
+		if p.toc != nil {
+			p.toc.active, p.toc.sent = false, false
+		}
 		if p.split {
 			if err := p.command("region reset"); err != nil {
 				return err
@@ -294,6 +303,12 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 			return err
 		}
 		p.clear = false
+		if p.toc != nil {
+			p.toc.sent = false
+		}
+	}
+	if p.toc != nil && p.toc.active {
+		return p.drawContents(e)
 	}
 	if result := p.completed; result != nil && (result.request.immediate || p.lastPublished.IsZero() || now.Sub(p.lastPublished) >= p.options.gap) {
 		if len(result.pdf) > 0 {
@@ -378,6 +393,10 @@ func (p *editorPreview) event(e *Editor, event previewEvent) {
 	if p == nil || p.closed {
 		return
 	}
+	if event.kind == "activate" {
+		p.activateContents(e, event)
+		return
+	}
 	if event.kind == "layout" {
 		if p.split && !p.unsupported && event.secondary && event.cols >= 8 && event.rows >= 2 {
 			p.ready = true
@@ -386,6 +405,9 @@ func (p *editorPreview) event(e *Editor, event previewEvent) {
 				e.dirty, e.fullRedraw = true, true
 			}
 		}
+		return
+	}
+	if p.toc != nil && p.toc.active {
 		return
 	}
 	if !p.published || !p.ready || p.source == nil {
@@ -425,6 +447,14 @@ func (p *editorPreview) close() error {
 
 func parsePreviewEvent(control string) *previewEvent {
 	fields := strings.Fields(control)
+	if len(fields) == 6 && fields[0] == "region" && fields[1] == "secondary" && fields[2] == "event" && fields[3] == "activate" {
+		token, e1 := strconv.Atoi(fields[4])
+		item, e2 := strconv.Atoi(fields[5])
+		if e1 == nil && e2 == nil && token >= 1 && token <= 1<<30 && item >= 1 && item <= outline.MaxEntries {
+			return &previewEvent{kind: "activate", token: token, value: item}
+		}
+		return nil
+	}
 	if len(fields) == 12 && fields[0] == "region" && fields[1] == "layout" && fields[2] == "main" && fields[7] == "secondary" {
 		values := make([]int, 8)
 		for j, i := range []int{3, 4, 5, 6, 8, 9, 10, 11} {

@@ -23,6 +23,10 @@ type displayRegionState struct {
 	mainWidth, totalWidth int // requested ratio, preserved across WM resizes
 	mainRows, windowRows  int // nonzero mainRows selects a stacked layout
 	secondary             *regionSurface
+	listPreview           *regionSurface // suspended image/PDF while a list is shown
+	listVisible           *regionListSurface
+	listVisibleY          float64 // last committed frame, not the animation target
+	listVisibleEpoch      uint64
 	generation            uint64
 	documentRevision      uint64
 	jobs                  chan regionJob // one pending job, latest request wins
@@ -45,6 +49,8 @@ type regionReply struct {
 }
 
 type regionSurface struct {
+	list                  *regionListSurface
+	listSelected          int
 	request               *term.RegionImage
 	bitmap                regionBitmap
 	dirty                 bool
@@ -174,6 +180,8 @@ func (t *Terminal) SetRegions(regions []term.DisplayRegion) error {
 		s.generation++ // invalidate both pending and in-flight decode results
 		s.documentRevision++
 		s.secondary = nil
+		s.listPreview = nil
+		s.listVisible = nil
 		t.cancelRegionDecode()
 		s.mainWidth, s.totalWidth = 0, 0
 		s.mainRows = 0
@@ -256,6 +264,15 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 	if request.Background != 0 && (!request.Continuous || request.Background>>24 != 255) {
 		return fmt.Errorf("region background requires an opaque color and a continuous PDF view")
 	}
+	if surface.list != nil {
+		if t.displayRegions.listPreview != nil {
+			surface = t.displayRegions.listPreview
+		} else {
+			surface = &regionSurface{}
+		}
+		t.displayRegions.secondary, t.displayRegions.listPreview = surface, nil
+		t.displayRegions.listVisible = nil
+	}
 	if request.KeepPage && surface.request != nil {
 		request.Options.Page = surface.request.Options.Page
 	}
@@ -297,6 +314,9 @@ func (t *Terminal) ClearRegion(id term.RegionID) error {
 	t.displayRegions.documentRevision++
 	t.cancelRegionDecode()
 	surface.request = nil
+	surface.list = nil
+	t.displayRegions.listPreview = nil
+	t.displayRegions.listVisible = nil
 	surface.search, surface.pendingSearch = nil, nil
 	surface.searchAnchored = false
 	surface.bitmap = regionBitmap{}
@@ -313,6 +333,23 @@ func (t *Terminal) queueRegionImage() {
 	s := &t.displayRegions
 	s.generation++
 	surface := s.secondary
+	if surface != nil && surface.list != nil {
+		list := surface.list
+		if list.cw != t.cw || list.ch != t.ch || list.baseline != t.baseline {
+			if next, err := newRegionList(list.content, t.cw, t.ch, t.baseline, list); err == nil {
+				surface.list = next
+			} else {
+				limits.Report("region list", "%v", err)
+			}
+		}
+		maximum := surface.list.maximum(s.viewport.Dy())
+		surface.scrollY = max(0, min(surface.scrollY, maximum))
+		surface.targetY = max(0, min(surface.targetY, maximum))
+		surface.dirty = true
+		t.cancelRegionDecode()
+		t.requestRegionPaint()
+		return
+	}
 	if surface == nil || surface.request == nil {
 		t.cancelRegionDecode()
 		return
@@ -582,6 +619,10 @@ func (t *Terminal) regionMousePress(button byte, px, py int) bool {
 	t.displayRegions.mu.Lock()
 	defer t.displayRegions.mu.Unlock()
 	surface := t.displayRegions.secondary
+	if surface.list != nil {
+		t.listMousePress(button, px, py)
+		return true
+	}
 	if button == 4 || button == 5 {
 		delta := 1
 		if button == 4 {
@@ -686,6 +727,25 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 	}
 	if event.Value < -limits.MaxBytes || event.Value > limits.MaxBytes || (event.Kind == "seek" && event.Value < 1) {
 		return fmt.Errorf("invalid region navigation event")
+	}
+	if surface.list != nil {
+		switch event.Kind {
+		case "scroll":
+			t.scrollRegionBy(event.Value)
+		case "view":
+			t.scrollRegionPixels(float64(event.Value) * float64(t.displayRegions.viewport.Dy()) / 1e6)
+		case "position":
+			if event.Value < 0 || event.Value > 1000000 {
+				return fmt.Errorf("invalid list position")
+			}
+			surface.scrollY = t.regionScrollMaximum() * float64(event.Value) / 1e6
+			surface.targetY = surface.scrollY
+			surface.dirty = true
+			t.requestRegionPaint()
+		default:
+			return fmt.Errorf("unsupported list navigation")
+		}
+		return nil
 	}
 	if event.Kind == "info" {
 		page, pages := surface.currentPage(), max(0, len(surface.bitmap.pageTops)-1)
@@ -806,6 +866,9 @@ func (t *Terminal) scrollRegionPixels(pixels float64) {
 }
 
 func (t *Terminal) regionScrollMaximum() float64 {
+	if list := t.displayRegions.secondary.list; list != nil {
+		return list.maximum(t.displayRegions.viewport.Dy())
+	}
 	b := t.displayRegions.secondary.bitmap
 	r := t.displayRegions.viewport
 	return max(0, float64(b.contentHeight)*float64(t.displayRegions.secondary.renderWidth(r.Dx()))/float64(max(1, b.width))-float64(r.Dy()))
@@ -813,7 +876,7 @@ func (t *Terminal) regionScrollMaximum() float64 {
 
 func (t *Terminal) tickRegionScroll(now time.Time) {
 	s := t.displayRegions.secondary
-	if s == nil || s.request == nil || !s.request.Continuous || s.scrollY == s.targetY {
+	if s == nil || s.list == nil && (s.request == nil || !s.request.Continuous) || s.scrollY == s.targetY {
 		return
 	}
 	dt := max(0, min(now.Sub(s.lastScroll).Seconds(), 0.05))
@@ -874,10 +937,15 @@ func (t *Terminal) paintSecondary() image.Rectangle {
 		return image.Rectangle{}
 	}
 	renderRegionPixels(frame.surface, frame.viewport, frame.pane, frame.background, framebuf, fbW)
+	t.noteRegionListFrame(frame)
 	return frame.pane
 }
 
 func renderRegionPixels(surface regionSurface, r, pane image.Rectangle, fallback uint32, pixels []uint32, stride int) {
+	if surface.list != nil {
+		renderRegionList(surface, r, pane, pixels, stride)
+		return
+	}
 	bitmap := surface.bitmap
 	bg := surface.background(fallback)
 	if bitmap.contentHeight > 0 && bitmap.background != 0 {

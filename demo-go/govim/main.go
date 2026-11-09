@@ -364,6 +364,10 @@ Save to refresh; %cursor wins, otherwise follow the cursor saved with :w.
 :Preview [LINE] / :PreviewScroll COUNT navigate manually. --no-preview disables.
 :toggle seeks the disk preview to the cursor; :toggle! draws unsaved buffers
 and seeks there instead. Neither writes files; both override %cursor.
+Normal Shift-Tab toggles the same panel between preview and source TOC.
+Wheel scrolls smoothly; click a heading/label to navigate the editor.
+Tab/Ctrl-I still moves forward through jump history.
+The bottom row shows the last successful save's date/time, not a second path.
 
 RECOVERY: every text change (including undo/redo) is written to a
 checksummed .govim.swp before it is applied. fsync defaults to

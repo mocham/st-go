@@ -53,6 +53,20 @@ make st govim
 * Wheel over the preview to scroll locally without re-rendering. Manual
   `:Preview [LINE]` and `:PreviewScroll COUNT` commands are also available
   (`:VimtexPreview` / `:VimtexScroll` aliases are accepted).
+* **Shift+Tab in Normal mode** switches that same panel to **Table of contents**;
+  press it again to restore the PDF and its scroll position. Tab/Ctrl-I remains
+  jump-forward. The TOC reads the active buffer, including unsaved edits, and
+  lists `\chapter`, `\section`, `\subsection`, `\subsubsection`, and
+  `\subsubsubsection`; `\label`, `\paragraph`, and `\subparagraph` share the
+  lowest level. Starred/short titles are supported; comments, verbatim regions,
+  and common macro definitions are ignored. Markdown ATX headings work too.
+  Wheel scrolling is locally pixel-animated; clicking an item moves the main
+  editor to its exact source location and adds a jump-history entry. No save,
+  compilation, editor resize, or main-pane repaint is needed to switch panels.
+  Source-offset changes alone do not resend the list. TOCs are bounded to 4096
+  entries and a bounded protocol payload. While visible, preview publication
+  waits so a save cannot unexpectedly replace the TOC. `:toggle[!]` returns to
+  the preview explicitly. Requires updated st-go; `--no-preview` disables both.
 * **`:toggle`** explicitly previews the on-disk document at the current editor
   cursor, ignoring `%cursor`. **`:toggle!`** instead renders immutable snapshots
   of the current named buffers, including unsaved `%main` roots/includes, and
@@ -75,6 +89,12 @@ browser-based Markdown renderer. The panel itself is owned by the terminal
 frontend; govim communicates using DCS region commands and never assumes X11.
 
 ## Recovery and saving
+
+The status bar retains the filepath. The bottom command/message row normally
+shows **Last saved YYYY-MM-DD HH:MM:SS TZ**, initialized from the file's modification
+time and advanced only by successful saves. New files show **Not saved yet**;
+unsaved edits and failed saves do not advance it. Prompts and messages/errors
+take precedence over this timestamp.
 
 * Every text edit, undo, and redo is appended to a swap **before** changing the
   live buffer. The initial snapshot is self-contained, so recovery does not

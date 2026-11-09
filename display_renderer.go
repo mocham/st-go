@@ -237,6 +237,7 @@ func (t *Terminal) regionPainter(wake <-chan struct{}, done <-chan struct{}, pre
 		pane := image.Rect(0, 0, frame.pane.Dx(), frame.pane.Dy())
 		renderRegionPixels(frame.surface, r, pane, frame.background, pixels, pane.Dx())
 		present(frame, pixels)
+		t.noteRegionListFrame(frame)
 		if frame.surface.scrollY != frame.surface.targetY {
 			timer.Reset(max(0, limits.PreviewFrameInterval-time.Since(last)))
 		}

@@ -181,6 +181,8 @@ func (t *Term) dslRegion(args []string) error {
 	}
 	id := RegionID(args[0])
 	switch args[1] {
+	case "list":
+		return t.dslRegionList(id, args[2:])
 	case "toc", "text":
 		want := 4
 		if args[1] == "text" {

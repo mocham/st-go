@@ -175,6 +175,8 @@ discarded. Input/bitmap limits apply, and failures are logged under `/tmp/`.
 | `region secondary open '<path>' [page N\|current] [fit-contain\|fit-width\|fit-height\|native]` | Replace the preview with a static image or PDF page |
 | `region secondary open '<path>' fit-width continuous [background '#RRGGBB']` | Display a continuous PDF with locally animated pixel scrolling and optional paper/canvas color |
 | `region secondary clear` | Clear the preview, retaining the split |
+| `region secondary list BASE64` | Overlay a retained, smoothly scrollable text list, encoded as base64 JSON |
+| `region secondary list restore` | Restore the previous image/PDF and its navigation, without changing the layout |
 | `region secondary scroll report\|pages` | Report navigation to the application, or use default PDF-page scrolling |
 | `region secondary scroll N` / `region secondary seek N` | Scroll locally in continuous mode, or emit an application navigation event |
 | `region secondary position N` | Set a continuous view's position in millionths of its scroll range (0–1000000) |
@@ -227,6 +229,15 @@ preview changes PDF pages (wrapping at either end); preview clicks are consumed
 locally. Keyboard input stays with the main terminal. The split persists across
 terminal resets and alternate-screen changes until `region reset`; applications
 should send that command during cleanup.
+
+Retained lists use `{"token":1,"title":"Table of contents","items":[{"id":1,"level":0,"text":"Chapter"}]}`.
+The terminal owns glyph rendering, local pixel scrolling, and hit-testing; it
+never interprets item IDs as paths or commands. A left click replies with
+`DCS region secondary event activate TOKEN ID ST`; applications must reject
+stale tokens. Control characters, duplicate/nonpositive IDs, excessive depth,
+and oversized lists are rejected. Lists are limited to 4096 items and the
+bounded DCS payload, with at most 512 KiB of text. `RegionListHooks` is an
+optional frontend capability; applications remain backend-neutral.
 
 Continuous PDF metadata queries reply with
 `DCS region secondary data TOKEN KIND PAGE OFFSET NEXT BASE64 ST`. Decode each

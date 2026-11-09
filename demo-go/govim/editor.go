@@ -231,7 +231,7 @@ func (e *Editor) open(path string, recoverFile bool) (*Buffer, error) {
 	if b.warning != "" {
 		e.message = b.warning
 	} else {
-		e.message = fileLabel(b)
+		e.message = ""
 	}
 	e.dirty = true
 	return b, nil
@@ -517,6 +517,13 @@ func (e *Editor) normalKey(key string) {
 	}
 	if key == "\n" && e.operator == "" && !e.visual() && texEditing(b) {
 		e.jumpTexPlaceholder()
+		return
+	}
+	if key == "<S-Tab>" && e.mode == normalMode && e.operator == "" {
+		if err := e.preview.toggleContents(e); err != nil {
+			e.error(err)
+		}
+		e.reset()
 		return
 	}
 	if len(key) == 1 && key[0] >= '0' && key[0] <= '9' && (key != "0" || e.count != "") {
@@ -1114,6 +1121,7 @@ func (e *Editor) bindPath(path string) error {
 	// A new name has not been written yet, even if this text matched the old
 	// file. Keep edit versions/history intact and reserve an unsaved sentinel.
 	copy.savedVersion = ^uint64(0)
+	copy.savedAt = time.Time{}
 	if data, err := readBounded(name, maxBufferBytes*4); err == nil {
 		copy.meta.DiskHash = digest(data)
 	} else if !os.IsNotExist(err) {

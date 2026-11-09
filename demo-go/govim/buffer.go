@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
@@ -59,6 +60,7 @@ type Buffer struct {
 	recoveryCursor                                int
 	placeholder                                   bool
 	syntax                                        syntaxCache
+	savedAt                                       time.Time
 }
 
 func canonicalPath(path string) (string, error) {
@@ -132,6 +134,7 @@ func loadBuffer(path string) (*Buffer, error) {
 		return nil, err
 	}
 	b.meta.Existed, b.meta.Mode, b.meta.DiskHash = true, uint32(info.Mode().Perm()), digest(data)
+	b.savedAt = info.ModTime()
 	decoded := data
 	b.placeholder = len(data) == 0
 	if len(data) >= 3 && string(data[:3]) == "\xef\xbb\xbf" {
@@ -527,6 +530,9 @@ func (b *Buffer) save(force bool) error {
 	}
 	if err == nil && b.journal != nil {
 		err = b.journal.Sync()
+	}
+	if err == nil {
+		b.savedAt = time.Now()
 	}
 	return err
 }

@@ -203,7 +203,7 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 				}
 				continue
 			}
-			if key := map[string]string{"[A": "<Up>", "[B": "<Down>", "[C": "<Right>", "[D": "<Left>", "OA": "<Up>", "OB": "<Down>", "OC": "<Right>", "OD": "<Left>", "[H": "<Home>", "[F": "<End>", "OH": "<Home>", "OF": "<End>", "[1~": "<Home>", "[4~": "<End>", "[7~": "<Home>", "[8~": "<End>", "[2~": "<Insert>", "[3~": "<Delete>", "[5~": "<PageUp>", "[6~": "<PageDown>", "[Z": "<S-Tab>", "[15~": "<F5>", "[15;5~": "<C-F5>", "[1;5D": "<C-Left>", "[1;5C": "<C-Right>"}[sequence]; key != "" {
+			if key := map[string]string{"[A": "<Up>", "[B": "<Down>", "[C": "<Right>", "[D": "<Left>", "OA": "<Up>", "OB": "<Down>", "OC": "<Right>", "OD": "<Left>", "[H": "<Home>", "[F": "<End>", "OH": "<Home>", "OF": "<End>", "[1~": "<Home>", "[4~": "<End>", "[7~": "<Home>", "[8~": "<End>", "[2~": "<Insert>", "[3~": "<Delete>", "[5~": "<PageUp>", "[6~": "<PageDown>", "[Z": "<S-Tab>", "[1;2Z": "<S-Tab>", "[15~": "<F5>", "[15;5~": "<C-F5>", "[1;5D": "<C-Left>", "[1;5C": "<C-Right>"}[sequence]; key != "" {
 				emit(keyEvent{Key: key})
 			}
 			continue
