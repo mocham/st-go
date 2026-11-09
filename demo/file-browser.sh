@@ -136,6 +136,7 @@ PATH_MATCHES=()
 PATH_MATCH_IDX=-1
 PATH_MATCH_TOP=0
 PATH_MESSAGE=
+PATH_COMPLETED=
 PATH_POPUP_MAX=8
 CMD_MESSAGE=
 CMD_AFFECTED=()
@@ -564,8 +565,17 @@ update_path_matches() {
 	shopt -s nullglob
 	shopt -u failglob dotglob nocaseglob globstar extglob
 	local IFS=
-	# shellcheck disable=SC2206 # Intentional glob expansion with IFS disabled.
-	local -a expanded=( $pattern )
+	local -a expanded
+	if [[ -n $PATH_COMPLETED ]]; then
+		if ((completion)) && [[ -d $PATH_COMPLETED ]]; then
+			expanded=( "${PATH_COMPLETED%/}"/* )
+		else
+			expanded=( "$PATH_COMPLETED" )
+		fi
+	else
+		# shellcheck disable=SC2206 # Intentional glob expansion with IFS disabled.
+		expanded=( $pattern )
+	fi
 	eval "$old_opts"
 	if ((old_globignore_set)); then GLOBIGNORE=$old_globignore; else unset GLOBIGNORE; fi
 	PATH_MATCHES=()
@@ -599,11 +609,26 @@ prompt_delete() {
 }
 
 refresh_prompt_matches() {
+	PATH_COMPLETED=
 	if [[ $PROMPT_MODE == path ]]; then
 		update_path_matches 1
 	else
 		update_command_preview
 	fi
+}
+
+complete_path_prompt() {
+	update_path_matches 1
+	if ((${#PATH_MATCHES[@]} == 0)); then PATH_MESSAGE='No match'; return; fi
+	local target=${PATH_MATCHES[0]} value
+	value=$target
+	if [[ $PROMPT_BUFFER != /* && $value == "$DIR/"* ]]; then value=${value#"$DIR/"}; fi
+	if [[ -d $target && $value != */ ]]; then value+=/; fi
+	PROMPT_BUFFER=$value
+	PROMPT_CURSOR=${#PROMPT_BUFFER}
+	# The selected filesystem name is literal, even if it contains glob syntax.
+	PATH_COMPLETED=$target
+	update_path_matches 1
 }
 
 path_select_delta() {
@@ -964,6 +989,10 @@ submit_path_prompt() {
 		activate_typed_path "${PATH_MATCHES[$PATH_MATCH_IDX]}"
 		return
 	fi
+	if [[ -n $PATH_COMPLETED ]]; then
+		activate_typed_path "$PATH_COMPLETED"
+		return
+	fi
 	path_pattern "$PROMPT_BUFFER" 0; exact=$REPLY
 	if ! path_has_glob "$PROMPT_BUFFER" && [[ -e $exact || -L $exact ]]; then
 		activate_typed_path "$exact"
@@ -1089,6 +1118,7 @@ modal_prompt() {
 			$'\001') PROMPT_CURSOR=0 ;;
 			$'\005') PROMPT_CURSOR=${#PROMPT_BUFFER} ;;
 			$'\003') PROMPT_ABORT=1 ;;
+			$'\t') if [[ $mode == path ]]; then complete_path_prompt; else prompt_insert "$key"; fi ;;
 			$'\e')
 				if IFS= read -rsn1 -t 0.05 next; then
 					if [[ $next == '[' ]] && IFS= read -rsn1 -t 0.05 first; then
@@ -1307,6 +1337,8 @@ PATH PROMPT  (/)
     /home/user/file.txt
     sub/*.go
   A popup lists live matches; Up/Down selects one before Enter.
+  Tab fills the input with the first match; directories get a trailing /.
+  Completion stays in input mode. Only Enter opens or enters the path.
   Backspace removes the leading / to type relative paths.
 
 OTHER KEYS

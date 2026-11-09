@@ -125,6 +125,7 @@ type Browser struct {
 	pathMatchIdx    int
 	pathMatchTop    int
 	pathMessage     string
+	pathCompleted   string // exact Tab target; never reinterpreted as a glob
 	cmdMessage      string
 	cmdAffected     []int
 	cmdNewNames     []string

@@ -85,6 +85,10 @@ func (b *Browser) handlePromptKey(k byte) {
 		b.promptEdit("<End>")
 	case 0x03: // Ctrl+C
 		b.promptAbort = true
+	case '\t':
+		if b.promptMode == "path" {
+			b.completePathPrompt()
+		}
 	case 0x1b:
 		next, st := b.in.readByte(50 * time.Millisecond)
 		if st == inData && (next == '[' || next == 'O') {
@@ -232,6 +236,7 @@ func (b *Browser) promptParts() (string, string) {
 }
 
 func (b *Browser) refreshPromptMatches() {
+	b.pathCompleted = ""
 	if b.promptMode == "path" {
 		b.updatePathMatches(true)
 	} else {
@@ -261,7 +266,19 @@ func (b *Browser) pathPattern(completion bool) string {
 
 func (b *Browser) updatePathMatches(completion bool) {
 	pattern := b.pathPattern(completion)
-	expanded, _ := filepath.Glob(pattern)
+	var expanded []string
+	if b.pathCompleted != "" {
+		if completion && isDir(b.pathCompleted) {
+			entries, _ := os.ReadDir(b.pathCompleted)
+			for _, entry := range entries {
+				expanded = append(expanded, filepath.Join(b.pathCompleted, entry.Name()))
+			}
+		} else {
+			expanded = []string{b.pathCompleted}
+		}
+	} else {
+		expanded, _ = filepath.Glob(pattern)
+	}
 	b.pathMatches = nil
 	for _, f := range expanded {
 		if pathExists(f) || isSymlink(f) {
@@ -271,6 +288,37 @@ func (b *Browser) updatePathMatches(completion bool) {
 	b.pathMatchIdx = -1
 	b.pathMatchTop = 0
 	b.pathMessage = ""
+}
+
+func (b *Browser) completePathPrompt() {
+	b.updatePathMatches(true)
+	if len(b.pathMatches) == 0 {
+		b.pathMessage = "No match"
+		return
+	}
+	target := b.pathMatches[0]
+	value := target
+	if !bytes.HasPrefix(b.promptBuffer, []byte("/")) {
+		if strings.HasPrefix(value, b.dir+"/") {
+			value = strings.TrimPrefix(value, b.dir+"/")
+		} else if relative, err := filepath.Rel(b.dir, value); err == nil {
+			value = relative
+		}
+	}
+	if isDir(target) && !strings.HasSuffix(value, "/") {
+		value += "/"
+	}
+	b.ensurePromptEditor()
+	if len(value) > b.promptEditor.Limit {
+		b.pathMessage = "Completed path exceeds input limit"
+		return
+	}
+	b.promptEditor.Reset(value, 0)
+	b.syncPromptEditor(readline.Result{})
+	// Keep the raw filesystem target, including any literal glob/control bytes.
+	// Rendering sanitizes names; Enter must not reinterpret the completion.
+	b.pathCompleted = target
+	b.updatePathMatches(true)
 }
 
 func (b *Browser) pathSelectDelta(delta int) {
@@ -351,6 +399,10 @@ func (b *Browser) drawPathPrompt() {
 func (b *Browser) submitPathPrompt() {
 	if b.pathMatchIdx >= 0 && b.pathMatchIdx < len(b.pathMatches) {
 		b.activateTypedPath(b.pathMatches[b.pathMatchIdx])
+		return
+	}
+	if b.pathCompleted != "" {
+		b.activateTypedPath(b.pathCompleted)
 		return
 	}
 	exact := b.pathPattern(false)

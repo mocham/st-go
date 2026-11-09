@@ -71,6 +71,8 @@ PATH PROMPT  (/)
     /home/user/file.txt
     sub/*.go
   A popup lists live matches; Up/Down selects one before Enter.
+  Tab fills the input with the first match; directories get a trailing /.
+  Completion stays in input mode. Only Enter opens or enters the path.
   Backspace removes the leading / to type relative paths.
 
 OTHER KEYS

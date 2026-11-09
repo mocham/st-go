@@ -514,8 +514,10 @@ The path prompt accepts absolute paths and paths relative to the current browser
 directory, including `file`, `./file`, and `../../file`. Backspace can remove
 the initial `/`; `Ctrl+A`/`Ctrl+E` move to the beginning/end. Live matching
 shows a popup menu, standard `*`, `?`, and bracket wildcards are expanded, and
-Up/Down selects a match before Enter activates it. Escape, `Ctrl+C`, or any
-mouse click cancels path entry.
+Up/Down selects a match before Enter activates it. **Tab fills the input with
+the first match**, appending `/` for a directory and leaving the cursor at the
+end. Completion stays in input mode; only Enter opens or enters the path.
+Escape, `Ctrl+C`, or any mouse click cancels path entry.
 
 The `:` key opens a shell command prompt built on the same modal input loop as
 the `/` path prompt. The selected file is exported as `$F` and the browsed
