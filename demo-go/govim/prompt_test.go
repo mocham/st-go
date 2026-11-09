@@ -142,7 +142,7 @@ func TestPromptHorizontalScrollAndRenderedCursor(t *testing.T) {
 	}
 	editKeys(e, "<C-a>")
 	line, column = e.promptLine(e.cols - 1)
-	if e.promptView != 1 || column != 1 || line != e.prompt {
+	if e.promptView != 1 || column != 1 || !strings.HasPrefix(e.prompt, line) {
 		t.Fatal("prompt beginning remained scrolled")
 	}
 	editKeys(e, "<C-f><C-f>")

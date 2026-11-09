@@ -164,14 +164,18 @@ func (e *Editor) storeRegister(value register, yank, copyClipboard bool) {
 		e.registers['-'] = value
 	}
 	if selected == '+' || selected == '*' || copyClipboard {
-		e.registers['+'] = value
+		target := '+'
+		if selected == '*' {
+			target = '*'
+		}
+		e.registers[target] = value
 		if e.clip != nil {
 			if err := e.clip.Set(value.Text, selected == '*'); err != nil {
 				e.clipboardError = err.Error()
 				e.message = "Clipboard: " + err.Error() + " (internal register retained)"
 			}
 		} else {
-			e.message = "X11 clipboard unavailable; internal register retained"
+			e.message = "Terminal clipboard unavailable; internal register retained"
 		}
 	}
 }
@@ -192,16 +196,6 @@ func (e *Editor) getRegister(name rune) register {
 		return register{Text: e.lastEx}
 	case '.':
 		return register{Text: e.lastInsert}
-	}
-	if (name == '+' || name == '*') && e.clip != nil {
-		if text, err := e.clip.Get(name == '*'); err == nil {
-			if old := e.registers[name]; old.Text == text {
-				return old
-			}
-			return register{Text: text, Line: strings.HasSuffix(text, "\n")}
-		} else {
-			e.error(err)
-		}
 	}
 	return e.registers[unicode.ToLower(name)]
 }

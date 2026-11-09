@@ -11,8 +11,8 @@ import (
 	"golang.org/x/text/width"
 )
 
-const baseStyle = "\x1b[0;38;5;223;48;5;236m"
-const currentLineStyle = "\x1b[0;38;5;223;48;5;237m"
+const baseStyle = "\x1b[0;38;5;231;48;5;236m"
+const currentLineStyle = "\x1b[0;38;5;231;48;5;237m"
 const numberStyle = "\x1b[0;38;5;244;48;5;236m"
 const statusStyle = "\x1b[0;38;5;231;48;5;239m"
 const activeStatusStyle = "\x1b[1;38;5;223;48;5;240m"
@@ -33,8 +33,9 @@ type tile struct {
 	continuation bool
 }
 type renderer struct {
-	previous   []string
-	rows, cols int
+	previous                      [][]tile
+	rows, cols                    int
+	cursorX, cursorY, cursorShape int
 }
 
 func runeCells(r rune, column int) int {
@@ -293,9 +294,28 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 		}
 	}
 	cursorX, cursorY := 0, 0
+	// Combine split-window demand before queueing work. Two views of the same
+	// buffer must not evict each other's colors or endlessly alternate requests.
+	demands := make(map[*Buffer][2]int)
 	for _, w := range e.windows() {
-		tokens := e.syntaxTokens(w.buffer)
 		e.viewport(w)
+		first := w.buffer.start(max(0, w.topLine-syntaxViewportMargin))
+		lastRow := w.topLine
+		if len(w.rows) > 0 {
+			lastRow = w.rows[len(w.rows)-1].line
+		}
+		last := w.buffer.end(min(len(w.buffer.lineStarts())-1, lastRow+syntaxViewportMargin))
+		if previous, ok := demands[w.buffer]; ok {
+			first, last = min(first, previous[0]), max(last, previous[1])
+		}
+		demands[w.buffer] = [2]int{first, last}
+	}
+	tokenSets := make(map[*Buffer][]syntaxToken)
+	for buffer, demand := range demands {
+		tokenSets[buffer] = e.syntaxTokens(buffer, demand[0], demand[1])
+	}
+	for _, w := range e.windows() {
+		tokens := tokenSets[w.buffer]
 		gutter := numberWidth(w.buffer) + 1
 		textWidth := max(1, w.rect.w-gutter)
 		for slot := 0; slot < max(0, w.rect.h-1); slot++ {
@@ -363,6 +383,24 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 				}
 			}
 		}
+		cache := &w.buffer.syntax
+		demand := demands[w.buffer]
+		if !cache.ready || cache.key != (syntaxKey{w.buffer.version, w.buffer.meta.Path}) || cache.first > demand[0] || cache.last < demand[1] {
+			// Commit text and its colors together. A pending/partial syntax job
+			// must NEVER produce a plain (or stale-color) intermediate frame.
+			// Keep the last committed pane; prompts/status remain responsive.
+			for y := max(0, w.rect.y); y < min(e.rows-1, w.rect.y+w.rect.h-1); y++ {
+				for x := max(0, w.rect.x); x < min(e.cols, w.rect.x+w.rect.w); x++ {
+					canvas[y][x] = tile{}
+					if r.rows == e.rows && r.cols == e.cols && y < len(r.previous) && x < len(r.previous[y]) {
+						canvas[y][x] = r.previous[y][x]
+					}
+				}
+			}
+			if w == e.window() && e.prompt == "" {
+				cursorX, cursorY = r.cursorX, r.cursorY
+			}
+		}
 		statusY := w.rect.y + w.rect.h - 1
 		if statusY >= 0 && statusY < e.rows-1 {
 			status := fileLabel(w.buffer)
@@ -418,43 +456,6 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 		putCanvas(canvas, 0, e.rows-1, "Press any key to continue", statusStyle, e.cols)
 		cursorX, cursorY = 0, e.rows-1
 	}
-	lines := make([]string, e.rows)
-	for y, row := range canvas {
-		var line strings.Builder
-		style := ""
-		for _, cell := range row {
-			if cell.continuation {
-				continue
-			}
-			next := cell.style
-			if next == "" {
-				next = baseStyle
-			}
-			if next != style {
-				line.WriteString(next)
-				style = next
-			}
-			if cell.text == "" {
-				line.WriteByte(' ')
-			} else {
-				line.WriteString(cell.text)
-			}
-		}
-		line.WriteString("\x1b[0m")
-		lines[y] = line.String()
-	}
-	var output strings.Builder
-	output.WriteString("\x1b[?2026h\x1b[?25l")
-	if r.rows != e.rows || r.cols != e.cols {
-		output.WriteString("\x1b[2J")
-		r.previous = nil
-		r.rows, r.cols = e.rows, e.cols
-	}
-	for y, line := range lines {
-		if y >= len(r.previous) || r.previous[y] != line {
-			fmt.Fprintf(&output, "\x1b[%d;1H%s", y+1, line)
-		}
-	}
 	shape := 2
 	if e.mode == insertMode || e.prompt != "" {
 		shape = 6
@@ -462,12 +463,88 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 	if e.mode == replaceMode {
 		shape = 4
 	}
-	fmt.Fprintf(&output, "\x1b[%d q\x1b[%d;%dH\x1b[?25h\x1b[?2026l", shape, clamp(cursorY, 0, e.rows-1)+1, clamp(cursorX, 0, e.cols-1)+1)
-	if err := writeAll(out, []byte(output.String())); err != nil {
+	if err := r.paint(canvas, clamp(cursorX, 0, e.cols-1), clamp(cursorY, 0, e.rows-1), shape, out); err != nil {
 		return err
 	}
-	r.previous = lines
 	e.dirty = false
+	return nil
+}
+
+// Compare terminal cells, not ANSI row strings. A color-only change sends only
+// the affected span. Extend through both old/new wide glyphs so shrinking a
+// character cannot leave half a glyph or stale tab padding behind.
+func (r *renderer) paint(canvas [][]tile, cursorX, cursorY, shape int, out io.Writer) error {
+	rows := len(canvas)
+	if rows == 0 {
+		return nil
+	}
+	cols := len(canvas[0])
+	resized := r.rows != rows || r.cols != cols
+	for y := range canvas {
+		for x := range canvas[y] {
+			cell := &canvas[y][x]
+			if cell.style == "" {
+				cell.style = baseStyle
+			}
+			if cell.text == "" && !cell.continuation {
+				cell.text = " "
+			}
+		}
+	}
+	var body strings.Builder
+	if resized {
+		body.WriteString("\x1b[2J")
+		r.previous = nil
+	}
+	for y, row := range canvas {
+		var old []tile
+		if y < len(r.previous) {
+			old = r.previous[y]
+		}
+		changed := func(x int) bool { return x >= len(old) || old[x] != row[x] }
+		for x := 0; x < len(row); {
+			if !changed(x) {
+				x++
+				continue
+			}
+			first := x
+			for first > 0 && (row[first].continuation || first < len(old) && old[first].continuation) {
+				first--
+			}
+			end := x + 1
+			for end < len(row) && (changed(end) || row[end].continuation || end < len(old) && old[end].continuation) {
+				end++
+			}
+			fmt.Fprintf(&body, "\x1b[%d;%dH", y+1, first+1)
+			style := ""
+			for _, cell := range row[first:end] {
+				if cell.continuation {
+					continue
+				}
+				if cell.style != style {
+					body.WriteString(cell.style)
+					style = cell.style
+				}
+				body.WriteString(cell.text)
+			}
+			x = end
+		}
+	}
+	painted := body.Len() > 0
+	if len(r.previous) == 0 || r.cursorShape != shape {
+		fmt.Fprintf(&body, "\x1b[%d q", shape)
+	}
+	if painted || len(r.previous) == 0 || r.cursorX != cursorX || r.cursorY != cursorY {
+		fmt.Fprintf(&body, "\x1b[%d;%dH", cursorY+1, cursorX+1)
+	}
+	if body.Len() > 0 {
+		if err := writeAll(out, []byte("\x1b[?2026h"+body.String()+"\x1b[?2026l")); err != nil {
+			return err
+		}
+	}
+	r.previous = canvas
+	r.rows, r.cols = rows, cols
+	r.cursorX, r.cursorY, r.cursorShape = cursorX, cursorY, shape
 	return nil
 }
 

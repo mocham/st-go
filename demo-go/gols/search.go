@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"st-go/limits"
 	"st-go/pdfmeta"
+	"st-go/tui/readline"
 	"st-go/tui/textsearch"
 )
 
@@ -31,15 +31,27 @@ func (browser *Browser) startDocumentSearchPrompt(mode byte) {
 		return
 	}
 	browser.searchPromptBuffer = []byte{mode}
+	browser.searchLine = readline.New(string(browser.searchPromptBuffer), 1, 4097)
+	browser.searchLine.SetHistory(browser.searchHistory)
 	fmt.Fprint(browser.out, "\x1b[?25h")
 	browser.drawPrompt(string(browser.searchPromptBuffer))
 }
 
 func (browser *Browser) handleSearchPromptKey(character byte) {
 	buffer := browser.searchPromptBuffer
+	if browser.searchLine == nil || browser.searchLine.Text() != string(buffer) {
+		browser.searchLine = readline.New(string(buffer), 1, 4097)
+		browser.searchLine.SetHistory(browser.searchHistory)
+	}
 	finish := func() { browser.searchPromptBuffer = nil; fmt.Fprint(browser.out, "\x1b[?25l") }
-	switch character {
-	case '\r', '\n':
+	result := browser.editInputByte(browser.searchLine, character)
+	browser.searchPromptBuffer = []byte(browser.searchLine.Text())
+	if result.Submit {
+		buffer = browser.searchPromptBuffer
+		browser.searchHistory = append(browser.searchHistory, string(buffer))
+		if len(browser.searchHistory) > 100 {
+			browser.searchHistory = browser.searchHistory[1:]
+		}
 		value, mode := strings.TrimSpace(string(buffer[1:])), buffer[0]
 		finish()
 		if mode == ':' {
@@ -57,38 +69,39 @@ func (browser *Browser) handleSearchPromptKey(character byte) {
 			value = browser.documentSearch.query
 		}
 		browser.findDocumentText(value, mode == '?')
-	case 0x1b:
-		// Consume a complete arrow/mouse sequence without letting its tail
-		// become prompt text; a lone Escape cancels only the prompt.
-		next, status := browser.in.readByte(50 * time.Millisecond)
-		if status == inData && next == '[' {
-			if first, st := browser.in.readByte(50 * time.Millisecond); st == inData {
-				if first < 0x40 || first > 0x7e {
-					browser.readCSI(first)
-				}
-			}
-			return
-		}
+	}
+	if result.Cancel {
 		finish()
 		browser.drawStatus()
-	case 0x03:
-		finish()
-		browser.drawStatus()
-	case 0x15:
-		browser.searchPromptBuffer = buffer[:1]
-	case 0x7f, '\b':
-		if len(buffer) > 1 {
-			_, size := utf8.DecodeLastRune(buffer[1:])
-			browser.searchPromptBuffer = buffer[:len(buffer)-size]
-		}
-	default:
-		if character >= 0x20 && len(buffer) < 4097 {
-			browser.searchPromptBuffer = append(buffer, character)
-		}
 	}
 	if len(browser.searchPromptBuffer) > 0 {
 		browser.drawPrompt(string(browser.searchPromptBuffer))
 	}
+}
+
+func (browser *Browser) editInputByte(line *readline.Line, character byte) readline.Result {
+	if character != 0x1b {
+		return line.FeedByte(character)
+	}
+	next, status := browser.in.readByte(50 * time.Millisecond)
+	if status != inData {
+		return line.Handle("<Esc>")
+	}
+	if next == '[' || next == 'O' {
+		first, st := browser.in.readByte(50 * time.Millisecond)
+		if st != inData {
+			return readline.Result{Handled: true}
+		}
+		sequence := string(first)
+		if first < 0x40 || first > 0x7e {
+			sequence = browser.readCSI(first)
+		}
+		return line.Handle(readline.CSI(sequence))
+	}
+	if key := map[byte]string{'b': "<A-b>", 'f': "<A-f>", 'd': "<A-d>", 0x7f: "<A-BS>"}[next]; key != "" {
+		return line.Handle(key)
+	}
+	return line.Handle("<Esc>")
 }
 
 func (browser *Browser) findDocumentText(query string, backward bool) {

@@ -458,15 +458,7 @@ func (t *Term) strhandle() {
 			}
 			return
 		case 52:
-			if t.strescseq.narg > 2 && t.cfg.AllowWindowOps {
-				dec := base64dec(t.strescseq.args[2])
-				if len(dec) > 0 {
-					t.xsetsel(dec)
-					t.xclipcopy()
-				} else {
-					log.Printf("erresc: invalid base64\n")
-				}
-			}
+			t.oscClipboard()
 			return
 		case 10, 11, 12:
 			if t.strescseq.narg < 2 {
@@ -1347,7 +1339,11 @@ func (t *Term) tputc(u rune) {
 		if t.strescseq.discard {
 			return
 		}
-		if !limits.Check("control string", int64(len(t.strescseq.buf)+len_), limits.ControlBytes) {
+		maximum := limits.ControlBytes
+		if t.strescseq.typ == ']' && len(t.strescseq.buf) >= 3 && string(t.strescseq.buf[:3]) == "52;" {
+			maximum = maxClipboardControl
+		}
+		if !limits.Check("control string", int64(len(t.strescseq.buf)+len_), maximum) {
 			t.strescseq.discard = true
 			t.strescseq.buf = nil
 			t.strescseq.args = nil

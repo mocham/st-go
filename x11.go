@@ -98,6 +98,11 @@ type Terminal struct {
 	mshortcuts []mShortcut
 
 	selectionText         string
+	clipboardText         string
+	clipboardSet          bool
+	primarySet            bool
+	clipboardQuery        *clipboardQuery
+	clipboardTransfers    map[clipboardTransferID]*clipboardTransfer
 	geometryTags          map[string]windowRect
 	restoreGeometryTag    string
 	suppressRestoreButton bool

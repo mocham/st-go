@@ -36,7 +36,8 @@ extraction is needed for these substitutes.
 
 - One native-document-owning decoder worker, retaining its Splash font/render
   engine across slices. Decoding never holds the terminal or preview-state mutex.
-- Separate preview-state mutex, private pixel buffer, painter, X11 child window,
+- In the **st-go frontend** (not the zat TUI): a separate preview-state mutex,
+  private pixel buffer, painter, X11 child window,
   GC and backing pixmap. The child shares the parent's X connection/event loop.
   Frame preparation and uploads run outside the terminal mutex; only layout and
   shutdown synchronize with outstanding preview uploads.

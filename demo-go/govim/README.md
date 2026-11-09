@@ -82,21 +82,53 @@ auto/smart indentation, unrestricted insert backspace, mouse selection, UTF-8
 with lossless GB18030 fallback, and double-width ambiguous characters.
 UTF-8 BOMs, uniform CRLF, and missing final newlines are retained.
 
-Syntax coloring uses **Chroma's language lexers and style inheritance**, with
-a desert-style foreground palette. Filename patterns (including names such as
-`Makefile`) and supported shebangs choose the language. Whole-document
-tokenization preserves multiline comments/strings and fenced or embedded
-languages supported by the selected Chroma lexer; Vim's syntax engine/runtime
-files are not cloned or loaded. Cursor-line, search, selection, and matching
-bracket backgrounds remain editor overlays.
+Syntax coloring uses **Chroma's language lexers and style inheritance**, plus a
+restartable TeX scanner. Filename patterns (including names such as `Makefile`)
+and supported shebangs choose the language. The embedded
+[`syntax/desert.json`](syntax/desert.json) theme maps semantic groups to the
+supplied Vim91 desert colors; it is data, not executable Vimscript. Comments,
+strings, commands, types, and identifiers have distinct foregrounds. TeX math
+bodies differ from prose, commands/delimiters, comments, and verbatim; inline and
+display delimiters, common starred/nested AMS environments, and `\text{...}`
+retain state across lines. See [the group mapping](syntax/README.md). Cursor-line,
+search, selection, and bracket backgrounds remain editor overlays.
 
-Highlighting runs on immutable snapshots in one background worker. Results are
-cached by buffer version and filename, and stale results are discarded after
-edits/undo/renames. For responsiveness, files above 1 MiB, results above 65,536
-tokens, and failed/over-budget lexers fall back to plain text without changing
-editing or recovery. The worker checks a one-second budget between tokens;
-Chroma also bounds individual regular-expression matches. No highlighter can
-write document text or invoke external programs.
+Highlighting is enabled automatically for Chroma's recognized filename patterns,
+including `.vim`, `.tex`, `.md`, `.sh`, `.py`, `.go`, `.c`, `.cc`/`.cpp`, `.json`,
+`.xml`, `.html`, `.css`, `.js`, `.php`, `.toml`, `.yaml`/`.yml`, `.csv`, and `.ini`.
+Common extensionless/configuration names are covered too: `Dockerfile`
+(`Dockerfile.*`), `Containerfile`, `Makefile`, `.bashrc`, `.bash_profile`,
+`.bash_logout`, `.profile`, `.zshrc`, `.zprofile`, `.zshenv`, `.vimrc`,
+`.editorconfig`, and `.gitconfig`. Unknown files remain plain text; supported
+shebangs can identify scripts without a recognized filename. Regression tests
+check that these examples select a lexer **and produce colored spans**.
+
+Highlighting is **lazy**, driven by visible lines plus a 40-line margin, not a
+whole-buffer job after every keystroke. A background worker reads immutable
+rune snapshots without a whole-buffer UTF-8 copy. Restartable Chroma regex
+lexers cache safe lexical-stack checkpoints; edits invalidate from a preceding
+line/checkpoint and re-lex forward only until state convergence or the requested
+viewport. TeX has explicit line/state checkpoints. Scrolling extends demand,
+and split-window demands for the same buffer are combined. Stale results are
+rejected using an edit serial as well as the buffer version (including undo).
+
+**There is no uncolored document pass.** Until the edited viewport's colors are
+ready, its previous committed cells remain on screen; prompts/status can still
+update. Text and final colors are then committed together. ANSI output compares
+cells and sends only changed spans, including color-only changes; identical
+frames emit nothing. Cursor hide/show is not toggled on every frame.
+
+Worker slices normally stop at safe token/line boundaries after 20 ms or 65,536
+tokens. This is a cooperative budget, not a hard deadline: a single multiline
+regex match or embedded lexer can run beyond a viewport/slice boundary. Chroma
+does not provide an incremental-edit API; this adapter is not Vim's complete
+syntax engine. Delegating/non-regex lexers without restartable state use a
+conservative prefix-through-demand fallback (limited to 1 MiB and a one-second
+between-token budget), not fake independent-line parsing. Lexing failures are
+presentation-only and never change text/recovery or invoke external programs.
+Worker caches retain at most eight document identities, thin checkpoints after
+8,192 entries, and refuse color caches beyond 262,144 spans rather than growing
+memory without limit.
 
 `:set` can show/accept the fixed preferences; there
 is no general options interpreter, Vimscript, plugin loader, or modeline
@@ -131,7 +163,8 @@ triple-click line selection, wheel scrolling, and middle-click PRIMARY put.
 
 ### Command-line editing
 
-The `:`, `/`, and `?` prompts support readline-style editing independently of
+The `:`, `/`, and `?` prompts use the shared backend-neutral `tui/readline`
+component and support readline-style editing independently of
 the document cursor:
 
 * Left/Right or Ctrl-B/F move; Home/End or Ctrl-A/E go to the start/end.
@@ -150,15 +183,23 @@ spaces; paste never submits a command by itself. Escape/Ctrl-C cancel.
 ### Clipboard
 
 The preferred `yy`/`dd` (including counts), visual `y`/`d`, and ranged `:Y`/`:D`
-copy affected text directly to the **X11 CLIPBOARD**. `"+` uses CLIPBOARD and
-`"*` uses PRIMARY. Transfers support UTF-8, Latin-1 fallback, and large X11 INCR
-requests. A small instance of **the same govim binary** keeps owned selections
-alive after exit until another application replaces them (up to 24 hours).
-There is no `xclip`, `xsel`, shell clipboard command, or font dependency.
+also queue an **OSC 52** copy request to the hosting terminal. Govim does not
+connect to a display server or spawn a selection-owner helper. Native selection
+ownership, large transfers and persistence are the terminal's responsibility.
 
-Without a reachable X display, internal registers still work and copying
-reports the missing system clipboard. Native Wayland and OSC52 clipboard
-transport are not implemented.
+Internal registers are separate and immediate: ordinary `p/P`, `"0p`, named
+registers, undo and editing never query or wait for the host clipboard. The
+copy request is flushed separately from register storage. Only explicit `"+`
+(clipboard) or `"*` (primary selection) reads wait asynchronously for an OSC 52
+reply; requests can be cancelled with Escape and time out after two seconds.
+External replies do not replace the unnamed/internal register.
+
+In st-go, `allowclipboardwrite` defaults to true; clipboard **reads** require
+`"allowclipboardread": true` in the terminal configuration for privacy. Both
+permissions are independent of window operations. Other terminals must support
+OSC 52 and permit the requested operation. Unsupported reads leave internal
+registers/document text intact. There is no X11 assumption or clipboard tool
+inside govim, so another frontend can implement the same terminal protocol.
 
 ### TeX compilation
 
@@ -190,13 +231,14 @@ disk usage includes original/deleted text and all journaled edits.
 go test ./demo-go/govim
 go test -race ./demo-go/govim
 make test
-# Optional; use an already-running, isolated X server (no packages downloaded):
-GOVIM_TEST_X11=1 DISPLAY=:99 go test ./demo-go/govim -run NativeClipboardX11
 ```
 
 Tests use synthetic text and cover command composition, optional comparison
 against an installed Vim **as a test oracle only**, randomized editing/history,
 journal corruption/locking/write-sync failures, file conflicts, encodings,
-rendering/parser bounds, PTY resize/paste/mouse/termios cleanup, and SIGKILL
+rendering/parser bounds, single colored edit commits (including delayed workers),
+changed-cell ANSI output, incremental/full-lexer equivalence after randomized
+edits, lazy viewport/convergence work bounds, TeX math state, split demand,
+PTY resize/paste/mouse/termios cleanup, and SIGKILL
 recovery in insert mode for both flush triggers. Fuzz targets cover the parser
 and editor state machine. No private reference-document text is copied.

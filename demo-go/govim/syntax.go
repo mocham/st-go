@@ -1,6 +1,8 @@
 package main
 
 import (
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -12,8 +14,10 @@ import (
 )
 
 // Highlighting is optional presentation work. One worker processes immutable
-// snapshots, never buffers or journals. Large/slow/broken lexers fall back to
-// plain text; neither their output nor a panic can change document contents.
+// snapshots, never buffers or journals. Viewport-demand/checkpoint calculation
+// lives in syntax_incremental.go; the bounded whole-prefix helper below is for
+// non-restartable lexers and full-lex regression comparisons. Neither a lexer
+// result nor a panic can change document contents.
 const maxSyntaxBytes = 1 << 20
 const maxSyntaxTokens = 65536
 const syntaxBudget = time.Second
@@ -29,22 +33,35 @@ type syntaxKey struct {
 }
 
 type syntaxCache struct {
-	key, requested syntaxKey
-	ready, waiting bool
-	tokens         []syntaxToken
+	key, requested  syntaxKey
+	ready, waiting  bool
+	tokens          []syntaxToken
+	serial          uint64
+	changes         []syntaxChange
+	requestedSerial uint64
+	first, last     int
+	scanned         int
+	identity        *syntaxIdentity
 }
 
 type syntaxRequest struct {
-	buffer *Buffer // identity only: the worker must not dereference it
-	key    syntaxKey
-	text   string
+	buffer      *Buffer // identity only: the worker must not dereference it
+	identity    *syntaxIdentity
+	key         syntaxKey
+	text        string
+	runes       []rune // immutable buffer snapshot; no whole-buffer UTF-8 copy
+	changes     []syntaxChange
+	serial      uint64
+	first, last int
 }
 
 type syntaxResult struct {
 	syntaxRequest
-	tokens []syntaxToken
-	lexer  string
-	err    error
+	tokens   []syntaxToken
+	lexer    string
+	err      error
+	complete bool
+	scanned  int
 }
 
 type syntaxHighlighter struct {
@@ -66,6 +83,8 @@ func newSyntaxHighlighter(calculate func(syntaxRequest, <-chan struct{}) syntaxR
 				result := calculate(request, h.stop)
 				// Do not retain the source snapshot in the result/cache.
 				result.text = ""
+				result.runes = nil
+				result.changes = nil
 				select {
 				case h.results <- result:
 				case <-h.stop:
@@ -96,15 +115,23 @@ func (e *Editor) pollSyntax() {
 					continue
 				}
 				cache := &b.syntax
-				if cache.waiting && cache.requested == result.key {
+				if cache.waiting && cache.requested == result.key && cache.requestedSerial == result.serial {
 					cache.waiting = false
-					if result.key == (syntaxKey{b.version, b.meta.Path}) {
-						cache.key, cache.ready = result.key, true
-						cache.tokens = result.tokens
-						if result.err != nil {
-							cache.tokens = nil
+					if result.key == (syntaxKey{b.version, b.meta.Path}) && result.serial == cache.serial {
+						cache.key, cache.ready = result.key, result.complete || result.err != nil
+						if result.err == nil {
+							cache.tokens = result.tokens
+						}
+						cache.scanned = result.scanned
+						cache.first, cache.last = result.first, result.last
+					}
+					kept := cache.changes[:0]
+					for _, change := range cache.changes {
+						if change.serial > result.serial {
+							kept = append(kept, change)
 						}
 					}
+					cache.changes = kept
 				}
 				break
 			}
@@ -117,72 +144,78 @@ func (e *Editor) pollSyntax() {
 	}
 }
 
-func (e *Editor) syntaxTokens(b *Buffer) []syntaxToken {
+func (e *Editor) syntaxTokens(b *Buffer, demand ...int) []syntaxToken {
 	key := syntaxKey{b.version, b.meta.Path}
 	cache := &b.syntax
-	if cache.ready && cache.key == key {
+	first, last := 0, len(b.text)
+	if len(demand) == 2 {
+		first, last = demand[0], demand[1]
+	}
+	if cache.ready && cache.key == key && cache.first <= first && cache.last >= last {
 		return cache.tokens
 	}
-	// Never paint stale offsets while an edited/renamed document is re-lexed.
-	cache.tokens = nil
-	cache.ready = false
-	if b.byteSize > maxSyntaxBytes || len(b.text) > maxSyntaxBytes {
+	// Plain text has no asynchronous color pass to wait for. Recheck unnamed
+	// prose after an edit so adding a supported shebang can still enable syntax.
+	if cache.identity == nil && syntaxLexer(key.path, string(b.text[:min(len(b.text), 1024)])) == nil {
 		cache.key, cache.ready = key, true
+		cache.first, cache.last = first, last
+		cache.tokens = nil
+		cache.changes = nil
 		return nil
 	}
+	if cache.key.path != key.path {
+		cache.tokens = nil
+	}
+	cache.ready = false
 	if cache.waiting {
-		return nil
+		return cache.tokens
 	}
 	if e.syntax == nil {
-		e.syntax = newSyntaxHighlighter(calculateSyntax)
+		e.syntax = newSyntaxHighlighter(newSyntaxCalculator())
 	}
 	if e.syntax.closed {
-		return nil
+		return cache.tokens
 	}
 	// Do not copy source text if the single pending-work slot is occupied.
 	if len(e.syntax.requests) == cap(e.syntax.requests) {
-		return nil
+		return cache.tokens
 	}
-	request := syntaxRequest{buffer: b, key: key, text: string(b.text)}
-	if len(request.text) > maxSyntaxBytes {
-		cache.key, cache.ready = key, true
-		return nil
+	if cache.identity == nil {
+		cache.identity = &syntaxIdentity{}
 	}
+	request := syntaxRequest{buffer: b, identity: cache.identity, key: key, runes: b.text, serial: cache.serial, changes: append([]syntaxChange(nil), cache.changes...), first: first, last: last}
 	select {
 	case e.syntax.requests <- request:
 		cache.requested, cache.waiting = key, true
+		cache.requestedSerial = cache.serial
 	default:
 	}
-	return nil
+	return cache.tokens
 }
 
-// Chroma handles token classification and style inheritance. This small style
-// definition preserves govim's warm desert palette rather than loading any Vim
-// runtime files or executing configuration from the document being edited.
-var desertSyntaxStyle = chroma.MustNewStyle("govim-desert", chroma.StyleEntries{
-	chroma.Text:                "#ffd7af",
-	chroma.Comment:             "#87af87",
-	chroma.CommentPreproc:      "#d7af87",
-	chroma.Keyword:             "#87afff",
-	chroma.KeywordType:         "#bdb76b",
-	chroma.NameBuiltin:         "#87afff",
-	chroma.NameClass:           "#bdb76b",
-	chroma.NameException:       "#ffaf5f",
-	chroma.NameFunction:        "#ffd75f",
-	chroma.NameDecorator:       "#87d7ff",
-	chroma.NameTag:             "#87d7ff",
-	chroma.NameAttribute:       "#bdb76b",
-	chroma.LiteralString:       "#d7af87",
-	chroma.LiteralStringEscape: "#ffaf5f",
-	chroma.LiteralNumber:       "#ffaf5f",
-	chroma.GenericHeading:      "bold #ffaf5f",
-	chroma.GenericSubheading:   "bold #ffaf5f",
-	chroma.GenericStrong:       "bold",
-	chroma.GenericEmph:         "italic",
-	chroma.GenericUnderline:    "underline",
-	chroma.GenericInserted:     "#87af87",
-	chroma.GenericDeleted:      "#ff8787",
-})
+// Embedded data, not executable Vimscript or files read from the edited tree.
+// See syntax/README.md for the Vim91 desert/TeX semantic-group mapping.
+//
+//go:embed syntax/desert.json
+var desertSyntaxJSON []byte
+
+var desertSyntaxStyle = loadSyntaxStyle(desertSyntaxJSON)
+
+func loadSyntaxStyle(data []byte) *chroma.Style {
+	var names map[string]string
+	if err := json.Unmarshal(data, &names); err != nil {
+		panic(err)
+	}
+	entries := chroma.StyleEntries{}
+	for name, value := range names {
+		kind, err := chroma.TokenTypeString(name)
+		if err != nil {
+			panic(err)
+		}
+		entries[kind] = value
+	}
+	return chroma.MustNewStyle("govim-desert", entries)
+}
 
 func syntaxForeground(kind chroma.TokenType) string {
 	entry := desertSyntaxStyle.Get(kind)
@@ -212,8 +245,15 @@ func syntaxCellStyle(foreground string, currentLine bool) string {
 
 func syntaxLexer(path, text string) chroma.Lexer {
 	if path != "" {
-		if lexer := lexers.Match(filepath.Base(path)); lexer != nil {
+		name := filepath.Base(path)
+		if lexer := lexers.Match(name); lexer != nil {
 			return lexer
+		}
+		// Chroma covers extensions, Dockerfiles and most rc files. A few
+		// standard extensionless shell startup files need explicit aliases.
+		switch name {
+		case ".profile", "profile", ".zprofile", ".zlogin", ".zlogout", ".zshenv", ".kshrc", ".ashrc", ".mkshrc":
+			return lexers.Get("bash")
 		}
 	}
 	// Filename matching covers normal files; content analysis is restricted to

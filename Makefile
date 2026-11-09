@@ -57,14 +57,15 @@ LATEXPDF_SRC = $(wildcard latexpdf/*.go) \
 SEMHTML_SRC = $(wildcard semhtml/*.go)
 TUI_NAV_SRC = $(wildcard tui/navigation/*.go)
 TUI_SEARCH_SRC = $(wildcard tui/textsearch/*.go)
+TUI_READLINE_SRC = $(wildcard tui/readline/*.go)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
-	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC)
-GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(wildcard pdfmeta/*.go) $(wildcard limits/*.go)
+	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
+GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) $(wildcard pdfmeta/*.go) $(wildcard limits/*.go)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) $(wildcard pdfmeta/*.go) \
-	       $(wildcard term/*.go) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) go.mod go.sum
-GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go) go.mod go.sum
+	       $(wildcard term/*.go) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
+GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/*) $(TUI_READLINE_SRC) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # Static C++/Splash rendering, including embedded JPEG images through libjpeg.
@@ -397,7 +398,7 @@ vimtex: $(VIMTEX_GO_SRC)
 zat: $(ZAT_GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/zat
 
-# Native Go editor, including its X11 clipboard and recovery journal.
+# Native Go TUI editor, with terminal clipboard protocol and recovery journal.
 govim: $(GOVIM_GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/govim
 

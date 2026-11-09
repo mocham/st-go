@@ -68,7 +68,10 @@ unqueried or still-loading PDF is never reported as lacking a text layer.
 Commands: `:open path.pdf`, `:page 12` (or `:12`), `:zoom 150`, `:zoom width`,
 `:zoom fit`, `:nohlsearch` (or `:noh`), `:reload`, `:help`, `:quit`. Paths can contain spaces, semicolons,
 and quotes; `~/` is expanded. Relative paths use zat's working directory.
-Backspace edits the prompt and Ctrl-U clears it. The header displays the
+Prompts use the shared `tui/readline` component: arrows/Ctrl-B/F edit at the
+cursor, Home/End or Ctrl-A/E move to the ends, Backspace/Delete remove text,
+and Ctrl-U/K/W/Y provide kill/yank. History uses Up/Down or Ctrl-P/N.
+The header displays the
 topmost visible page, total pages, scroll percentage, fit-width zoom percentage,
 and filename. It also reports loading and rendering errors. At one row the PDF
 temporarily hides and returns when the window grows.

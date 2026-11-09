@@ -7,12 +7,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"st-go/limits"
 	"st-go/pdfmeta"
 	"st-go/tui/navigation"
+	"st-go/tui/readline"
 )
 
 type viewer struct {
@@ -23,6 +22,8 @@ type viewer struct {
 	pages, position                            int
 	loading, failed, quit                      bool
 	prompt, count, prefix, message, lastStatus string
+	promptEditor                               *readline.Line
+	promptHistory                              []string
 	marks                                      map[string]int
 	previous                                   int
 	search                                     string
@@ -86,11 +87,25 @@ func (v *viewer) zoomTo(n int) {
 
 func (v *viewer) key(key string) {
 	if v.prompt != "" {
-		switch key {
-		case "escape", "\x03":
+		if v.promptEditor == nil || v.promptEditor.Text() != v.prompt {
+			v.promptEditor = readline.New(v.prompt, 1, 4096)
+			v.promptEditor.CancelEmptyBackspace = true
+			v.promptEditor.SetHistory(v.promptHistory)
+		}
+		result := v.promptEditor.Handle(key)
+		v.prompt = v.promptEditor.Text()
+		if result.Err != nil {
+			v.message = result.Err.Error()
+		}
+		if result.Cancel {
 			v.prompt = ""
-		case "\r", "\n":
+		}
+		if result.Submit {
 			command, mode := strings.TrimSpace(v.prompt[1:]), v.prompt[0]
+			v.promptHistory = append(v.promptHistory, v.prompt)
+			if len(v.promptHistory) > 100 {
+				v.promptHistory = v.promptHistory[1:]
+			}
 			v.prompt = ""
 			if mode == ':' {
 				v.execute(command)
@@ -100,15 +115,6 @@ func (v *viewer) key(key string) {
 				}
 				v.searchBackward = mode == '?'
 				v.find(false, false)
-			}
-		case "\x7f", "\b":
-			_, n := utf8.DecodeLastRuneInString(v.prompt)
-			v.prompt = v.prompt[:len(v.prompt)-n]
-		case "\x15":
-			v.prompt = v.prompt[:1]
-		default:
-			if len(v.prompt)+len(key) <= 4096 && len([]rune(key)) == 1 && !unicode.IsControl([]rune(key)[0]) {
-				v.prompt += key
 			}
 		}
 		return
@@ -452,7 +458,18 @@ func (v *viewer) draw() {
 		text += "  " + v.count + v.prefix
 	}
 	if v.prompt != "" {
-		text = v.prompt
+		if v.promptEditor == nil || v.promptEditor.Text() != v.prompt {
+			v.promptEditor = readline.New(v.prompt, 1, 4096)
+			v.promptEditor.CancelEmptyBackspace = true
+			v.promptEditor.SetHistory(v.promptHistory)
+		}
+		shown, cursor := v.promptEditor.View(max(1, v.cols-1), func(rune, int) int { return 1 })
+		text = shown
+		v.lastStatus = ""
+		defer func() { v.write(fmt.Sprintf("\x1b[1;%dH\x1b[?25h", cursor+1)) }()
+	} else if v.promptEditor != nil {
+		v.write("\x1b[?25l")
+		v.promptEditor = nil
 	}
 	text = statusText(text, max(1, v.cols-1))
 	if text == v.lastStatus {

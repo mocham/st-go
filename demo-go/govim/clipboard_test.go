@@ -2,18 +2,41 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
+	"encoding/base64"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/BurntSushi/xgb/xproto"
+	"time"
 )
 
 type testClipboard struct {
-	text    string
-	primary bool
-	copies  int
+	text             string
+	primary          bool
+	copies, requests int
+}
+
+func TestPTYTerminalClipboardAndImmediateInternalPaste(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "document.txt")
+	os.WriteFile(path, []byte("one\n"), 0600)
+	p := startPTYEditor(t, path)
+	p.send(t, "yyp")
+	copyFrame := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("one\n")) + "\x1b\\"
+	p.await(t, "terminal clipboard write", func() bool { return strings.Contains(p.text(), copyFrame) })
+	p.send(t, "\"+p")
+	p.await(t, "terminal clipboard query", func() bool { return strings.Contains(p.text(), "\x1b]52;c;?\x1b\\") })
+	p.send(t, "\x1b]52;c;"+base64.StdEncoding.EncodeToString([]byte("HOST"))+"\x1b\\")
+	p.await(t, "clipboard paste", func() bool { return strings.Contains(p.text(), "HOST") })
+	p.send(t, "p:wq\r")
+	select {
+	case <-p.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("clipboard PTY did not exit")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "one\noHOSTne\none\n" {
+		t.Fatalf("clipboard/internal register separation: %q %v", data, err)
+	}
 }
 
 func (c *testClipboard) Set(text string, primary bool) error {
@@ -21,8 +44,8 @@ func (c *testClipboard) Set(text string, primary bool) error {
 	c.copies++
 	return nil
 }
-func (c *testClipboard) Get(bool) (string, error) { return c.text, nil }
-func (c *testClipboard) Close() error             { return nil }
+func (c *testClipboard) Request(primary bool) error { c.requests++; c.primary = primary; return nil }
+func (c *testClipboard) Close() error               { return nil }
 
 func TestClipboardMappings(t *testing.T) {
 	for _, keys := range []string{"2yy", "2dd", "Vjy", "Vjd", ":1,2Y<Enter>", ":1,2D<Enter>"} {
@@ -31,93 +54,83 @@ func TestClipboardMappings(t *testing.T) {
 			c := &testClipboard{}
 			e.clip = c
 			editKeys(e, keys)
-			if c.copies != 1 || c.text != "one\ntwo\n" || c.primary {
-				t.Fatalf("mapping %s copied %+v", keys, c)
+			if c.copies != 1 || c.text != "one\ntwo\n" || c.primary || c.requests != 0 {
+				t.Fatalf("mapping copied %+v", c)
 			}
 		})
 	}
+}
+func TestInternalRegistersNeverReadHostClipboard(t *testing.T) {
+	e := memoryEditor("one\ntwo\n")
+	c := &testClipboard{}
+	e.clip = c
+	editKeys(e, "yy")
+	c.text = "unrelated host clipboard"
+	editKeys(e, "p")
+	if editorText(e) != "one\none\ntwo\n" || c.requests != 0 || e.clipboardRead != nil {
+		t.Fatal("internal paste depended on host clipboard")
+	}
+}
+func TestClipboardReadAsynchronousAndSeparate(t *testing.T) {
 	e := memoryEditor("abc\n")
-	c := &testClipboard{text: "世界"}
+	c := &testClipboard{}
+	e.clip = c
+	e.registers['"'] = register{Text: "internal"}
+	editKeys(e, "\"+p")
+	if c.requests != 1 || e.clipboardRead == nil || editorText(e) != "abc\n" {
+		t.Fatal("host read was not deferred")
+	}
+	e.Feed(keyEvent{Clipboard: &clipboardReply{selection: 'p', text: "wrong target"}})
+	if editorText(e) != "abc\n" {
+		t.Fatal("mismatched clipboard reply accepted")
+	}
+	e.Feed(keyEvent{Clipboard: &clipboardReply{selection: 'c', text: "世界"}})
+	if editorText(e) != "a世界bc\n" || e.registers['"'].Text != "internal" {
+		t.Fatal("host reply changed internal register or was not pasted")
+	}
+	e = memoryEditor("abc\n")
 	e.clip = c
 	editKeys(e, "\"+p")
-	if editorText(e) != "a世界bc\n" {
-		t.Fatal("native clipboard register paste")
+	e.tick(time.Now().Add(clipboardTimeout + time.Second))
+	if e.clipboardRead != nil || editorText(e) != "abc\n" {
+		t.Fatal("timeout mutated document")
 	}
 }
-
-func TestClipboardWireBoundsAndEncoding(t *testing.T) {
-	text, primary := strings.Repeat("\x00\x1b<&世界", 1000), "café"
-	var data bytes.Buffer
-	var header [8]byte
-	binary.LittleEndian.PutUint32(header[:4], uint32(len(text)))
-	binary.LittleEndian.PutUint32(header[4:], uint32(len(primary)))
-	data.Write(header[:])
-	data.WriteString(text)
-	data.WriteString(primary)
-	a, z, err := readClipboardPayload(&data)
-	if err != nil || a != text || z != primary {
-		t.Fatal("clipboard handoff changed binary/control text")
-	}
-	binary.LittleEndian.PutUint32(header[:4], ^uint32(0))
-	if _, _, err := readClipboardPayload(bytes.NewReader(header[:])); err == nil {
-		t.Fatal("unbounded clipboard allocation")
-	}
-	c := &xClipboard{atoms: map[string]xproto.Atom{"UTF8_STRING": 1, "STRING": 2}}
-	if got, err := c.decodeText(2, 8, []byte{'c', 'a', 'f', 0xe9}); err != nil || got != "café" {
-		t.Fatal("STRING was not decoded as Latin-1")
-	}
-	if _, err := c.decodeText(1, 8, []byte{0xff}); err == nil {
-		t.Fatal("invalid UTF-8 clipboard accepted")
-	}
-	if latin1Text("café 世界") != "caf\xe9 ??" {
-		t.Fatal("Latin-1 conversion")
-	}
-}
-
-// Use an existing isolated X server. These tests do not install, download, or
-// launch any X server/font packages, and never run an external clipboard tool.
-func TestNativeClipboardX11(t *testing.T) {
-	if os.Getenv("GOVIM_TEST_X11") != "1" {
-		t.Skip("set GOVIM_TEST_X11=1 with DISPLAY pointing at an existing isolated X server")
-	}
-	owner, err := newXClipboard(false)
-	if err != nil {
+func TestClipboardProtocolRoundTrip(t *testing.T) {
+	var out bytes.Buffer
+	c := &terminalClipboard{out: &out}
+	text := "café 世界\n\x1b:q!"
+	if err := c.Set(text, false); err != nil {
 		t.Fatal(err)
 	}
-	defer owner.Close()
-	reader, err := newXClipboard(true)
-	if err != nil {
+	if out.Len() != 0 {
+		t.Fatal("copy performed terminal I/O before flush")
+	}
+	c.Request(true)
+	if err := c.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { reader.mu.Lock(); reader.keep = false; reader.mu.Unlock(); reader.Close() }()
-	for _, text := range []string{"café 世界 α", strings.Repeat("large 世界\n", 20000), ""} {
-		if err := owner.Set(text, false); err != nil {
-			t.Fatal(err)
+	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\x1b\\\x1b]52;p;?\x1b\\"
+	if out.String() != want {
+		t.Fatalf("OSC 52=%q", out.String())
+	}
+	for chunk := 1; chunk < 10; chunk++ {
+		var parser inputParser
+		var replies []*clipboardReply
+		wire := []byte("\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\x1b\\")
+		for at := 0; at < len(wire); at += chunk {
+			parser.feed(wire[at:min(len(wire), at+chunk)], time.Now(), func(event keyEvent) {
+				if event.Clipboard == nil {
+					t.Fatal("clipboard data became commands")
+				}
+				replies = append(replies, event.Clipboard)
+			})
 		}
-		got, err := reader.Get(false)
-		if err != nil || got != text {
-			t.Fatalf("X11 transfer: bytes=%d want=%d err=%v", len(got), len(text), err)
+		if len(replies) != 1 || replies[0].err != nil || replies[0].text != text {
+			t.Fatalf("chunk%d reply=%+v", chunk, replies)
 		}
 	}
-	if err := owner.Set("primary selection", true); err != nil {
-		t.Fatal(err)
+	if err := c.Set(strings.Repeat("x", maxClipboardBytes+1), false); err == nil {
+		t.Fatal("oversized clipboard queued")
 	}
-	if got, err := reader.Get(true); err != nil || got != "primary selection" {
-		t.Fatalf("PRIMARY transfer: %q %v", got, err)
-	}
-	// The clipboard remains readable after the editor's original owner closes.
-	owner.mu.Lock()
-	owner.keep = true
-	owner.mu.Unlock()
-	if err := owner.Set("persisted 世界", false); err != nil {
-		t.Fatal(err)
-	}
-	if err := owner.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := reader.Get(false); err != nil || got != "persisted 世界" {
-		t.Fatalf("clipboard handoff: %q %v", got, err)
-	}
-	reader.Set("release helper", false)
-	reader.Set("release primary", true)
 }

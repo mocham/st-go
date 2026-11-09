@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"st-go/tui/readline"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,10 @@ func (p *inputParser) feed(data []byte, now time.Time, key func(string), reply f
 			}
 			if name := map[string]string{"[A": "up", "[B": "down", "[C": "right", "[D": "left", "[H": "home", "[F": "end", "OH": "home", "OF": "end", "[1~": "home", "[4~": "end", "[5~": "pageup", "[6~": "pagedown", "[Z": "backtab", "[1;2Z": "backtab"}[sequence]; name != "" {
 				key(name)
+			} else if b[1] == '[' {
+				if name := readline.CSI(sequence[1:]); name != "" {
+					key(name)
+				}
 			}
 			// Unknown CSI, including focus/paste delimiters, is consumed whole.
 			p.pending = b[end+1:]

@@ -75,7 +75,7 @@ func (e *Editor) insertKey(key string) {
 		e.pending = ""
 		r := []rune(key)
 		if len(r) == 1 {
-			e.insertLiteral(e.getRegister(r[0]).Text)
+			e.withRegister(r[0], func(value register) { e.insertLiteral(value.Text) })
 		}
 		return
 	}

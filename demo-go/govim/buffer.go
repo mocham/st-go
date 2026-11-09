@@ -355,6 +355,7 @@ func (b *Buffer) append(record journalRecord) (bool, error) {
 }
 
 func (b *Buffer) apply(record journalRecord, result []rune) {
+	b.invalidateSyntax(record)
 	previous := b.version
 	previousEmpty := b.placeholder
 	b.placeholder = record.Placeholder

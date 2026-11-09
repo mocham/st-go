@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"github.com/BurntSushi/xgb/xproto"
+	"strings"
+	"time"
+	"unicode/utf8"
 
 	"st-go/limits"
 )
@@ -58,13 +62,47 @@ func (t *Terminal) selrequest(e xproto.SelectionRequestEvent) {
 			prop, t.atoms["INTEGER"], 32, 1, buf).Check()
 		ok()
 	case t.atoms["UTF8_STRING"], t.atoms["STRING"]:
-		if t.selectionText == "" {
+		text := t.selectionText
+		if e.Selection == t.atoms["CLIPBOARD"] && t.clipboardSet {
+			text = t.clipboardText
+		}
+		if text == "" && !(e.Selection == t.atoms["CLIPBOARD"] && t.clipboardSet) && !(e.Selection == t.atoms["PRIMARY"] && t.primarySet) {
 			fail()
 			return
 		}
-		_ = xproto.ChangePropertyChecked(t.conn, xproto.PropModeReplace, e.Requestor,
-			prop, t.atoms["UTF8_STRING"], 8, uint32(len(t.selectionText)),
-			[]byte(t.selectionText)).Check()
+		if e.Target == t.atoms["STRING"] {
+			var out strings.Builder
+			for _, r := range text {
+				if r > 255 {
+					out.WriteByte('?')
+				} else {
+					out.WriteByte(byte(r))
+				}
+			}
+			text = out.String()
+		}
+		if len(text) > 32768 {
+			if t.clipboardTransfers == nil {
+				t.clipboardTransfers = make(map[clipboardTransferID]*clipboardTransfer)
+			}
+			for id, transfer := range t.clipboardTransfers {
+				if time.Since(transfer.started) > 10*time.Second {
+					delete(t.clipboardTransfers, id)
+				}
+			}
+			if len(t.clipboardTransfers) >= 4 {
+				fail()
+				return
+			}
+			id := clipboardTransferID{e.Requestor, prop}
+			t.clipboardTransfers[id] = &clipboardTransfer{text: text, target: e.Target, started: time.Now()}
+			xproto.ChangeWindowAttributes(t.conn, e.Requestor, xproto.CwEventMask, []uint32{xproto.EventMaskPropertyChange})
+			var size [4]byte
+			binary.LittleEndian.PutUint32(size[:], uint32(len(text)))
+			xproto.ChangeProperty(t.conn, xproto.PropModeReplace, e.Requestor, prop, t.atoms["INCR"], 32, 1, size[:])
+		} else {
+			_ = xproto.ChangePropertyChecked(t.conn, xproto.PropModeReplace, e.Requestor, prop, e.Target, 8, uint32(len(text)), []byte(text)).Check()
+		}
 		ok()
 	default:
 		fail()
@@ -78,8 +116,7 @@ func (t *Terminal) clipcopy() {
 	if sel == "" {
 		return
 	}
-	t.selectionText = sel
-	xproto.SetSelectionOwner(t.conn, t.win, t.atoms["CLIPBOARD"], xproto.TimeCurrentTime)
+	t.SetClipboard('c', sel)
 }
 
 // clippaste requests the CLIPBOARD content.
@@ -92,6 +129,10 @@ func (t *Terminal) clippaste() {
 
 // selnotify handles the response to our ConvertSelection request.
 func (t *Terminal) selnotify(e xproto.SelectionNotifyEvent) {
+	if t.clipboardQuery != nil && e.Requestor == t.win && e.Selection == t.clipboardQuery.selection && (e.Property == t.clipboardQuery.property || e.Property == 0 && e.Target == t.clipboardQuery.target) {
+		t.clipboardQueryNotify(e)
+		return
+	}
 	if e.Property == 0 || e.Requestor != t.win {
 		return
 	}
@@ -123,6 +164,25 @@ func (t *Terminal) selnotify(e xproto.SelectionNotifyEvent) {
 
 // propnotify handles INCR chunk data arriving on the property.
 func (t *Terminal) propnotify(e xproto.PropertyNotifyEvent) {
+	if e.State == xproto.PropertyDelete {
+		id := clipboardTransferID{e.Window, e.Atom}
+		if transfer := t.clipboardTransfers[id]; transfer != nil {
+			end := min(len(transfer.text), transfer.offset+32768)
+			chunk := transfer.text[transfer.offset:end]
+			xproto.ChangeProperty(t.conn, xproto.PropModeReplace, id.window, id.property, transfer.target, 8, uint32(len(chunk)), []byte(chunk))
+			if len(chunk) == 0 {
+				delete(t.clipboardTransfers, id)
+			} else {
+				transfer.offset = end
+				transfer.started = time.Now()
+			}
+			return
+		}
+	}
+	if query := t.clipboardQuery; query != nil && query.incr && e.Window == t.win && e.Atom == query.property && e.State == xproto.PropertyNewValue {
+		t.clipboardQueryChunk()
+		return
+	}
 	if !t.incrActive || e.State != xproto.PropertyNewValue || e.Window != t.win || e.Atom != t.incrProperty {
 		return
 	}
@@ -155,6 +215,146 @@ func (t *Terminal) propnotify(e xproto.PropertyNotifyEvent) {
 		return
 	}
 	t.incrData = append(t.incrData, rep.Value...)
+}
+
+type clipboardTransferID struct {
+	window   xproto.Window
+	property xproto.Atom
+}
+type clipboardTransfer struct {
+	text    string
+	offset  int
+	target  xproto.Atom
+	started time.Time
+}
+type clipboardQuery struct {
+	selection, property, target xproto.Atom
+	incr, discard               bool
+	data                        []byte
+	reply                       func(string, bool)
+	timer                       *time.Timer
+}
+
+// QueryClipboard keeps desktop retrieval in the terminal frontend. The TUI
+// receives only an OSC response through its normal input stream.
+func (t *Terminal) QueryClipboard(selection byte, reply func(string, bool)) {
+	if t.conn == nil || t.closed() || t.clipboardQuery != nil {
+		reply("", false)
+		return
+	}
+	name := "CLIPBOARD"
+	if selection == 'p' {
+		name = "PRIMARY"
+	} else if selection != 'c' {
+		reply("", false)
+		return
+	}
+	atomName := "ST_GO_OSC52"
+	property, err := xproto.InternAtom(t.conn, false, uint16(len(atomName)), atomName).Reply()
+	if err != nil {
+		reply("", false)
+		return
+	}
+	query := &clipboardQuery{selection: t.atoms[name], property: property.Atom, target: t.atoms["UTF8_STRING"], reply: reply}
+	t.clipboardQuery = query
+	query.timer = time.AfterFunc(1500*time.Millisecond, func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if t.clipboardQuery == query && !t.closed() {
+			t.finishClipboardQuery("", false)
+		}
+	})
+	xproto.ConvertSelection(t.conn, t.win, query.selection, query.target, query.property, xproto.TimeCurrentTime)
+}
+func (t *Terminal) finishClipboardQuery(text string, ok bool) {
+	query := t.clipboardQuery
+	if query == nil {
+		return
+	}
+	t.clipboardQuery = nil
+	if query.timer != nil {
+		query.timer.Stop()
+	}
+	query.reply(text, ok)
+}
+func (t *Terminal) clipboardQueryNotify(event xproto.SelectionNotifyEvent) {
+	query := t.clipboardQuery
+	if event.Property == 0 {
+		if query.target == t.atoms["UTF8_STRING"] {
+			query.target = t.atoms["STRING"]
+			xproto.ConvertSelection(t.conn, t.win, query.selection, query.target, query.property, xproto.TimeCurrentTime)
+		} else {
+			t.finishClipboardQuery("", false)
+		}
+		return
+	}
+	if event.Property != query.property {
+		return
+	}
+	property, err := xproto.GetProperty(t.conn, false, t.win, query.property, xproto.GetPropertyTypeAny, 0, limits.ClipboardBytes/4+1).Reply()
+	if err != nil || property == nil {
+		t.finishClipboardQuery("", false)
+		return
+	}
+	defer xproto.DeleteProperty(t.conn, t.win, query.property)
+	if property.Type == t.atoms["INCR"] {
+		query.incr = true
+		if len(property.Value) >= 4 && binary.LittleEndian.Uint32(property.Value) > limits.ClipboardBytes {
+			query.discard = true
+		}
+		return
+	}
+	if property.BytesAfter > 0 || len(property.Value) > limits.ClipboardBytes {
+		t.finishClipboardQuery("", false)
+		return
+	}
+	text, ok := t.clipboardQueryText(property.Type, property.Format, property.Value)
+	t.finishClipboardQuery(text, ok)
+}
+func (t *Terminal) clipboardQueryText(target xproto.Atom, format byte, data []byte) (string, bool) {
+	if format != 8 {
+		return "", false
+	}
+	if target == t.atoms["STRING"] {
+		runes := make([]rune, len(data))
+		for i, b := range data {
+			runes[i] = rune(b)
+		}
+		text := string(runes)
+		return text, len(text) <= limits.ClipboardBytes
+	}
+	return string(data), target == t.atoms["UTF8_STRING"] && utf8.Valid(data)
+}
+func (t *Terminal) clipboardQueryChunk() {
+	query := t.clipboardQuery
+	remaining := limits.ClipboardBytes - len(query.data)
+	if query.discard {
+		remaining = 0
+	}
+	property, err := xproto.GetProperty(t.conn, false, t.win, query.property, xproto.GetPropertyTypeAny, 0, uint32((remaining+3)/4)).Reply()
+	if err != nil || property == nil {
+		t.finishClipboardQuery("", false)
+		return
+	}
+	defer xproto.DeleteProperty(t.conn, t.win, query.property)
+	if len(property.Value) == 0 && property.BytesAfter == 0 {
+		if query.discard {
+			t.finishClipboardQuery("", false)
+		} else {
+			text, ok := t.clipboardQueryText(query.target, 8, query.data)
+			t.finishClipboardQuery(text, ok)
+		}
+		return
+	}
+	if query.discard {
+		return
+	}
+	if property.Type != query.target || property.Format != 8 || len(query.data)+len(property.Value)+int(property.BytesAfter) > limits.ClipboardBytes {
+		query.discard = true
+		query.data = nil
+		return
+	}
+	query.data = append(query.data, property.Value...)
 }
 
 func replaceNewlines(s string) string {

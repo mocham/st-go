@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
+	"st-go/tui/readline"
 )
 
 func safeText(value string) string {
@@ -312,7 +313,16 @@ func (browser *Browser) drawStatus() {
 }
 
 func (browser *Browser) drawPrompt(prompt string) {
+	if browser.searchLine != nil && browser.searchLine.Text() == prompt {
+		browser.drawInputPrompt(browser.searchLine)
+		return
+	}
 	fmt.Fprintf(browser.out, "\x1b[%d;1H%s%*s\x1b[%d;2H%s%s", browser.rows, statusStyle, browser.cols, "", browser.rows, shorten(prompt, browser.cols-3), resetStyle)
+	browser.out.Flush()
+}
+func (browser *Browser) drawInputPrompt(line *readline.Line) {
+	shown, cursor := line.View(max(1, browser.cols-3), readline.CellWidth)
+	fmt.Fprintf(browser.out, "\x1b[%d;1H%s%*s\x1b[%d;2H%s%s\x1b[%d;%dH", browser.rows, statusStyle, browser.cols, "", browser.rows, shown, resetStyle, browser.rows, cursor+2)
 	browser.out.Flush()
 }
 

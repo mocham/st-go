@@ -16,7 +16,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if os.Getenv("GOVIM_TEST_PROCESS") == "1" || (len(os.Args) > 1 && os.Args[1] == "--clipboard-owner") {
+	if os.Getenv("GOVIM_TEST_PROCESS") == "1" {
 		os.Exit(run(os.Args[1:]))
 	}
 	os.Exit(m.Run())
@@ -33,6 +33,16 @@ type ptyEditor struct {
 }
 
 func (p *ptyEditor) text() string { p.mu.Lock(); defer p.mu.Unlock(); return p.output.String() }
+func (p *ptyEditor) screenText() string {
+	screen := newPaintTerminal(80, 24)
+	screen.Twrite([]byte(p.text()), false)
+	var text strings.Builder
+	for y := 0; y < 24; y++ {
+		text.WriteString(screen.LineText(y))
+		text.WriteByte('\n')
+	}
+	return text.String()
+}
 func (p *ptyEditor) send(t *testing.T, keys string) {
 	t.Helper()
 	if _, err := p.master.Write([]byte(keys)); err != nil {
@@ -72,7 +82,7 @@ func startPTYEditor(t *testing.T, args ...string) *ptyEditor {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd, err := ptyutil.Start(slave, append([]string{executable}, args...), append(os.Environ(), "GOVIM_TEST_PROCESS=1", "DISPLAY=", "HOME="+t.TempDir()))
+	cmd, err := ptyutil.Start(slave, append([]string{executable}, args...), append(os.Environ(), "GOVIM_TEST_PROCESS=1", "HOME="+t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +224,7 @@ func TestPTYBracketedPasteAndMouse(t *testing.T) {
 	os.WriteFile(path, []byte("abc\n"), 0600)
 	p := startPTYEditor(t, path)
 	p.send(t, "\x1b[200~literal :q!\n世界\x1b[201~")
-	p.await(t, "literal paste", func() bool { return strings.Contains(p.text(), "literal :q!") })
+	p.await(t, "literal paste", func() bool { return strings.Contains(p.screenText(), "literal :q!") })
 	p.send(t, "\x1b[<0;6;1M\x1b[<32;8;1M\x1b[<0;8;1m")
 	p.send(t, "\x1b")
 	time.Sleep(100 * time.Millisecond)

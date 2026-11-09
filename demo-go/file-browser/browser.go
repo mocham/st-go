@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	"st-go/tui/navigation"
+	"st-go/tui/readline"
 )
 
 // Terminal styles shared with the shell browser.
@@ -118,6 +119,8 @@ type Browser struct {
 	promptMode      string // "path" or "cmd"
 	promptBuffer    []byte
 	promptCursor    int
+	promptEditor    *readline.Line
+	promptHistories map[string][]string
 	pathMatches     []string
 	pathMatchIdx    int
 	pathMatchTop    int

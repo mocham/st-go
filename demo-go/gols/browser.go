@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 	"st-go/tui/navigation"
+	"st-go/tui/readline"
 )
 
 const (
@@ -108,6 +108,8 @@ type Browser struct {
 	documentSearch     documentSearch
 	searchToken        int
 	searchPromptBuffer []byte
+	searchLine         *readline.Line
+	searchHistory      []string
 
 	cacheDir    string
 	previewLink string
@@ -471,14 +473,15 @@ func (browser *Browser) toggleNavigationPin() {
 
 func (browser *Browser) searchPrompt() {
 	browser.clearDocumentSearch()
-	query := []byte{}
+	line := readline.New("Search: ", 8, 4104)
+	line.SetHistory(browser.searchHistory)
 	fmt.Fprint(browser.out, "\x1b[?25h")
 	defer func() {
 		fmt.Fprint(browser.out, "\x1b[?25l")
 		browser.out.Flush()
 	}()
 	for {
-		browser.drawPrompt("Search: " + string(query))
+		browser.drawInputPrompt(line)
 		character, status := browser.in.readByte(100 * time.Millisecond)
 		if status == inTimeout {
 			browser.processSignals()
@@ -491,9 +494,9 @@ func (browser *Browser) searchPrompt() {
 			browser.running = false
 			return
 		}
-		switch character {
-		case '\r', '\n':
-			value := strings.TrimSpace(string(query))
+		result := browser.editInputByte(line, character)
+		if result.Submit {
+			value := strings.TrimSpace(line.Text()[8:])
 			if value == "" {
 				browser.status = "Search cancelled"
 				browser.renderAll()
@@ -504,27 +507,17 @@ func (browser *Browser) searchPrompt() {
 				corpusIndex = browser.view.corpusIndex
 			}
 			browser.status = "Search: " + value
+			browser.searchHistory = append(browser.searchHistory, line.Text())
+			if len(browser.searchHistory) > 100 {
+				browser.searchHistory = browser.searchHistory[1:]
+			}
 			browser.setView(viewState{kind: viewSearch, corpusIndex: corpusIndex, query: value})
 			return
-		case 0x1b:
+		}
+		if result.Cancel {
 			browser.status = "Search cancelled"
 			browser.renderAll()
 			return
-		case 0x03:
-			browser.running = false
-			return
-		case 0x7f, '\b':
-			if len(query) > 0 {
-				_, size := utf8.DecodeLastRune(query)
-				if size < 1 {
-					size = 1
-				}
-				query = query[:len(query)-size]
-			}
-		default:
-			if character >= 0x20 {
-				query = append(query, character)
-			}
 		}
 	}
 }

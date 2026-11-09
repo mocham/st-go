@@ -42,18 +42,40 @@ func TestChromaLanguages(t *testing.T) {
 		{"example.go", "package main\nfunc main() { println(42) }\n"},
 		{"example.c", "/* comment */\nint main(void) { return 42; }\n"},
 		{"example.cpp", "class Example { public: int value = 42; };\n"},
+		{"example.cc", "class Example { public: int value = 42; };\n"},
+		{"example.vim", "\" Synthetic comment\nset number\nlet g:value = 42\n"},
 		{"example.py", "def example():\n    return 'hello'\n"},
 		{"example.rs", "fn main() { let value = 42; }\n"},
 		{"example.json", "{\"message\": \"hello\", \"count\": 42}"},
 		{"example.yaml", "message: hello\ncount: 42\n"},
+		{"example.yml", "message: hello\ncount: 42\n"},
 		{"example.toml", "[example]\ncount = 42\n"},
 		{"example.sh", "#!/bin/sh\necho \"hello\""},
 		{"example.tex", "\\section{Synthetic heading}\n% synthetic comment\n$x^2$\n"},
 		{"example.md", "# Synthetic heading\n\n**bold** and `code`\n\n```go\nvar n = 42\n```\n"},
 		{"example.html", "<p class=\"example\">hello</p>\n"},
+		{"example.xml", "<?xml version=\"1.0\"?>\n<example count=\"42\">hello</example>\n"},
 		{"example.css", ".example { color: #aabbcc; }\n"},
+		{"example.js", "const example = 'hello';\nfunction value() { return 42; }\n"},
+		{"example.php", "<?php\nfunction example() { return 'hello'; }\n"},
+		{"example.csv", "name,count\n\"hello, 世界\",42\n"},
+		{"example.ini", "[example]\nmessage=hello\ncount=42\n"},
 		{"example.sql", "SELECT count(*) FROM example WHERE id = 42;\n"},
 		{"Makefile", "all:\n\tprintf 'hello'\n"},
+		{"Dockerfile", "FROM alpine:latest\nENV EXAMPLE=hello\nRUN echo \"hello\"\n"},
+		{"Dockerfile.test", "FROM alpine:latest\nRUN echo \"hello\"\n"},
+		{"Containerfile", "FROM alpine:latest\nRUN echo \"hello\"\n"},
+		{".bashrc", "# Synthetic comment\nexport EXAMPLE=\"hello\"\nalias ll='ls -l'\n"},
+		{".bash_profile", "# Synthetic comment\nexport EXAMPLE=\"hello\"\n"},
+		{".bash_logout", "# Synthetic comment\necho 'goodbye'\n"},
+		{".profile", "# Synthetic comment\nexport EXAMPLE=\"hello\"\n"},
+		{".zshrc", "# Synthetic comment\nexport EXAMPLE=\"hello\"\n"},
+		{".zprofile", "# Synthetic comment\nexport EXAMPLE=\"hello\"\n"},
+		{".zshenv", "# Synthetic comment\nexport EXAMPLE=\"hello\"\n"},
+		{".kshrc", "# Synthetic comment\nexport EXAMPLE=\"hello\"\n"},
+		{".vimrc", "\" Synthetic comment\nset number\nlet g:value = 42\n"},
+		{".editorconfig", "root = true\n[*]\nindent_size = 4\n"},
+		{".gitconfig", "[example]\n    value = hello\n"},
 		{"script", "#!/usr/bin/env -S python3 -u\nprint('hello')\n"},
 	} {
 		t.Run(test.path, func(t *testing.T) {
@@ -61,6 +83,7 @@ func TestChromaLanguages(t *testing.T) {
 			if result.lexer == "" || len(result.tokens) == 0 {
 				t.Fatalf("no highlighting: lexer=%q tokens=%+v", result.lexer, result.tokens)
 			}
+			t.Logf("%s: %s, %d colored spans", test.path, result.lexer, len(result.tokens))
 		})
 	}
 	for _, name := range []string{"notes.unknown-govim", ""} {
@@ -130,11 +153,11 @@ func TestSyntaxCacheEditUndoAndRename(t *testing.T) {
 	if !e.replace(0, 2, "  ", 0) {
 		t.Fatal("edit failed")
 	}
-	if len(e.syntaxTokens(b)) != 0 {
-		t.Fatal("stale syntax survived edit")
+	if got := syntaxAt(e.syntaxTokens(b), at); got != syntaxForeground(chroma.Comment) {
+		t.Fatal("unaffected colors disappeared while replacement was pending")
 	}
 	awaitSyntax(t, e, b)
-	if got := syntaxAt(b.syntax.tokens, at); got != syntaxForeground(chroma.Keyword) {
+	if got := syntaxAt(b.syntax.tokens, at); got != syntaxForeground(chroma.KeywordNamespace) {
 		t.Fatalf("edit did not reclassify following line: %q", got)
 	}
 	editKeys(e, "u")
@@ -178,7 +201,7 @@ func TestSyntaxWorkerRejectsStaleSnapshot(t *testing.T) {
 	if !e.replace(0, 3, "new text", 0) {
 		t.Fatal("editing blocked by syntax work")
 	}
-	if request.text != "old" {
+	if string(request.runes) != "old" {
 		t.Fatal("worker did not receive immutable snapshot")
 	}
 	close(release)
@@ -202,7 +225,7 @@ func TestSyntaxPreservesEditorOverlays(t *testing.T) {
 	if err := e.draw(&r, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), syntaxCellStyle(syntaxForeground(chroma.Keyword), true)+"package") {
+	if !strings.Contains(out.String(), syntaxCellStyle(syntaxForeground(chroma.KeywordNamespace), true)+"package") {
 		t.Fatalf("syntax lost cursorline background: %q", out.String())
 	}
 	e.startSearch("package", false, false, 1)
@@ -271,13 +294,25 @@ func TestSyntaxFailureLimitsAndCancellation(t *testing.T) {
 	if _, err := lexSyntax(base, "package main", nil, time.Now().Add(-time.Second)); err == nil {
 		t.Fatal("expired budget ignored")
 	}
-	e := memoryEditor(strings.Repeat("x", maxSyntaxBytes+1))
+	e := memoryEditor(strings.Repeat("var n = 42\n", maxSyntaxBytes/10))
 	defer e.close(false)
 	e.buffer().meta.Path = "large.go"
-	if tokens := e.syntaxTokens(e.buffer()); len(tokens) != 0 || e.syntax != nil {
-		t.Fatal("oversized syntax snapshot queued")
-	}
-	if err := e.draw(&renderer{}, io.Discard); err != nil {
+	var renderer renderer
+	if err := e.draw(&renderer, io.Discard); err != nil {
 		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		e.pollSyntax()
+		if err := e.draw(&renderer, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		if e.buffer().syntax.ready && !e.buffer().syntax.waiting {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if cache := &e.buffer().syntax; !cache.ready || len(cache.tokens) == 0 || cache.scanned > 2000 {
+		t.Fatalf("large buffer did not use lazy viewport calculation: ready=%v scanned=%d", cache.ready, cache.scanned)
 	}
 }

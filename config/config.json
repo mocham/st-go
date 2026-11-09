@@ -12,6 +12,8 @@
   "worddelimiters": " ",
   "allowaltscreen": true,
   "allowwindowops": false,
+  "allowclipboardwrite": true,
+  "allowclipboardread": false,
   "allowgeometryops": true,
   "termname": "st-256color",
   "tabspaces": 8,

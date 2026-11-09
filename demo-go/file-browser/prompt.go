@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"st-go/tui/readline"
 	"strings"
 	"time"
 )
@@ -16,6 +17,8 @@ func (b *Browser) modalPrompt(mode string, init []byte) {
 	b.promptAbort = false
 	b.promptBuffer = append([]byte{}, init...)
 	b.promptCursor = len(b.promptBuffer)
+	b.promptEditor = readline.New(string(init), 0, readline.DefaultLimit)
+	b.promptEditor.SetHistory(b.promptHistories[mode])
 	b.pathMatchIdx = -1
 	b.pathMatchTop = 0
 	b.pathMessage = ""
@@ -77,17 +80,23 @@ func (b *Browser) handlePromptKey(k byte) {
 	case '\x7f', '\b':
 		b.promptBackspace()
 	case 0x01: // Ctrl+A
-		b.promptCursor = 0
+		b.promptEdit("<Home>")
 	case 0x05: // Ctrl+E
-		b.promptCursor = len(b.promptBuffer)
+		b.promptEdit("<End>")
 	case 0x03: // Ctrl+C
 		b.promptAbort = true
 	case 0x1b:
 		next, st := b.in.readByte(50 * time.Millisecond)
-		if st == inData && next == '[' {
+		if st == inData && (next == '[' || next == 'O') {
 			first, st2 := b.in.readByte(50 * time.Millisecond)
 			if st2 == inData {
 				b.handlePromptCSI(first)
+			} else {
+				b.promptAbort = true
+			}
+		} else if st == inData {
+			if key := map[byte]string{'b': "<A-b>", 'f': "<A-f>", 'd': "<A-d>", 0x7f: "<A-BS>"}[next]; key != "" {
+				b.promptEdit(key)
 			} else {
 				b.promptAbort = true
 			}
@@ -95,9 +104,9 @@ func (b *Browser) handlePromptKey(k byte) {
 			b.promptAbort = true
 		}
 	default:
-		if k >= 0x20 {
-			b.promptInsert([]byte{k})
-		}
+		b.ensurePromptEditor()
+		result := b.promptEditor.FeedByte(k)
+		b.syncPromptEditor(result)
 	}
 }
 
@@ -106,23 +115,23 @@ func (b *Browser) handlePromptCSI(first byte) {
 	case 'A':
 		if b.promptMode == "path" {
 			b.pathSelectDelta(-1)
+		} else {
+			b.promptEdit("<Up>")
 		}
 	case 'B':
 		if b.promptMode == "path" {
 			b.pathSelectDelta(1)
+		} else {
+			b.promptEdit("<Down>")
 		}
 	case 'C':
-		if b.promptCursor < len(b.promptBuffer) {
-			b.promptCursor++
-		}
+		b.promptEdit("<Right>")
 	case 'D':
-		if b.promptCursor > 0 {
-			b.promptCursor--
-		}
+		b.promptEdit("<Left>")
 	case 'H':
-		b.promptCursor = 0
+		b.promptEdit("<Home>")
 	case 'F':
-		b.promptCursor = len(b.promptBuffer)
+		b.promptEdit("<End>")
 	case '<':
 		b.drainPromptMouse()
 	default:
@@ -130,11 +139,15 @@ func (b *Browser) handlePromptCSI(first byte) {
 			rest := b.readNumericCSI(first)
 			switch rest {
 			case "1~", "7~":
-				b.promptCursor = 0
+				b.promptEdit("<Home>")
 			case "3~":
 				b.promptDelete()
 			case "4~", "8~":
-				b.promptCursor = len(b.promptBuffer)
+				b.promptEdit("<End>")
+			default:
+				if key := readline.CSI(rest); key != "" {
+					b.promptEdit(key)
+				}
 			}
 		} else {
 			b.promptAbort = true
@@ -148,6 +161,14 @@ func (b *Browser) drainPromptMouse() {
 }
 
 func (b *Browser) submitPrompt() {
+	if b.promptHistories == nil {
+		b.promptHistories = make(map[string][]string)
+	}
+	history := append(b.promptHistories[b.promptMode], string(b.promptBuffer))
+	if len(history) > 100 {
+		history = history[1:]
+	}
+	b.promptHistories[b.promptMode] = history
 	if b.promptMode == "path" {
 		b.submitPathPrompt()
 	} else {
@@ -156,27 +177,58 @@ func (b *Browser) submitPrompt() {
 }
 
 func (b *Browser) promptInsert(text []byte) {
-	b.promptBuffer = append(b.promptBuffer[:b.promptCursor],
-		append(text, b.promptBuffer[b.promptCursor:]...)...)
-	b.promptCursor += len(text)
-	b.refreshPromptMatches()
+	b.ensurePromptEditor()
+	before := b.promptEditor.Text()
+	err := b.promptEditor.Insert(string(text))
+	b.syncPromptEditor(readline.Result{Changed: before != b.promptEditor.Text(), Err: err})
 }
 
 func (b *Browser) promptBackspace() {
-	if b.promptCursor <= 0 {
-		return
-	}
-	b.promptBuffer = append(b.promptBuffer[:b.promptCursor-1], b.promptBuffer[b.promptCursor:]...)
-	b.promptCursor--
-	b.refreshPromptMatches()
+	b.promptEdit("<BS>")
 }
 
 func (b *Browser) promptDelete() {
-	if b.promptCursor >= len(b.promptBuffer) {
-		return
+	b.promptEdit("<Delete>")
+}
+
+func (b *Browser) ensurePromptEditor() {
+	if b.promptEditor == nil || b.promptEditor.Text() != string(b.promptBuffer) {
+		b.promptEditor = readline.New(string(b.promptBuffer), 0, readline.DefaultLimit)
 	}
-	b.promptBuffer = append(b.promptBuffer[:b.promptCursor], b.promptBuffer[b.promptCursor+1:]...)
-	b.refreshPromptMatches()
+}
+func (b *Browser) syncPromptEditor(result readline.Result) {
+	b.promptBuffer = []byte(b.promptEditor.Text())
+	b.promptCursor = b.promptEditor.ByteCursor()
+	if result.Err != nil {
+		b.pathMessage, b.cmdMessage = result.Err.Error(), result.Err.Error()
+	}
+	if result.Changed {
+		b.refreshPromptMatches()
+	}
+}
+func (b *Browser) promptEdit(key string) {
+	b.ensurePromptEditor()
+	b.syncPromptEditor(b.promptEditor.Handle(key))
+}
+func promptMeasure(r rune, column int) int {
+	size := 0
+	for _, shown := range displayText(string(r)) {
+		size += readline.CellWidth(shown, column+size)
+	}
+	return size
+}
+func (b *Browser) promptParts() (string, string) {
+	b.ensurePromptEditor()
+	shown, cursor := b.promptEditor.View(max(1, b.cols-6), promptMeasure)
+	column, at := 0, 0
+	for index, r := range shown {
+		if column >= cursor {
+			at = index
+			return shown[:at], shown[at:]
+		}
+		column += promptMeasure(r, column)
+	}
+	return shown, ""
 }
 
 func (b *Browser) refreshPromptMatches() {
@@ -286,8 +338,7 @@ func (b *Browser) drawPathPrompt() {
 		}
 		b.drawText(row, 1, b.cols, style, shown)
 	}
-	before := string(b.promptBuffer[:b.promptCursor])
-	after := string(b.promptBuffer[b.promptCursor:])
+	before, after := b.promptParts()
 	shown := " / " + displayText(before) + selectedStyle + " " + resetStyle + statusStyle + displayText(after)
 	if b.pathMessage != "" {
 		shown += "  [" + b.pathMessage + "]"
@@ -337,8 +388,7 @@ func (b *Browser) commandPrompt() { b.modalPrompt("cmd", []byte(":")) }
 func (b *Browser) drawCommandPrompt() {
 	b.paintStop()
 	b.paintAffectedRows()
-	before := string(b.promptBuffer[:b.promptCursor])
-	after := string(b.promptBuffer[b.promptCursor:])
+	before, after := b.promptParts()
 	shown := " " + displayText(before) + selectedStyle + " " + resetStyle + statusStyle + displayText(after)
 	if b.cmdMessage != "" {
 		shown += "  [" + b.cmdMessage + "]"

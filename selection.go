@@ -2,14 +2,34 @@ package main
 
 import (
 	"github.com/BurntSushi/xgb/xproto"
+	"st-go/limits"
 )
 
 // setSelection claims PRIMARY ownership with the given text.
 func (t *Terminal) setSelection(text string) {
+	if t.conn == nil || !limits.Check("clipboard", int64(len(text)), limits.ClipboardBytes) {
+		return
+	}
 	win := t.win
 	sel := t.atoms["PRIMARY"]
 	t.selectionText = text
+	t.primarySet = true
 	xproto.SetSelectionOwner(t.conn, win, sel, xproto.TimeCurrentTime)
+}
+
+func (t *Terminal) SetClipboard(selection byte, text string) {
+	if t.conn == nil || t.closed() || !limits.Check("clipboard", int64(len(text)), limits.ClipboardBytes) {
+		return
+	}
+	if selection == 'p' {
+		t.setSelection(text)
+		return
+	}
+	if selection != 'c' {
+		return
+	}
+	t.clipboardText, t.clipboardSet = text, true
+	xproto.SetSelectionOwner(t.conn, t.win, t.atoms["CLIPBOARD"], xproto.TimeCurrentTime)
 }
 
 // SetSel is the Hooks interface entry for OSC 52 / selection text.

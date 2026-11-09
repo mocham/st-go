@@ -135,7 +135,9 @@ Corner and boundary placement is resolved against the X screen. A window
 placed with `restore TAG` stays mapped, consumes the next left-button
 press/release, and restores the tagged geometry. These operations obey
 `allowgeometryops`; the default config enables geometry while leaving the
-broader OSC clipboard/window operations controlled by `allowwindowops` off.
+broader OSC window operations controlled by `allowwindowops` off. OSC 52
+clipboard writes are independently controlled by `allowclipboardwrite`
+(default true); reads require `allowclipboardread` (default false).
 At runtime st-go exports a random `ST_GO_GEOMETRY_TOKEN` capability to its
 child. Child-emitted window commands use `window auth TOKEN ...`; commands
 without the matching token are ignored. The file browser adds this prefix
@@ -272,7 +274,7 @@ The preview uses a soft warm off-white (`#f7f5ef`) background by default. Set
 ### Native Go modal editor
 
 [`demo-go/govim`](demo-go/govim/README.md) is a native Go Vim-style editor with
-builtin vimrc0 preferences, direct X11 clipboard transfer (no `xclip` or new
+builtin vimrc0 preferences, terminal-owned OSC 52 clipboard transfer (no `xclip` or new
 font/system dependencies), and checksummed write-ahead swap recovery:
 
 ```sh

@@ -13,15 +13,18 @@ type mouseEvent struct {
 	release      bool
 }
 type keyEvent struct {
-	Key   string
-	Paste string
-	Mouse *mouseEvent
-	Err   string
+	Key       string
+	Paste     string
+	Mouse     *mouseEvent
+	Err       string
+	Clipboard *clipboardReply
 }
 type inputParser struct {
 	pending, paste                        []byte
 	since                                 time.Time
 	inPaste, discardPaste, discardControl bool
+	osc                                   []byte
+	inOSC, oscEscape, discardOSC          bool
 }
 
 func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
@@ -30,6 +33,37 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 	}
 	p.pending = append(p.pending, data...)
 	for len(p.pending) > 0 {
+		if p.inOSC {
+			b := p.pending[0]
+			p.pending = p.pending[1:]
+			if b == 7 || (p.oscEscape && b == '\\') {
+				if !p.discardOSC {
+					if reply := parseClipboardReply(p.osc); reply != nil {
+						emit(keyEvent{Clipboard: reply})
+					}
+				}
+				p.osc = nil
+				p.inOSC, p.oscEscape, p.discardOSC = false, false, false
+				continue
+			}
+			if p.oscEscape && !p.discardOSC {
+				p.osc = append(p.osc, 0x1b)
+			}
+			p.oscEscape = b == 0x1b
+			if !p.oscEscape && !p.discardOSC {
+				maximum := 8192
+				if bytes.HasPrefix(p.osc, []byte("52;")) {
+					maximum = maxClipboardControl
+				}
+				if len(p.osc) >= maximum {
+					p.osc = nil
+					p.discardOSC = true
+				} else {
+					p.osc = append(p.osc, b)
+				}
+			}
+			continue
+		}
 		if p.inPaste {
 			end := bytes.Index(p.pending, []byte("\x1b[201~"))
 			if end < 0 {
@@ -90,7 +124,12 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 			p.pending = b[2:]
 			continue
 		}
-		if b[1] == 'P' || b[1] == ']' {
+		if b[1] == ']' {
+			p.pending = b[2:]
+			p.inOSC = true
+			continue
+		}
+		if b[1] == 'P' {
 			end := bytes.Index(b[2:], []byte("\x1b\\"))
 			bel := bytes.IndexByte(b[2:], 7)
 			if bel >= 0 && (end < 0 || bel < end) {
@@ -284,9 +323,7 @@ func (e *Editor) mouse(event mouseEvent) {
 	}
 	pos = target.buffer.normal(pos)
 	if event.button&3 == 1 && !event.release {
-		value := e.getRegister('*')
-		e.setPos(pos)
-		e.put(value, true, 1)
+		e.withRegister('*', func(value register) { e.setPos(pos); e.put(value, true, 1) })
 		return
 	}
 	if event.button&32 != 0 {

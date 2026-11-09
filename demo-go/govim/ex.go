@@ -406,13 +406,14 @@ func (e *Editor) execute(command string) {
 		if r := []rune(args); len(r) == 1 {
 			reg = r[0]
 		}
-		value := e.getRegister(reg)
-		value.Line = true
-		if !strings.HasSuffix(value.Text, "\n") {
-			value.Text += "\n"
-		}
-		e.setPos(b.start(last))
-		e.put(value, force, 1)
+		e.withRegister(reg, func(value register) {
+			value.Line = true
+			if !strings.HasSuffix(value.Text, "\n") {
+				value.Text += "\n"
+			}
+			e.setPos(b.start(last))
+			e.put(value, force, 1)
+		})
 	case "j", "join":
 		count := last - first + 1
 		if !explicit {

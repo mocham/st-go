@@ -25,9 +25,6 @@ func (c *commandsFlag) String() string         { return strings.Join(*c, "; ") }
 func (c *commandsFlag) Set(value string) error { *c = append(*c, value); return nil }
 
 func run(args []string) (code int) {
-	if len(args) == 1 && args[0] == "--clipboard-owner" {
-		return clipboardOwner()
-	}
 	options := defaultJournalOptions()
 	flags := flag.NewFlagSet("govim", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -154,14 +151,8 @@ func run(args []string) (code int) {
 		fmt.Fprint(os.Stdout, "\x18\x1b[?2026l\x1b[?2004l\x1b[?1002l\x1b[?1000l\x1b[?1006l\x1b[?7h\x1b[0 q\x1b[0m\x1b[?25h\x1b[?1049l")
 		unix.IoctlSetTermios(fd, unix.TCSETS, old)
 	}
-	if os.Getenv("DISPLAY") != "" {
-		clip, err := newXClipboard(true)
-		if err == nil {
-			e.clip = clip
-		} else {
-			e.clipboardError = err.Error()
-		}
-	}
+	clip := &terminalClipboard{out: os.Stdout}
+	e.clip = clip
 	signals := make(chan os.Signal, 16)
 	signal.Notify(signals, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
@@ -199,12 +190,23 @@ func run(args []string) (code int) {
 		now := time.Now()
 		parser.expire(now, e.Feed)
 		e.tick(now)
+		if err := clip.Flush(); err != nil {
+			return 1
+		}
 		if e.dirty {
 			if err := e.draw(&renderer, os.Stdout); err != nil {
 				return 1
 			}
 		}
 		timeout := min(50, max(1, int(options.Interval/time.Millisecond)))
+		// A tiny completed syntax slice should not wait a full idle interval
+		// before committing an edit's single colored frame.
+		for _, buffer := range e.buffers {
+			if buffer.syntax.waiting {
+				timeout = min(timeout, 5)
+				break
+			}
+		}
 		poll := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
 		_, err := unix.Poll(poll, timeout)
 		if err == unix.EINTR {
@@ -315,7 +317,9 @@ INSERT: Escape; arrows; Backspace/Delete; auto/smart indent;
 Tab=4 spaces, Ctrl-W/U/T/D/R/V/O/N/P; bracketed paste.
 UNDO: u / Ctrl-R, U; dot repeats a change; q{reg} records,
 @{reg} plays and @@ repeats a macro. "{reg} chooses a register.
-yy/dd and Visual y/d copy to the X11 clipboard without xclip.
+yy/dd and Visual y/d also request a host clipboard copy using OSC 52.
+Internal registers/p/P are immediate and separate from host clipboard reads.
+Explicit "+/"* reads are asynchronous; Escape cancels a pending read.
 
 SEARCH: / ? n N * #, Vim basic magic, \v (RE2), \V (literal).
 :noh clears highlights. :[range]s/pattern/replacement/gicn

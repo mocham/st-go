@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"st-go/tui/readline"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ type visualSelection struct {
 
 type clipboard interface {
 	Set(string, bool) error
-	Get(bool) (string, error)
+	Request(bool) error
 	Close() error
 }
 
@@ -104,11 +105,8 @@ type Editor struct {
 	prompt                           string
 	promptStart                      int
 	promptCursor, promptView         int // rune indexes, including the ':'/'/'/'?' prefix
-	promptDraft                      string
-	promptDraftCursor                int
-	promptKill                       string
+	promptEditor                     *readline.Line
 	promptHistory                    []string
-	historyIndex                     int
 	lastSubstitute                   string
 	lastEx, lastInsert               string
 	completion                       *completionState
@@ -123,6 +121,7 @@ type Editor struct {
 	syntax                           *syntaxHighlighter
 	clip                             clipboard
 	clipboardError                   string
+	clipboardRead                    *clipboardRead
 	registerReady                    bool
 	emptyResult                      bool
 	insertSeparator                  string
@@ -377,6 +376,27 @@ func (e *Editor) Feed(event keyEvent) {
 	if e.quit {
 		return
 	}
+	if event.Clipboard != nil {
+		e.finishClipboard(event.Clipboard)
+		return
+	}
+	if read := e.clipboardRead; read != nil {
+		if event.Key == "<Esc>" || event.Key == "\x03" {
+			e.clipboardRead = nil
+			e.message = "Clipboard read cancelled"
+			e.reset()
+			e.finishCommand()
+			e.dirty = true
+			return
+		}
+		if len(read.queued) >= 100000 || read.bytes+len(event.Key)+len(event.Paste) > maxBufferBytes {
+			e.error(fmt.Errorf("clipboard input queue is full; Esc cancels"))
+			return
+		}
+		read.queued = append(read.queued, event)
+		read.bytes += len(event.Key) + len(event.Paste)
+		return
+	}
 	e.dirty = true
 	if len(e.tabs) == 0 {
 		return
@@ -459,7 +479,7 @@ func (e *Editor) Feed(event keyEvent) {
 }
 
 func (e *Editor) finishCommand() {
-	complete := e.mode == normalMode && e.operator == "" && e.pending == "" && e.count == "" && !e.registerReady && e.prompt == ""
+	complete := e.mode == normalMode && e.operator == "" && e.pending == "" && e.count == "" && !e.registerReady && e.prompt == "" && e.clipboardRead == nil
 	if complete {
 		if e.changed && !e.ignoreRepeat && !e.replaying {
 			e.lastChange = append([]keyEvent(nil), e.commandKeys...)
@@ -522,10 +542,7 @@ func (e *Editor) normalKey(key string) {
 			e.reset()
 			return
 		case "p", "P":
-			reg := e.getRegister(e.selectedRegister)
-			e.visualOperation("d")
-			e.put(reg, false, n)
-			e.mode = normalMode
+			e.withRegister(e.selectedRegister, func(reg register) { e.visualOperation("d"); e.put(reg, false, n); e.mode = normalMode })
 			e.reset()
 			return
 		case "r":
@@ -635,7 +652,7 @@ func (e *Editor) normalKey(key string) {
 	case "Y":
 		e.applyOperator("y", e.lineRange(b.row(e.pos()), n), true)
 	case "p", "P":
-		e.put(e.getRegister(e.selectedRegister), key == "P", n)
+		e.withRegister(e.selectedRegister, func(value register) { e.put(value, key == "P", n) })
 	case "r":
 		e.pending = "replace"
 		return
@@ -963,11 +980,13 @@ func (e *Editor) repeatChange(n int, override bool) {
 }
 
 func (e *Editor) playMacro(reg rune, count int) {
+	e.withRegister(reg, func(value register) { e.playRegisterMacro(value, count) })
+}
+func (e *Editor) playRegisterMacro(value register, count int) {
 	if e.macroDepth >= 20 {
 		e.error(fmt.Errorf("macro recursion limit"))
 		return
 	}
-	value := e.getRegister(reg)
 	keys := value.Keys
 	if len(keys) == 0 {
 		keys = eventsText(value.Text)
@@ -998,6 +1017,9 @@ func (e *Editor) playMacro(reg rune, count int) {
 }
 
 func (e *Editor) tick(now time.Time) {
+	if read := e.clipboardRead; read != nil && !now.Before(read.deadline) {
+		e.finishClipboard(&clipboardReply{selection: read.selection, err: fmt.Errorf("terminal clipboard query timed out or was denied; internal registers unchanged")})
+	}
 	e.pollSyntax()
 	for _, b := range e.buffers {
 		if b.journal != nil {
