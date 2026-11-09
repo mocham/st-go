@@ -91,6 +91,7 @@ type Terminal struct {
 	ttyResize func(rows, cols int)
 
 	displayRegions displayRegionState
+	pdfSearch      pdfSearchState
 
 	keys       []keyDef
 	shortcuts  []shortcut

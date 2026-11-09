@@ -282,6 +282,7 @@ func (t *Terminal) queueRegionReply(reply regionReply) {
 // Native workers publish bounded replies; only the terminal event loop writes
 // application input. This keeps the lock order one-way.
 func (t *Terminal) flushRegionReplies() {
+	t.flushPDFSearchReply()
 	s := &t.displayRegions
 	s.mu.Lock()
 	var reply regionReply

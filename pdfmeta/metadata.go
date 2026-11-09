@@ -21,3 +21,11 @@ type Payload struct {
 	Truncated bool    `json:"truncated,omitempty"`
 	Error     string  `json:"error,omitempty"`
 }
+
+// Search lists one page per occurrence in native reading order. Coordinates
+// stay in the terminal; clients select a one-based occurrence when painting.
+type Search struct {
+	Pages     []int  `json:"pages,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Error     string `json:"error,omitempty"`
+}

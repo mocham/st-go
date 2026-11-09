@@ -21,7 +21,7 @@ import (
 	"st-go/pdfmeta"
 )
 
-// scrollPDF's native document is confined to the region decoder goroutine.
+// scrollPDF's native document is confined to its owning decoder/search worker.
 type scrollPDF struct {
 	handle       unsafe.Pointer
 	cache        regionBitmap // worker-owned; published pixels are immutable

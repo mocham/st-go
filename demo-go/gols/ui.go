@@ -287,12 +287,23 @@ func (browser *Browser) drawDivider() {
 }
 
 func (browser *Browser) drawStatus() {
-	help := " Tab navigation  S-Tab pin  [ ] page  q"
+	help := " Tab nav  [ ] page  / text  n/N match  q"
 	if browser.navigation.Visible {
-		help = " Tab hide  S-Tab pin  arrows Enter Backspace / search"
+		help = " Tab nav  arrows Enter  / text  n/N match  s corpus"
+	}
+	if len(browser.searchPromptBuffer) > 0 {
+		browser.drawPrompt(string(browser.searchPromptBuffer))
+		return
+	}
+	if browser.documentSearch.visible {
+		help = " n/N match  / search  Esc clear  Tab nav"
 	}
 	fmt.Fprintf(browser.out, "\x1b[%d;1H%s%*s\x1b[%d;2H", browser.rows, statusStyle, browser.cols, "", browser.rows)
-	fmt.Fprint(browser.out, shorten(browser.status, browser.cols-len(help)-3))
+	width := browser.cols - 3
+	if browser.cols >= 78 {
+		width -= len(help)
+	}
+	fmt.Fprint(browser.out, shorten(browser.status, width))
 	if browser.cols >= 78 {
 		fmt.Fprintf(browser.out, "\x1b[%d;%dH%s", browser.rows, browser.cols-len(help)+1, help)
 	}
@@ -376,6 +387,18 @@ func (browser *Browser) renderPreview() {
 }
 
 func (browser *Browser) displayDocumentPreview(document documentMeta, preview renderedPreview) {
+	browser.previewDrawn = true
+	if browser.documentSearch.path != "" && browser.documentSearch.path != preview.path {
+		browser.clearDocumentSearch()
+	}
+	browser.displayedPreview = preview
+	index := browser.view.corpusIndex
+	if entry := browser.selectedEntry(); browser.view.kind != viewTOC && entry != nil {
+		index = entry.corpusIndex
+	}
+	if index >= 0 && index < len(browser.corpora) {
+		browser.displayedSource = previewSourceID{corpus: browser.corpora[index].file, id: document.ID}
+	}
 	browser.pages = preview.pageCount
 	if browser.pages < 1 {
 		browser.pages = 1
@@ -397,7 +420,11 @@ func (browser *Browser) displayDocumentPreview(document documentMeta, preview re
 			title += fmt.Sprintf("  (%d math errors)", preview.mathErrors)
 		}
 		browser.drawPreviewTitle(title)
-		browser.dcs(fmt.Sprintf("open '%s' rect 1 3 %d %d fit-height page %d", browser.previewLink, browser.previewW, heightCells, browser.page))
+		searchOptions := ""
+		if search := &browser.documentSearch; search.visible && !search.pending && search.path == preview.path && len(search.pages) > 0 {
+			searchOptions = fmt.Sprintf(" pdfsearch %d %d", search.token, search.active+1)
+		}
+		browser.dcs(fmt.Sprintf("open '%s' rect 1 3 %d %d fit-height page %d%s", browser.previewLink, browser.previewW, heightCells, browser.page, searchOptions))
 	} else {
 		browser.drawPreviewTitle("SOURCE  " + document.Title)
 		browser.dcs(fmt.Sprintf("open '%s' rect 2 3 %d %d", browser.previewLink, browser.previewW-3, heightCells))
@@ -415,7 +442,12 @@ func (browser *Browser) renderAll() {
 	}
 	browser.ensureVisible()
 	fmt.Fprint(browser.out, "\x1b[2J")
+	browser.previewDrawn = false
 	browser.renderPreview()
+	if !browser.previewDrawn {
+		browser.displayedPreview = renderedPreview{}
+		browser.clearDocumentSearch()
+	}
 	browser.drawHeader()
 	if browser.navigation.Visible {
 		browser.drawInfo()

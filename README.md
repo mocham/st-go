@@ -109,6 +109,9 @@ Supported DSL commands:
 |---------|---------|
 | `open '<path>' [fit-width] [fit-height] [fit-contain] [page N]` | load and display an image/PDF |
 | `open '<path>' rect X Y W H [fit-contain] [page N]` | paint text/image/PDF inside a fixed cell rectangle |
+| `pdfsearch query TOKEN '<path>' '<text>'` | asynchronously search a PDF for fixed-page previews |
+| `pdfsearch chunk TOKEN OFFSET` | request another bounded search-result chunk |
+| `pdfsearch clear` | cancel fixed-page search and discard retained matches |
 | `open '<path>'` (text file) | render a plain text file row-by-row from the cursor, stopping at the last row (no scroll) |
 | `setpwd '<dir>'`           | set the working directory for relative paths |
 | `clear`                    | clear the screen and remove all images |
@@ -619,15 +622,39 @@ and Enter move down the hierarchy, and Backspace or Left moves up. Selecting a d
 renders a fit-height preview; Enter keeps navigation visible and replaces the
 document list with its table of contents, whose entries jump to rendered pages.
 Tab hides the pane for a full-width preview, or shows/focuses it again.
-`/` searches document paths/titles/content, `[` and `]` change rendered document
-pages, and `q` exits. Selection previews are cached and reused on entry. The
+`/query` + Enter searches the **displayed document**, highlighting all matches
+yellow and the current occurrence orange. `n`/`N` move between occurrences,
+including within the same page, wrapping at either end. `?` searches backward;
+an empty `/` or `?` repeats the previous query. Search works with navigation
+shown or hidden and preserves the fit-height layout and TOC. `:noh`,
+`:nohlsearch`, or Escape clears highlights; `n` can restore the last search.
+The same Unicode shortcuts as zat are available: `/{alpha}` finds **α** and
+`/caf\'e` finds **café**. Queries are literal and case-insensitive, with the same
+1024-byte expanded-query and 4096-occurrence budgets. Search uses embedded PDF
+text; vector-only math without a text representation cannot be matched.
+
+`s` searches document paths/titles/content across the corpus (as does `/` when
+no PDF is displayed). `[` and `]` change rendered document pages; `q` exits.
+Selection previews are cached and reused on entry. The
 opened page-size variant remains pinned while the window is resized; selecting
 or reopening at another size creates or reuses that cached variant.
+An active document search also pins its selected preview until cleared, so
+resizing or toggling the sidebar does not repaginate its occurrence list.
 `r` reopens the immutable databases; changed record digests invalidate
 and remove their old session previews. Successfully opened databases are kept
 in most-recently-used order in `$HOME/.cache/gols.json`. Starting `gols` without
 a path displays that recent database list; selecting an entry moves it to the
 front for the next launch.
+
+Fixed-page PDF search uses st-go's native Poppler matcher, not an external
+converter. Replies are tokenized, chunked base64 JSON:
+`DCS pdfsearch data TOKEN OFFSET NEXT BASE64 ST`, with a `pdfmeta.Search`
+payload (`pages` lists one page per occurrence, plus `truncated`/`error`).
+`NEXT=-1` ends the reply. Append `pdfsearch TOKEN MATCH` to an `open ... rect`
+command to paint the retained highlights; `MATCH` is one-based (zero highlights
+all occurrences equally). The terminal validates the document digest before
+applying coordinates, so stale replies cannot tint another PDF. GoLS requires
+the rebuilt `st` for this protocol; its corpus browsing remains read-only.
 
 ### Shared TUI navigation
 

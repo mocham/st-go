@@ -33,6 +33,7 @@ int pdf_scroll_search_page(void *view, int page, const char *text);
  * counts rectangles, not doubles; output is bounded and needs no iconv modules. */
 int pdf_scroll_search_rects(void *view, int page, const char *text,
                             double *rects, int capacity, int *truncated);
+int pdf_scroll_page_size(void *view, int page, double *width, double *height);
 /* Bounded UTF-8 page text and binary outline records (page/level/length u32 LE,
  * then UTF-8 title). Return bytes written, -1 on failure. No actions execute. */
 int pdf_scroll_text(void *view, int page, char *out, int capacity, int *truncated);

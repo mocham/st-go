@@ -100,8 +100,14 @@ type Browser struct {
 	status         string
 	navigation     navigation.Panel
 
-	openedDocumentID int64
-	openedPreview    renderedPreview
+	openedDocumentID   int64
+	openedPreview      renderedPreview
+	displayedPreview   renderedPreview
+	displayedSource    previewSourceID
+	previewDrawn       bool
+	documentSearch     documentSearch
+	searchToken        int
+	searchPromptBuffer []byte
 
 	cacheDir    string
 	previewLink string
@@ -130,6 +136,9 @@ func (browser *Browser) setup() error {
 	browser.lastClickIdx = -1
 	browser.status = "Ready"
 	browser.navigation = navigation.DefaultPanel()
+	if browser.in != nil {
+		browser.in.reply = browser.searchReply
+	}
 	browser.buildEntries()
 	return nil
 }
@@ -145,6 +154,7 @@ func (browser *Browser) cleanup() {
 		return
 	}
 	browser.cleaned = true
+	browser.clearDocumentSearch()
 	fmt.Fprint(browser.out, "\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[0m\x1b[?1049l")
 	browser.out.Flush()
 	browser.restoreTermios()
@@ -263,6 +273,12 @@ func (browser *Browser) previewDocument(corpusIndex int, document documentMeta) 
 		return renderedPreview{}, fmt.Errorf("preview is unavailable")
 	}
 	corpus := browser.corpora[corpusIndex]
+	// Keep the searched PDF revision/pagination stable across resize and
+	// sidebar changes, just as an explicitly opened document is retained.
+	if browser.documentSearch.visible && browser.documentSearch.path == browser.displayedPreview.path &&
+		browser.displayedSource == (previewSourceID{corpus: corpus.file, id: document.ID}) {
+		return browser.displayedPreview, nil
+	}
 	width, height := browser.previewPDFPageSize()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -288,6 +304,7 @@ func (browser *Browser) refreshCorpora() error {
 		_ = old.close()
 	}
 	if changed {
+		browser.clearDocumentSearch()
 		browser.openedDocumentID = 0
 		browser.openedPreview = renderedPreview{}
 		browser.page = 1
@@ -453,6 +470,7 @@ func (browser *Browser) toggleNavigationPin() {
 }
 
 func (browser *Browser) searchPrompt() {
+	browser.clearDocumentSearch()
 	query := []byte{}
 	fmt.Fprint(browser.out, "\x1b[?25h")
 	defer func() {
@@ -512,6 +530,10 @@ func (browser *Browser) searchPrompt() {
 }
 
 func (browser *Browser) handleKey(character byte) {
+	if len(browser.searchPromptBuffer) > 0 {
+		browser.handleSearchPromptKey(character)
+		return
+	}
 	switch character {
 	case 'q', 'Q':
 		browser.running = false
@@ -521,10 +543,27 @@ func (browser *Browser) handleKey(character byte) {
 		browser.changePage(-1)
 	case ']', '}':
 		browser.changePage(1)
+	case '/':
+		if browser.displayedPreview.pdf {
+			browser.startDocumentSearchPrompt('/')
+		} else {
+			browser.searchPrompt()
+		}
+	case '?':
+		browser.startDocumentSearchPrompt('?')
+	case ':':
+		browser.startDocumentSearchPrompt(':')
+	case 'n', 'N':
+		browser.nextDocumentMatch(character == 'N')
 	case 0x1b:
 		next, status := browser.in.readByte(50 * time.Millisecond)
 		if status != inData {
-			browser.running = false
+			if browser.documentSearch.visible {
+				browser.clearDocumentSearch()
+				browser.renderAll()
+			} else {
+				browser.running = false
+			}
 			return
 		}
 		if next != '[' {
@@ -545,7 +584,7 @@ func (browser *Browser) handleKey(character byte) {
 
 func (browser *Browser) handleNavigationKey(character byte) {
 	switch character {
-	case '/', 's', 'S':
+	case 's', 'S':
 		browser.searchPrompt()
 	case 'r', 'R':
 		if err := browser.refreshCorpora(); err != nil {
@@ -678,6 +717,7 @@ func (browser *Browser) loop() {
 	browser.running = true
 	for browser.running {
 		browser.processSignals()
+		browser.expireDocumentSearch(time.Now())
 		if browser.resized {
 			browser.resized = false
 			browser.status = "Resized"

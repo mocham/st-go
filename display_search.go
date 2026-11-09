@@ -103,17 +103,21 @@ func paintSearchMatches(surface regionSurface, viewport image.Rectangle, pixels 
 			viewport.Min.Y+int(math.Floor(pageTop+float64(hit.box.Min.Y)*h/1e6-surface.scrollY)),
 			x0+int(math.Ceil(float64(hit.box.Max.X)*float64(width)/1e6)),
 			viewport.Min.Y+int(math.Ceil(pageTop+float64(hit.box.Max.Y)*h/1e6-surface.scrollY))).Intersect(viewport)
-		for y := box.Min.Y; y < box.Max.Y; y++ {
-			for x := box.Min.X; x < box.Max.X; x++ {
-				pixel := pixels[y*stride+x]
-				// Multiplicative yellow/orange tint preserves black text and never
-				// modifies cached document pixels. The active occurrence is darker.
-				green, blue := uint32(235), uint32(100)
-				if i == m.active {
-					green, blue = 170, 45
-				}
-				pixels[y*stride+x] = 0xff000000 | pixel&0xff0000 | (((pixel>>8)&255)*green/255)<<8 | (pixel&255)*blue/255
-			}
+		tintSearchBox(pixels, stride, box, i == m.active)
+	}
+}
+
+func tintSearchBox(pixels []uint32, stride int, box image.Rectangle, active bool) {
+	// Multiplicative yellow/orange preserves black text. Callers clip the box;
+	// cached source pixels remain untouched, including on the continuous path.
+	green, blue := uint32(235), uint32(100)
+	if active {
+		green, blue = 170, 45
+	}
+	for y := box.Min.Y; y < box.Max.Y; y++ {
+		for x := box.Min.X; x < box.Max.X; x++ {
+			pixel := pixels[y*stride+x]
+			pixels[y*stride+x] = 0xff000000 | pixel&0xff0000 | (((pixel>>8)&255)*green/255)<<8 | (pixel&255)*blue/255
 		}
 	}
 }

@@ -356,6 +356,7 @@ func (t *Terminal) imageDecodePDF(encoded []byte, opts term.ImageDecodeOptions) 
 		r := bgra[i*4+2]
 		rgba[i] = 0xFF000000 | uint32(r)<<16 | uint32(g)<<8 | uint32(b)
 	}
+	t.paintPDFPreviewSearch(encoded, page, pw, ph, rgba, opts)
 
 	if _, valid := limits.Product("PDF glyphs", limits.MaxBytes, cols, rows, 16); !valid {
 		return 0, 0, nil, false

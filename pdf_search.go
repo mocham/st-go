@@ -28,6 +28,20 @@ type pdfMatches struct {
 	truncated bool
 }
 
+type pdfPageSize struct{ width, height float64 }
+
+func (p *scrollPDF) pageSize(page int) (pdfPageSize, error) {
+	var width, height C.double
+	if C.pdf_scroll_page_size(p.handle, C.int(page), &width, &height) == 0 {
+		return pdfPageSize{}, fmt.Errorf("invalid PDF page size")
+	}
+	w, h := float64(width), float64(height)
+	if math.IsNaN(w) || math.IsNaN(h) || math.IsInf(w, 0) || math.IsInf(h, 0) || w < 1 || h < 1 {
+		return pdfPageSize{}, fmt.Errorf("invalid PDF page size")
+	}
+	return pdfPageSize{w, h}, nil
+}
+
 func (p *scrollPDF) matches(width int, query string, current func() bool) (*pdfMatches, []int, error) {
 	if C.pdf_scroll_height(p.handle, C.int(width), C.int(limits.PreviewHeight)) < 1 {
 		return nil, nil, fmt.Errorf("invalid PDF search geometry")

@@ -317,6 +317,15 @@ try {
     return 1;
 } catch (...) { return 0; }
 
+int pdf_scroll_page_size(void *handle, int index, double *width, double *height)
+{
+    auto *view = static_cast<scroll_pdf *>(handle);
+    if (!view || !width || !height || index < 0 || index >= (int)view->pages.size()) return 0;
+    *width = view->pages[index].width;
+    *height = view->pages[index].height;
+    return 1;
+}
+
 int pdf_scroll_page_tops(void *handle, int *tops, int capacity)
 try {
     auto *view = static_cast<scroll_pdf *>(handle);

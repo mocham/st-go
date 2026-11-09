@@ -231,13 +231,14 @@ type Term struct {
 // ImageDecodeOptions describes how a DCS open command should size an image.
 // ViewCols/ViewRows are zero for legacy whole-terminal behavior.
 type ImageDecodeOptions struct {
-	FitWidth   bool
-	FitHeight  bool
-	FitContain bool
-	Page       int
-	ViewCols   int
-	ViewRows   int
-	Animate    bool // play an animated WebP (open DSL `anim` option)
+	FitWidth                 bool
+	FitHeight                bool
+	FitContain               bool
+	Page                     int
+	ViewCols                 int
+	ViewRows                 int
+	Animate                  bool // play an animated WebP (open DSL `anim` option)
+	SearchToken, SearchMatch int  // fixed-page PDF highlights; match is one-based
 }
 
 type GeometryUnit uint8

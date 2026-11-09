@@ -601,6 +601,10 @@ func (t *Term) dcs() {
 			if err := t.dslRegion(args[1:]); err != nil {
 				log.Printf("dsl: region: %v", err)
 			}
+		case "pdfsearch":
+			if err := t.dslPDFSearch(args[1:]); err != nil {
+				log.Printf("dsl: pdfsearch: %v", err)
+			}
 		default:
 			log.Printf("dsl: unknown command %q\n", args[0])
 		}
@@ -689,6 +693,19 @@ func (t *Term) dslOpen(args []string) {
 			opts.FitContain = true
 		case "anim":
 			opts.Animate = true
+		case "pdfsearch":
+			if i+2 >= len(args[1:]) {
+				log.Printf("dsl: pdfsearch requires TOKEN MATCH")
+				return
+			}
+			token, e1 := strconv.Atoi(args[1+i+1])
+			match, e2 := strconv.Atoi(args[1+i+2])
+			if e1 != nil || e2 != nil || token < 1 || token > 1<<30 || match < 0 || match > limits.PreviewSearchMatches {
+				log.Printf("dsl: invalid PDF search paint options")
+				return
+			}
+			opts.SearchToken, opts.SearchMatch = token, match
+			i += 2
 		case "page":
 			// page N (1-based)
 			if i+1 < len(args[1:]) {
