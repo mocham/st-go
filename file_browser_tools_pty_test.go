@@ -14,22 +14,14 @@ import (
 	"st-go/ptyutil"
 )
 
-// Exercise real browser -> zat/Vim -> browser handoffs against the terminal's
+// Exercise real browser -> zat/govim -> browser handoffs against the terminal's
 // parser, native PDF worker, region negotiation, and controlling PTY.
 func TestFileBrowserNativeDocumentToolsPTY(t *testing.T) {
-	vim, err := exec.LookPath("vim")
-	if err != nil {
-		t.Skip("Vim is not installed")
-	}
 	tools := t.TempDir()
-	build := exec.Command("go", "build", "-o", tools+"/", "./demo-go/zat", "./demo-go/vimtex")
+	build := exec.Command("go", "build", "-o", tools+"/", "./demo-go/zat", "./demo-go/govim")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build document tools: %v\n%s", err, output)
-	}
-	// Disable machine/user Vim configuration, not the real editor or preview.
-	if err := os.WriteFile(filepath.Join(tools, "vim"), []byte("#!/bin/sh\nexec "+fmt.Sprintf("%q", vim)+" -Nu NONE -n \"$@\"\n"), 0700); err != nil {
-		t.Fatal(err)
 	}
 	browser := filepath.Join(tools, "file-browser")
 	build = exec.Command("go", "build", "-o", browser, "-tags", "sqlite_omit_load_extension",
@@ -38,7 +30,7 @@ func TestFileBrowserNativeDocumentToolsPTY(t *testing.T) {
 		t.Fatalf("build browser: %v\n%s", err, output)
 	}
 	for _, implementation := range []string{"go", "bash"} {
-		for _, extension := range []string{"pdf", "tex", "md"} {
+		for _, extension := range []string{"pdf", "tex", "md", "sh", "txt"} {
 			t.Run(implementation+"/"+extension, func(t *testing.T) {
 				dir := t.TempDir()
 				var document []byte
@@ -49,6 +41,10 @@ func TestFileBrowserNativeDocumentToolsPTY(t *testing.T) {
 					document = []byte("\\documentclass{article}\n\\begin{document}\nSynthetic browser handoff.\n\\end{document}\n")
 				case "md":
 					document = []byte("# Synthetic browser handoff\n\nA **Markdown** document with $x^2$.\n")
+				case "sh":
+					document = []byte("#!/bin/sh\nprintf 'Synthetic browser handoff\\n'\n")
+				case "txt":
+					document = []byte("Synthetic browser handoff.\n")
 				}
 				if err := os.WriteFile(filepath.Join(dir, "document."+extension), document, 0600); err != nil {
 					t.Fatal(err)
@@ -134,9 +130,14 @@ func TestFileBrowserNativeDocumentToolsPTY(t *testing.T) {
 					}
 					t.Fatalf("waiting for %s\nscreen=%q\noutput=%q", description, screen, raw)
 				}
-				await("browser", func(screen, _ string, _ bool) bool { return strings.Contains(screen, "st-go files") })
+				await("browser", func(screen, _ string, _ bool) bool {
+					return strings.Contains(screen, "st-go files") && strings.Contains(screen, "Ready")
+				})
 				fmt.Fprint(master, "\x1b[B\r")
-				await("real document tool and native preview", func(_, raw string, ready bool) bool {
+				await("real document tool (and preview for document formats)", func(_, raw string, ready bool) bool {
+					if extension == "sh" || extension == "txt" {
+						return !ready && strings.Contains(raw, "\x1b[2 q")
+					}
 					return ready && strings.Contains(raw, "region secondary open ")
 				})
 				if extension == "pdf" {

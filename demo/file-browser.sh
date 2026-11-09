@@ -45,7 +45,7 @@ Options:
 
 CODE is evaluated by `bash -c` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
-By default, .pdf opens in zat and .tex/.md in vimtex when available in PATH.
+By default, .pdf opens in zat and text/source/config files in govim when available in PATH.
 These tools use this terminal; exiting returns to the browser. Otherwise the
 existing external opener is used. Explicit opener settings take precedence.
 
@@ -309,6 +309,32 @@ is_text_file() {
 		return 1
 	fi
 	LC_ALL=C grep -Iq . -- "$1" 2>/dev/null
+}
+
+# Accept text by content instead of maintaining an incomplete syntax-extension
+# list. Empty text files are editable too; native/binary formats retain their
+# existing routes even when empty. Refuse FIFOs/devices before invoking readers.
+is_editor_text_file() {
+	[[ -f $1 ]] || return 1
+	case ${1,,} in
+		*.pdf|*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tga|*.webp|*.ico|\
+		*.zip|*.tar|*.tgz|*.gz|*.bz2|*.xz|*.7z|*.rar|*.zst|*.jar|*.war|*.deb|*.rpm|\
+		*.mp3|*.wav|*.flac|*.ogg|*.m4a|*.aac|*.mp4|*.mkv|*.webm|*.avi|*.mov|*.mpeg|*.mpg|\
+		*.sqlite3|*.sqlite|*.db|*.db3|*.s3db|*.epub|*.doc|*.docx|*.xls|*.xlsx|*.ppt|*.pptx|*.odt|*.ods|\
+		*.exe|*.dll|*.so|*.o|*.a|*.bin|*.wasm|*.pyc|*.class|*.mo|*.ttf|*.otf|*.woff|*.woff2) return 1 ;;
+	esac
+	[[ -s $1 ]] || return 0
+	local mime
+	if command -v file >/dev/null 2>&1; then
+		mime=$(file -Lb --mime-type -- "$1" 2>/dev/null || true)
+		case $mime in
+			text/*|application/json|application/xml|application/x-shellscript|application/javascript|*+json|*+xml) return 0 ;;
+			image/*|audio/*|video/*|font/*|application/pdf|application/zip|application/gzip|application/x-tar|application/x-7z-compressed|application/vnd.sqlite3) return 1 ;;
+		esac
+	fi
+	# PEM and other textual application/* formats need a content fallback. Bound
+	# it instead of scanning a huge unknown file or maintaining lexer suffixes.
+	LC_ALL=C head -c 8192 -- "$1" 2>/dev/null | LC_ALL=C grep -Iq ''
 }
 
 human_size() {
@@ -761,7 +787,7 @@ open_path() {
 		if ((!CUSTOM_OPEN)); then
 			case ${path,,} in
 				*.pdf) tool=zat ;;
-				*.tex|*.md) tool=vimtex ;;
+				*) if is_editor_text_file "$path"; then tool=govim; fi ;;
 			esac
 			if [[ -n $tool ]] && executable=$(type -P -- "$tool") && [[ -x $executable && ! -d $executable ]]; then
 				run_terminal_tool "$executable" "$path"
@@ -1295,7 +1321,7 @@ MOUSE
   Middle click   go to parent
 
 HINTS
-  With the default opener, .pdf uses zat and .tex/.md use vimtex
+  With the default opener, .pdf uses zat and text/source/config files use govim
   when available in PATH. They run in this terminal; exit the tool
   to return to the same browser location. Otherwise the existing
   external opener is used. --open and ST_FILE_BROWSER_OPEN override

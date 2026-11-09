@@ -541,7 +541,9 @@ it with `--open CODE` or `ST_FILE_BROWSER_OPEN`; `FILE`, `NAME`, and
 `BROWSER_DIR` are exported to `bash -c`, so dispatch functions and command
 sequences are supported:
 
-By default, both browsers open `.pdf` with `zat` and `.tex`/`.md` with `vimtex`
+By default, both browsers open `.pdf` with `zat` and text/source/config files
+(including `.sh`, `.txt`, syntax-highlighted formats, dotfiles and extensionless
+scripts) with `govim`
 when the corresponding tool is in `$PATH` (extensions are case-insensitive).
 The tool runs in the **same terminal**, and exiting it restores the browser's
 directory, selection, and preview. Enter, `o`, double-click, and path entry all

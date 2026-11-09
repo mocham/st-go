@@ -87,7 +87,7 @@ MOUSE
   Middle click   go to parent
 
 HINTS
-  With the default opener, .pdf uses zat and .tex/.md use vimtex
+  With the default opener, .pdf uses zat and text/source/config files use govim
   when available in PATH. They run in this terminal; exit the tool
   to return to the same browser location. Otherwise the existing
   external opener is used. --open and ST_FILE_BROWSER_OPEN override

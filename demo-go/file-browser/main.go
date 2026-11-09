@@ -19,7 +19,7 @@ Options:
 
 CODE is evaluated by ` + "`bash -c`" + ` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
-By default, .pdf opens in zat and .tex/.md in vimtex when available in PATH.
+By default, .pdf opens in zat and text/source/config files in govim when available in PATH.
 These tools use this terminal; exiting returns to the browser. Otherwise the
 existing external opener is used. Explicit opener settings take precedence.
 

@@ -99,6 +99,10 @@ func (e *Editor) insertKey(key string) {
 	if key != "\x0e" && key != "\x10" {
 		e.completion = nil
 	}
+	if e.mode == insertMode && key == "\n" && texEditing(b) {
+		e.jumpTexPlaceholder()
+		return
+	}
 	switch key {
 	case "<Esc>", "\x03", "\x1c":
 		e.finishInsert()
@@ -197,7 +201,13 @@ func (e *Editor) insertKey(key string) {
 		e.completeWord(key == "\x10")
 	case "\x01":
 		e.insertLiteral(e.lastInsert)
-	case "<F5>", "<C-F5>":
+	case "<F5>":
+		if e.mode == insertMode && texEditing(b) {
+			e.expandTexLine()
+		} else {
+			e.execute("Gn")
+		}
+	case "<C-F5>":
 		e.execute("Gn")
 	default:
 		if len([]rune(key)) == 1 && []rune(key)[0] >= 0x20 {
@@ -209,7 +219,9 @@ func (e *Editor) insertKey(key string) {
 					e.window().cursor = start + indent
 				}
 			}
-			e.insertLiteral(key)
+			if e.mode != insertMode || !e.expandTexIMAP(key) {
+				e.insertLiteral(key)
+			}
 		}
 	}
 }

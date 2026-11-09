@@ -29,6 +29,8 @@ type previewRequest struct {
 	path       string
 	line       int
 	noMove     bool
+	cursorOnly bool // explicit navigation ignores a document's %cursor marker
+	immediate  bool // explicit toggles bypass the automatic save-refresh gap
 	navigation uint64
 	overrides  map[string]string
 	reuse      bool
@@ -181,6 +183,46 @@ func (p *editorPreview) saved(e *Editor, path string, text *string, noMove bool)
 	p.queue(e, noMove, overrides)
 }
 
+func (p *editorPreview) toggle(e *Editor, unsaved bool) error {
+	if p == nil || p.closed {
+		return fmt.Errorf("preview is disabled (omit --no-preview)")
+	}
+	if p.unsupported {
+		return fmt.Errorf("preview unavailable: terminal does not support display regions")
+	}
+	p.observe(e)
+	if p.path == "" {
+		return fmt.Errorf("preview requires a named LaTeX/Markdown buffer")
+	}
+	var overrides map[string]string
+	if unsaved {
+		// The renderer never reads mutable Editor/Buffer state. Capture all named
+		// open buffers so an unsaved root, fragment, or newly added include is
+		// interpreted consistently, including files reached through %main.
+		overrides = make(map[string]string)
+		bytes := 0
+		for _, b := range e.buffers {
+			if b.meta.Path == "" {
+				continue
+			}
+			text := previewText(b)
+			bytes += len(text)
+			if bytes > limits.FileBytes {
+				return fmt.Errorf("unsaved preview snapshots exceed resource limit")
+			}
+			overrides[b.meta.Path] = text
+		}
+	}
+	p.navigation++
+	p.commands = nil
+	p.queue(e, false, overrides)
+	p.pending.cursorOnly, p.pending.immediate = true, true
+	if unsaved {
+		e.message = "Preview: buffer snapshot (not written)"
+	}
+	return nil
+}
+
 func (e *Editor) saveBuffer(b *Buffer, force, noMove bool) error {
 	if err := b.save(force); err != nil {
 		return err
@@ -253,7 +295,7 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 		}
 		p.clear = false
 	}
-	if result := p.completed; result != nil && (p.lastPublished.IsZero() || now.Sub(p.lastPublished) >= p.options.gap) {
+	if result := p.completed; result != nil && (result.request.immediate || p.lastPublished.IsZero() || now.Sub(p.lastPublished) >= p.options.gap) {
 		if len(result.pdf) > 0 {
 			if err := p.publish(result.pdf); err != nil {
 				e.error(fmt.Errorf("preview: %w", err))
@@ -269,7 +311,7 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 		p.published = true
 		if !result.request.noMove && result.request.navigation == p.navigation {
 			position := result.source.Position(result.request.path, result.request.line)
-			if result.source.CursorLine > 0 {
+			if result.source.CursorLine > 0 && !result.request.cursorOnly {
 				position = result.source.ExpandedPosition(result.source.CursorLine)
 			}
 			if err := p.command(fmt.Sprintf("region secondary position %d", position)); err != nil {
@@ -288,7 +330,7 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 		}
 	}
 	p.commands = nil
-	if p.pending != nil && !p.busy && (p.lastAttempt.IsZero() || now.Sub(p.lastAttempt) >= p.options.gap) && (p.lastPublished.IsZero() || now.Sub(p.lastPublished) >= p.options.gap) {
+	if p.pending != nil && !p.busy && (p.pending.immediate || (p.lastAttempt.IsZero() || now.Sub(p.lastAttempt) >= p.options.gap) && (p.lastPublished.IsZero() || now.Sub(p.lastPublished) >= p.options.gap)) {
 		request := *p.pending
 		p.pending = nil
 		p.busy = true

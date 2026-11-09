@@ -515,6 +515,10 @@ func (e *Editor) normalKey(key string) {
 		e.pendingKey(key)
 		return
 	}
+	if key == "\n" && e.operator == "" && !e.visual() && texEditing(b) {
+		e.jumpTexPlaceholder()
+		return
+	}
 	if len(key) == 1 && key[0] >= '0' && key[0] <= '9' && (key != "0" || e.count != "") {
 		if len(e.count) < 7 {
 			e.count += key
@@ -749,7 +753,13 @@ func (e *Editor) normalKey(key string) {
 		e.incrementNumber(n, key == "\x18")
 	case "\x07":
 		e.message = fmt.Sprintf("%s  %d lines  %d,%d  %s", fileLabel(b), len(b.lineStarts()), b.row(e.pos())+1, e.pos()-b.start(b.row(e.pos()))+1, b.meta.Encoding)
-	case "<F5>", "<C-F5>":
+	case "<F5>":
+		if !e.visual() && texEditing(b) {
+			e.expandTexLine()
+		} else {
+			e.execute("Gn")
+		}
+	case "<C-F5>":
 		e.execute("Gn")
 	case "<C-L>", "\x0c":
 		e.dirty, e.fullRedraw = true, true

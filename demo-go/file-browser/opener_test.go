@@ -17,7 +17,7 @@ import (
 func documentToolTestPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	for _, name := range []string{"bash", "stty", "mktemp", "rm", "file", "stat", "ln", "date", "cat"} {
+	for _, name := range []string{"bash", "stty", "mktemp", "rm", "file", "stat", "ln", "date", "cat", "head", "grep"} {
 		path, err := exec.LookPath(name)
 		if err != nil {
 			t.Fatal(err)
@@ -67,19 +67,33 @@ func TestDocumentToolsUseSameTerminalAndReturn(t *testing.T) {
 		t.Run(implementation, func(t *testing.T) {
 			for _, test := range []struct{ name, tool, activate, result string }{
 				{"a ';$literal.pdf", "zat", "\r", "zat finished"},
-				{"a document.tex", "vimtex", "o", "vimtex finished"},
-				{"a document.md", "vimtex", "double", "vimtex finished"},
+				{"a document.tex", "govim", "o", "govim finished"},
+				{"a document.md", "govim", "double", "govim finished"},
 				{"a document.PDF", "zat", "\r", "zat finished"},
-				{"a document.TeX", "vimtex", "\r", "vimtex finished"},
-				{"a document.MD", "vimtex", "\r", "vimtex"},
+				{"a document.TeX", "govim", "\r", "govim finished"},
+				{"a document.MD", "govim", "\r", "govim"},
+				{"a script.sh", "govim", "o", "govim finished"},
+				{"a note.txt", "govim", "\r", "govim finished"},
+				{"a preset.vim", "govim", "\r", "govim finished"},
+				{"a preset.yaml", "govim", "\r", "govim finished"},
+				{"a preset.cc", "govim", "\r", "govim finished"},
+				{"a textual.pem", "govim", "\r", "govim finished"},
+				{"Dockerfile", "govim", "\r", "govim finished"},
+				{".bashrc", "govim", "\r", "govim finished"},
+				{"plain.extensionless-custom", "govim", "\r", "govim finished"},
 				{"path document.pdf", "zat", "path", "zat finished"},
 			} {
 				t.Run(filepath.Ext(test.name), func(t *testing.T) {
 					dir, tools := t.TempDir(), documentToolTestPath(t)
 					writeFiles(t, dir, test.name)
+					if filepath.Ext(test.name) == ".pem" {
+						if err := os.WriteFile(filepath.Join(dir, test.name), []byte("-----BEGIN CERTIFICATE-----\nU3ludGhldGljIHRlc3Qgb25seQ==\n-----END CERTIFICATE-----\n"), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
 					writeDocumentTool(t, tools, test.tool, interactiveDocumentTool)
 					marker, created := filepath.Join(tools, "opened"), filepath.Join(dir, "0-created.txt")
-					env := envWithout(testEnv("PATH="+tools, "MARKER="+marker, "CREATED="+created), "ST_FILE_BROWSER_OPEN")
+					env := envWithout(testEnv("PATH="+tools, "MARKER="+marker, "CREATED="+created, "ST_FILE_BROWSER_HIDDEN=1"), "ST_FILE_BROWSER_OPEN")
 					if filepath.Ext(test.name) == ".MD" {
 						env = append(env, "TOOL_EXIT=7")
 					}
@@ -135,7 +149,7 @@ func TestDocumentToolsUseSameTerminalAndReturn(t *testing.T) {
 func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 	for implementation, program := range documentBrowserCommands(t) {
 		t.Run(implementation, func(t *testing.T) {
-			for _, mode := range []string{"missing-pdf", "missing-tex", "missing-md", "custom-flag", "custom-env", "disabled", "unrelated"} {
+			for _, mode := range []string{"missing-pdf", "missing-tex", "missing-md", "missing-txt", "missing-sh", "custom-flag", "custom-env", "disabled", "unrelated"} {
 				t.Run(mode, func(t *testing.T) {
 					dir, tools := t.TempDir(), documentToolTestPath(t)
 					name := "document.pdf"
@@ -145,20 +159,29 @@ func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 					if mode == "missing-md" {
 						name = "document.md"
 					}
-					if mode == "unrelated" {
+					if mode == "missing-txt" {
 						name = "document.txt"
+					}
+					if mode == "missing-sh" {
+						name = "document.sh"
+					}
+					if mode == "unrelated" {
+						name = "image.png"
 					}
 					writeFiles(t, dir, name)
 					marker := filepath.Join(tools, "opened")
 					writeDocumentTool(t, tools, "st", `printf '%s|%s' "$1" "$2" > "$MARKER"`)
 					writeDocumentTool(t, tools, "bar", `printf '%s|%s' "$1" "$2" > "$MARKER"`)
 					writeDocumentTool(t, tools, "xdg-open", `printf '%s' "$1" > "$MARKER"`)
+					// Legacy vimtex must no longer win default dispatch, even when
+					// govim is missing. Keep the established external fallback instead.
+					writeDocumentTool(t, tools, "vimtex", `printf 'wrong legacy tool' > "$MARKER"`)
 					if !strings.HasPrefix(mode, "missing-") {
-						for _, tool := range []string{"zat", "vimtex"} {
+						for _, tool := range []string{"zat", "govim"} {
 							writeDocumentTool(t, tools, tool, `printf 'wrong tool' > "$MARKER"`)
 						}
 					} else {
-						tool, other := "zat", "vimtex"
+						tool, other := "zat", "govim"
 						if mode != "missing-pdf" {
 							tool, other = other, tool
 						}
@@ -190,10 +213,10 @@ func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 					}
 					file := filepath.Join(dir, name)
 					want := file
-					if implementation == "go" && mode == "missing-pdf" {
+					if implementation == "go" && (mode == "missing-pdf" || mode == "unrelated") {
 						want = "external|" + file
 					}
-					if mode == "missing-tex" || mode == "missing-md" || mode == "unrelated" {
+					if mode == "missing-tex" || mode == "missing-md" || mode == "missing-txt" || mode == "missing-sh" {
 						want = "vim|" + file
 					}
 					if strings.HasPrefix(mode, "custom-") {
@@ -203,6 +226,37 @@ func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestEditorTextClassification(t *testing.T) {
+	dir := t.TempDir()
+	for _, test := range []struct {
+		name, content string
+		want          bool
+	}{
+		{"script.sh", "#!/bin/sh\necho synthetic\n", true},
+		{"notes.txt", "Synthetic note\n", true}, {"preset.vim", "set number\n", true},
+		{"Dockerfile", "FROM scratch\n", true}, {".bash_profile", "export SYNTHETIC=1\n", true},
+		{"unknown-format", "ordinary synthetic text\n", true}, {"empty.yaml", "", true}, {"empty.unknown", "", true},
+		{"textual.pem", "-----BEGIN CERTIFICATE-----\nU3ludGhldGljIHRlc3Qgb25seQ==\n-----END CERTIFICATE-----\n", true},
+		{"image.png", "", false}, {"video.mp4", "", false}, {"archive.zip", "", false}, {"database.sqlite3", "", false},
+		{"office.docx", "", false}, {"program.wasm", "", false}, {"binary.unknown", "\x00\x01\x02\x03", false},
+	} {
+		path := filepath.Join(dir, test.name)
+		if err := os.WriteFile(path, []byte(test.content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if got := editorTextFile(path); got != test.want {
+			t.Errorf("%s text=%v want %v", test.name, got, test.want)
+		}
+	}
+	fifo := filepath.Join(dir, "pipe.sh")
+	if err := unix.Mkfifo(fifo, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if editorTextFile(fifo) {
+		t.Fatal("non-regular file treated as editable text")
 	}
 }
 

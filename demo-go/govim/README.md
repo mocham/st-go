@@ -53,6 +53,12 @@ make st govim
 * Wheel over the preview to scroll locally without re-rendering. Manual
   `:Preview [LINE]` and `:PreviewScroll COUNT` commands are also available
   (`:VimtexPreview` / `:VimtexScroll` aliases are accepted).
+* **`:toggle`** explicitly previews the on-disk document at the current editor
+  cursor, ignoring `%cursor`. **`:toggle!`** instead renders immutable snapshots
+  of the current named buffers, including unsaved `%main` roots/includes, and
+  jumps to that cursor. Neither command writes files, marks buffers saved, or
+  changes undo history. Explicit toggles bypass the automatic refresh gap;
+  subsequent saves return to normal saved-document/marker behavior.
 * One background render runs at a time; rapid saves coalesce to the newest saved
   revision. Changed PDFs are at least **2.1 seconds apart** by default; override
   with `--preview-gap 500ms` (or `0`). Unchanged saves can navigate without
@@ -205,7 +211,7 @@ reference; unsupported commands produce an error rather than calling Vim.
 | Windows/tabs | `:split`, `:vsplit`, `:new`, `:vnew`, `:close`, `:only`, `:tabnew`, `:tabnext`, `:tabprevious`, `:tabclose`, Ctrl-W navigation/splits/resize |
 | Ex edits | ranged `:delete`, `:yank`, `:Y`, `:D`, `:put`, `:join`, `:copy`, `:move`, `:sort`, `:retab`, `:normal`, global/inverse-global delete/print |
 | Other | `:marks`, `:registers`, `:jumps`, `:changes`, `:undo`, `:redo`, `:preserve`, `:swapname`, `:! COMMAND`, `:Gn[!] [FILE]` |
-| Preview | automatic LaTeX/Markdown panel, `%cursor` / editor-cursor save navigation, `:wnomove`, `:Preview [LINE]`, `:PreviewScroll COUNT` |
+| Preview | automatic LaTeX/Markdown panel, `%cursor` / editor-cursor save navigation, `:wnomove`, `:toggle[!]`, `:Preview [LINE]`, `:PreviewScroll COUNT` |
 
 Ex ranges support line numbers, `.`, `$`, marks, offsets, `%`, comma/semicolon,
 and visual marks. Mouse supports click/drag, double-click word selection,
@@ -251,13 +257,39 @@ OSC 52 and permit the requested operation. Unsupported reads leave internal
 registers/document text intact. There is no X11 assumption or clipboard tool
 inside govim, so another frontend can implement the same terminal protocol.
 
+### TeX insert mappings
+
+In TeX files (`.tex`, `.ltx`, `.latex`, `.sty`, `.cls`), Insert-mode mappings
+include `` `a `` → `\alpha`, `` `b `` → `\beta`, `` `D `` → `\Delta`, and the
+other Greek entries in [`imap/tex.json`](imap/tex.json). Quotation/accent prefixes
+such as double backticks and `\` followed by a backtick remain literal. Pasted
+text, inserted register text, and non-TeX buffers are not expanded.
+
+With a standalone name on the current line, **F5** (Insert or Normal mode):
+
+* `cases` produces `\begin{cases}`, a blank body line with the insertion cursor,
+  and `\end{cases}<++>`. The line's indentation is retained; starred/custom
+  environment names work too.
+* In a preamble after `\documentclass` and before `\begin{document}`, `amsart`
+  produces `\usepackage{amsart}` with the cursor immediately after `}`.
+* **Ctrl-J** moves to and removes the next empty `<++>` stop, wrapping among
+  remaining stops. In Normal mode it enters Insert at the stop. With no stop it
+  does nothing; **Enter** still inserts an ordinary newline.
+
+Mappings and template bodies are embedded JSON, not hardcoded Greek handlers.
+The independent [`tui/imap`](../../tui/imap) component supplies longest-suffix
+matching, prefix guards, literal variable substitution, and rune-safe cursor
+stops. Editing the JSON and rebuilding changes the table. All document changes
+use normal insert undo groups and the recovery journal. This is a native subset,
+not a Vimscript/LaTeX-suite plugin loader or the suite's interactive wizards.
+
 ### TeX compilation
 
-`:Gn [FILE]` (or F5) saves current edits and runs `pdflatex`, resolving a
+`:Gn [FILE]` (or Ctrl-F5) saves current edits and runs `pdflatex`, resolving a
 fragment's `%main=...` relative to the fragment. Missing `.tex` suffixes are
 accepted; redirect cycles are rejected. `:Gn!` uses nonstop mode, runs `bibtex`
 when an `.aux` exists, and runs three additional `pdflatex` passes, matching the
-preferred command. Ctrl-F5 is also recognized. Filenames are passed as argv,
+preferred command. F5 in TeX files is reserved for expansion. Filenames are passed as argv,
 not interpolated into shell commands. This does not replace or alter the
 separate vimtex live-preview demo.
 

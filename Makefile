@@ -65,7 +65,7 @@ VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim)
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) $(wildcard pdfmeta/*.go) \
 	       $(wildcard term/*.go) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
-GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* tui/preview/*.go) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard limits/*.go) go.mod go.sum
+GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* tui/imap/*.go tui/preview/*.go) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard limits/*.go) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # Static C++/Splash rendering, including embedded JPEG images through libjpeg.

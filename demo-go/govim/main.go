@@ -353,12 +353,17 @@ Ctrl-W s/v/w/h/j/k/l/c/o/= and resize commands navigate windows.
 :delete :yank :Y :D :put :join :copy :move :sort :retab
 :normal :g/pattern/d :v/pattern/d :undo :redo :marks :registers
 :jumps :changes :preserve :swapname :recover FILE :! COMMAND
-:Gn[!] [FILE] and F5 run pdflatex/bibtex, honoring %main=.
+:Gn[!] [FILE] and Ctrl-F5 run pdflatex/bibtex, honoring %main=.
+TEX INSERT: embedded JSON IMAPs expand backtick+a to \alpha, etc.
+F5 expands a standalone environment name (or a package in the preamble).
+Ctrl-J consumes the next <++> stop. Enter remains a newline.
 
 PREVIEW: LaTeX/Markdown opens st-go's retained right panel automatically.
 Save to refresh; %cursor wins, otherwise follow the cursor saved with :w.
 :wnomove[!] refreshes without jumping. Wheel scrolls the preview locally.
 :Preview [LINE] / :PreviewScroll COUNT navigate manually. --no-preview disables.
+:toggle seeks the disk preview to the cursor; :toggle! draws unsaved buffers
+and seeks there instead. Neither writes files; both override %cursor.
 
 RECOVERY: every text change (including undo/redo) is written to a
 checksummed .govim.swp before it is applied. fsync defaults to

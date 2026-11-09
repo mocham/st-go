@@ -137,7 +137,7 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 			switch r {
 			case 0x7f:
 				key = "<BS>"
-			case '\r', '\n':
+			case '\r':
 				key = "<Enter>"
 			case '\t':
 				key = "<Tab>"
@@ -240,7 +240,7 @@ func eventsText(text string) []keyEvent {
 		switch r {
 		case 0x1b:
 			key = "<Esc>"
-		case '\r', '\n':
+		case '\r':
 			key = "<Enter>"
 		case '\t':
 			key = "<Tab>"

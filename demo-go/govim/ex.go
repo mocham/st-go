@@ -618,6 +618,12 @@ func (e *Editor) execute(command string) {
 		} else {
 			e.error(e.compile(path, force))
 		}
+	case "toggle":
+		if explicit || args != "" {
+			e.error(fmt.Errorf("usage: :toggle[!] (no range or arguments)"))
+			return
+		}
+		e.error(e.preview.toggle(e, force))
 	case "Preview", "VimtexPreview", "PreviewScroll", "VimtexScroll":
 		if e.preview != nil {
 			e.preview.observe(e)
