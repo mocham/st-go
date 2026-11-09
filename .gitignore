@@ -8,10 +8,12 @@
 /gols
 /vimtex
 /zat
+/govim
 
 # Editor swap files
 .*.swp
 *.swp
+*.govim.swp.damaged-*
 
 # Logs
 *.log

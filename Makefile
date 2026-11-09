@@ -64,6 +64,7 @@ VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim)
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) $(wildcard pdfmeta/*.go) \
 	       $(wildcard term/*.go) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) go.mod go.sum
+GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # Static C++/Splash rendering, including embedded JPEG images through libjpeg.
@@ -356,7 +357,7 @@ GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) \
 
 # Rebuild when build flags change; trim source and module-cache paths from all
 # distributable Go binaries, including their stack-trace/debug metadata.
-st st-pdf st-stb st-min $(FILE_BROWSER) gols vimtex zat: Makefile
+st st-pdf st-stb st-min $(FILE_BROWSER) gols vimtex zat govim: Makefile
 
 st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
@@ -395,6 +396,10 @@ vimtex: $(VIMTEX_GO_SRC)
 # PDF viewer; Poppler and the pixel cache live in the terminal, not this TUI.
 zat: $(ZAT_GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/zat
+
+# Native Go editor, including its X11 clipboard and recovery journal.
+govim: $(GOVIM_GO_SRC)
+	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/govim
 
 # --- dummy objects (no-op stubs for dropped libraries) --------------------
 $(DUMMY_DIR)/dummy-stb.o: third_party_wrapper/dummy-stb.c
@@ -448,9 +453,9 @@ uninstall:
 	      "$(DESTDIR)$(TERMINFO_DIR)/s/stterm-256color"
 
 clean:
-	rm -f st st-min st-stb st-pdf file-browser gols vimtex zat
+	rm -f st st-min st-stb st-pdf file-browser gols vimtex zat govim
 
 distclean:
-	rm -rf third_party st st-min st-stb st-pdf file-browser gols vimtex zat
+	rm -rf third_party st st-min st-stb st-pdf file-browser gols vimtex zat govim
 
 .PHONY: all install uninstall clean distclean test test-webp-x11 test-zat-x11

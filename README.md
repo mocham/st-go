@@ -269,6 +269,25 @@ preview is published; the first marker in the expanded saved document wins.
 The preview uses a soft warm off-white (`#f7f5ef`) background by default. Set
 `-preview-bg '#RRGGBB'` (alias `-bg`) before the filename to choose another color.
 
+### Native Go modal editor
+
+[`demo-go/govim`](demo-go/govim/README.md) is a native Go Vim-style editor with
+builtin vimrc0 preferences, direct X11 clipboard transfer (no `xclip` or new
+font/system dependencies), and checksummed write-ahead swap recovery:
+
+```sh
+make govim
+./govim document.tex
+./govim -r document.tex  # recover after a crash
+```
+
+Edits are journaled before application and flushed after one second or 64 KiB;
+`:preserve` forces a flush. It supports modal editing, objects, registers,
+undo/redo, macros, search/substitution, splits/tabs, and `:Gn[!]` TeX compilation.
+This is an initial native implementation, not full Vim compatibility; see its
+README for command coverage, durability guarantees, and limits. Existing Vimtex,
+PDF viewers, and file-browser openers are unchanged.
+
 ### Zat PDF viewer
 
 [`demo-go/zat`](demo-go/zat/README.md) is a zathura-style TUI using the same
