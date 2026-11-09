@@ -12,7 +12,9 @@ set -u
 
 if [[ -v ST_FILE_BROWSER_OPEN ]]; then
 	OPEN_CMD=$ST_FILE_BROWSER_OPEN
+	CUSTOM_OPEN=1
 else
+	CUSTOM_OPEN=0
 	OPEN_CMD='
 editor=${ST_GO_EXECUTABLE:-st}
 case ${FILE,,} in
@@ -43,6 +45,9 @@ Options:
 
 CODE is evaluated by `bash -c` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
+By default, .pdf opens in zat and .tex/.md in vimtex when available in PATH.
+These tools use this terminal; exiting returns to the browser. Otherwise the
+existing external opener is used. Explicit opener settings take precedence.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
 scroll, [ and ] change PDF pages, / enters a path, : runs a shell command
@@ -64,8 +69,9 @@ while (($#)); do
 				exit 2
 			fi
 			OPEN_CMD=$1
+			CUSTOM_OPEN=1
 			;;
-		--open=*) OPEN_CMD=${1#*=} ;;
+		--open=*) OPEN_CMD=${1#*=}; CUSTOM_OPEN=1 ;;
 		-h|--help) usage; exit 0 ;;
 		--)
 			shift
@@ -120,6 +126,7 @@ DOUBLE_CLICK_MS=${ST_FILE_BROWSER_DOUBLE_CLICK_MS:-350}
 ((DOUBLE_CLICK_MS > 2000)) && DOUBLE_CLICK_MS=2000
 RESIZED=0
 CLEANED=0
+TOOL_ACTIVE=0
 PROMPT_ACTIVE=0
 PROMPT_ABORT=0
 PROMPT_MODE=
@@ -193,7 +200,8 @@ cleanup() {
 }
 trap cleanup EXIT
 interrupt_browser() {
-	if ((PROMPT_ACTIVE)); then PROMPT_ABORT=1
+	if ((TOOL_ACTIVE)); then return
+	elif ((PROMPT_ACTIVE)); then PROMPT_ABORT=1
 	elif ((MANUAL_ACTIVE)); then MANUAL_ACTIVE=0
 	else exit 130
 	fi
@@ -744,12 +752,22 @@ enter_selected() {
 }
 
 open_path() {
-	local path=$1 minimize=${2:-0} name
+	local path=$1 minimize=${2:-0} name tool= executable=
 	base_name "$path"
 	name=$REPLY
 	if [[ -z $OPEN_CMD ]]; then
 		STATUS='External opening is disabled'
 	else
+		if ((!CUSTOM_OPEN)); then
+			case ${path,,} in
+				*.pdf) tool=zat ;;
+				*.tex|*.md) tool=vimtex ;;
+			esac
+			if [[ -n $tool ]] && executable=$(type -P -- "$tool") && [[ -x $executable && ! -d $executable ]]; then
+				run_terminal_tool "$executable" "$path"
+				return
+			fi
+		fi
 		if ((minimize)); then
 			window_dcs place bottom-left 0px 0px 24% 8% restore "$GEOMETRY_TAG"
 		fi
@@ -759,6 +777,30 @@ open_path() {
 		STATUS="Opened $REPLY"
 	fi
 	draw_status
+}
+
+run_terminal_tool() {
+	local executable=$1 path=$2 mode result selected= i
+	((IDX >= 0)) && selected=${FILES[$IDX]}
+	# Resolve relative PATH entries before changing the child's directory.
+	[[ $executable == /* ]] || executable=$PWD/$executable
+	mode=$(stty -g 2>/dev/null) || mode=
+	TOOL_ACTIVE=1
+	printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l'
+	(cd -- "$DIR" && "$executable" "$path")
+	result=$?
+	TOOL_ACTIVE=0
+	[[ -z $mode ]] || stty "$mode" 2>/dev/null
+	# A failed tool may leave a split region, mouse mode, or partial escape.
+	printf '\030\033[?2026l\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?2004l\033Pregion reset\033\\\033[?1049l\033[?7h\033[r\033[0m\033[?1049h\033[?25l\033[?1000h\033[?1006h'
+	reset_click
+	RESIZED=0
+	build_list
+	((IDX >= ${#FILES[@]})) && IDX=$((${#FILES[@]} - 1))
+	for i in "${!FILES[@]}"; do [[ ${FILES[$i]} == "$selected" ]] && { IDX=$i; break; }; done
+	STATUS="${executable##*/} finished"
+	((result == 0)) || STATUS="${executable##*/} exited with status $result"
+	render_all
 }
 
 open_selected() {
@@ -1253,8 +1295,13 @@ MOUSE
   Middle click   go to parent
 
 HINTS
-  Double-clicking a file collapses the terminal to a bottom strip;
-  clicking the strip restores it. All filenames are sanitized before
+  With the default opener, .pdf uses zat and .tex/.md use vimtex
+  when available in PATH. They run in this terminal; exit the tool
+  to return to the same browser location. Otherwise the existing
+  external opener is used. --open and ST_FILE_BROWSER_OPEN override
+  this dispatch (an empty value disables opening).
+  Double-clicking an externally opened file collapses the terminal
+  to a bottom strip; clicking the strip restores it. Filenames are sanitized before
   drawing, so names with spaces, quotes, or control characters are
   handled safely. Override openers and icons with --open,
   ST_FILE_BROWSER_OPEN, ST_FILE_BROWSER_ICON_*, and the terminal
@@ -1395,7 +1442,7 @@ while ((RUNNING)); do
 		o|O) reset_click; open_selected 0 ;;
 		'[') reset_click; change_pdf_page -1 ;;
 		']') reset_click; change_pdf_page 1 ;;
-		$'\r'|$'\n') reset_click; enter_selected ;;
+		''|$'\r'|$'\n') reset_click; enter_selected ;;
 		$'\177'|$'\b') reset_click; go_parent ;;
 		$'\e')
 			if IFS= read -rsn1 -t 0.05 next; then

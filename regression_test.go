@@ -1497,7 +1497,7 @@ func TestFBMouseDoubleClickOpener(t *testing.T) {
 
 func TestFBDefaultTextOpenerUsesRunningSt(t *testing.T) {
 	dir := t.TempDir()
-	file := dir + "/openme.md"
+	file := dir + "/openme.txt"
 	if err := os.WriteFile(file, []byte("preview me\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

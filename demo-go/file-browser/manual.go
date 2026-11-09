@@ -87,8 +87,13 @@ MOUSE
   Middle click   go to parent
 
 HINTS
-  Double-clicking a file collapses the terminal to a bottom strip;
-  clicking the strip restores it. All filenames are sanitized before
+  With the default opener, .pdf uses zat and .tex/.md use vimtex
+  when available in PATH. They run in this terminal; exit the tool
+  to return to the same browser location. Otherwise the existing
+  external opener is used. --open and ST_FILE_BROWSER_OPEN override
+  this dispatch (an empty value disables opening).
+  Double-clicking an externally opened file collapses the terminal
+  to a bottom strip; clicking the strip restores it. Filenames are sanitized before
   drawing, so names with spaces, quotes, or control characters are
   handled safely. Override openers and icons with --open,
   ST_FILE_BROWSER_OPEN, ST_FILE_BROWSER_ICON_*, and the terminal

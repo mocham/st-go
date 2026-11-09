@@ -87,6 +87,7 @@ type Browser struct {
 	status     string
 	showHidden bool
 	openCmd    string
+	customOpen bool
 
 	// lazy archive browsing: archiveStack holds each open archive level;
 	// archiveReturn* records the real directory to return to when the stack
@@ -185,8 +186,7 @@ func iconValue(key string) string {
 	return iconDefaults[key]
 }
 
-// defaultOpenCmd mirrors the shell default opener: text/source/config formats
-// open in the running terminal's vim; everything else uses xdg-open.
+// defaultOpenCmd is the fallback when no in-terminal document tool is found.
 const defaultOpenCmd = `
 editor=${ST_GO_EXECUTABLE:-st}
 case ${FILE,,} in
@@ -198,11 +198,11 @@ case ${FILE,,} in
     ;;
 esac`
 
-func defaultOpenCommand() string {
+func defaultOpenCommand() (string, bool) {
 	if v, ok := os.LookupEnv("ST_FILE_BROWSER_OPEN"); ok {
-		return v
+		return v, true
 	}
-	return defaultOpenCmd
+	return defaultOpenCmd, false
 }
 
 func parseShowHidden() bool {
@@ -1016,6 +1016,12 @@ func (b *Browser) openPath(path string, minimize int) {
 	if b.openCmd == "" {
 		b.status = "External opening is disabled"
 	} else {
+		if !b.customOpen {
+			if tool := terminalDocumentTool(path); tool != "" {
+				b.runTerminalTool(tool, path)
+				return
+			}
+		}
 		if minimize != 0 {
 			b.windowDCS(fmt.Sprintf("place bottom-left 0px 0px 24%% 8%% restore %s", b.geometryTag))
 		}

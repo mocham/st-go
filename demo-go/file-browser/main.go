@@ -19,6 +19,9 @@ Options:
 
 CODE is evaluated by ` + "`bash -c`" + ` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
+By default, .pdf opens in zat and .tex/.md in vimtex when available in PATH.
+These tools use this terminal; exiting returns to the browser. Otherwise the
+existing external opener is used. Explicit opener settings take precedence.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
 scroll, [ and ] change PDF or rendered document pages, / enters a path, : runs a shell command
@@ -37,9 +40,9 @@ directories: tables contain paginated record entries.
 
 // parseArgs mirrors the shell argument loop. It returns the settings, whether
 // parsing is finished (help/--), and the exit code when finished.
-func parseArgs(args []string) (showHidden bool, openCmd string, startDir string, done bool, code int) {
+func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool, startDir string, done bool, code int) {
 	showHidden = parseShowHidden()
-	openCmd = defaultOpenCommand()
+	openCmd, customOpen = defaultOpenCommand()
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -48,41 +51,43 @@ func parseArgs(args []string) (showHidden bool, openCmd string, startDir string,
 		case a == "-o" || a == "--open":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "file-browser: --open requires shell code")
-				return showHidden, openCmd, startDir, true, 2
+				return showHidden, openCmd, customOpen, startDir, true, 2
 			}
 			i++
 			openCmd = args[i]
+			customOpen = true
 		case strings.HasPrefix(a, "--open="):
 			openCmd = strings.TrimPrefix(a, "--open=")
+			customOpen = true
 		case a == "-h" || a == "--help":
 			usage()
-			return showHidden, openCmd, startDir, true, 0
+			return showHidden, openCmd, customOpen, startDir, true, 0
 		case a == "--":
 			rest := args[i+1:]
 			if len(rest) > 1 {
 				fmt.Fprintln(os.Stderr, "file-browser: only one directory may be specified")
-				return showHidden, openCmd, startDir, true, 2
+				return showHidden, openCmd, customOpen, startDir, true, 2
 			}
 			if len(rest) == 1 {
 				startDir = rest[0]
 			}
-			return showHidden, openCmd, startDir, false, 0
+			return showHidden, openCmd, customOpen, startDir, false, 0
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(os.Stderr, "file-browser: unknown option: %s\n", a)
-			return showHidden, openCmd, startDir, true, 2
+			return showHidden, openCmd, customOpen, startDir, true, 2
 		default:
 			if startDir != "" {
 				fmt.Fprintln(os.Stderr, "file-browser: only one directory may be specified")
-				return showHidden, openCmd, startDir, true, 2
+				return showHidden, openCmd, customOpen, startDir, true, 2
 			}
 			startDir = a
 		}
 	}
-	return showHidden, openCmd, startDir, false, 0
+	return showHidden, openCmd, customOpen, startDir, false, 0
 }
 
 func run() int {
-	showHidden, openCmd, startDir, done, code := parseArgs(os.Args[1:])
+	showHidden, openCmd, customOpen, startDir, done, code := parseArgs(os.Args[1:])
 	if done {
 		return code
 	}
@@ -102,6 +107,7 @@ func run() int {
 	b.dir = dir
 	b.showHidden = showHidden
 	b.openCmd = openCmd
+	b.customOpen = customOpen
 	b.sigCh = make(chan os.Signal, 8)
 	signal.Notify(b.sigCh, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	b.setup()

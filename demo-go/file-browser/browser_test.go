@@ -123,6 +123,11 @@ func waitFileContent(t *testing.T, path, want string) {
 
 func startBrowser(t *testing.T, env []string, args ...string) *fbTest {
 	t.Helper()
+	return startBrowserCommand(t, env, append([]string{browserBin}, args...)...)
+}
+
+func startBrowserCommand(t *testing.T, env []string, cmdline ...string) *fbTest {
+	t.Helper()
 	master, slave, err := ptyutil.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +135,6 @@ func startBrowser(t *testing.T, env []string, args ...string) *fbTest {
 	if err := ptyutil.SetWinSize(master, 24, 80); err != nil {
 		t.Fatal(err)
 	}
-	cmdline := append([]string{browserBin}, args...)
 	cmd, err := ptyutil.Start(slave, cmdline, env)
 	if err != nil {
 		master.Close()
@@ -322,8 +326,8 @@ func TestBackspaceGoesParent(t *testing.T) {
 
 func TestDefaultTextOpenerUsesRunningSt(t *testing.T) {
 	dir := t.TempDir()
-	file := filepath.Join(dir, "openme.md")
-	writeFiles(t, dir, "openme.md")
+	file := filepath.Join(dir, "openme.txt")
+	writeFiles(t, dir, "openme.txt")
 	tools := t.TempDir()
 	marker := filepath.Join(tools, "opened")
 	fakeSt := filepath.Join(tools, "st")
@@ -334,7 +338,7 @@ func TestDefaultTextOpenerUsesRunningSt(t *testing.T) {
 	env := testEnv("ST_GO_EXECUTABLE="+fakeSt, "MARKER="+marker)
 	env = envWithout(env, "ST_FILE_BROWSER_OPEN")
 	f := startBrowser(t, env, dir)
-	f.send("\x1b[B") // select openme.md
+	f.send("\x1b[B") // select openme.txt
 	time.Sleep(120 * time.Millisecond)
 	f.send("o") // open selected
 	waitFileContent(t, marker, "vim|"+file)

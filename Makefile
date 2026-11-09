@@ -188,7 +188,10 @@ $(PNG_LIB): $(ZLIB_LIB)
 
 # --- libjpeg-turbo static (poppler DCTDecode/JPEG support) ----------------
 # Build only the libjpeg API. SIMD is auto-detected; NASM enables it on x86.
-$(JPEG_LIB): Makefile
+# Archive targets deliberately do not depend on the whole Makefile: changing
+# app targets or test commands must not rebuild native dependencies. Explicitly
+# force the affected archive target when changing its version/build settings.
+$(JPEG_LIB):
 	@mkdir -p third_party
 	@if [ ! -f "$(JPEG_TAR)" ]; then \
 		echo "downloading libjpeg-turbo $(JPEG_VERSION)..."; \
@@ -268,7 +271,7 @@ $(SND_O): $(SND_C) $(ALSA_LIB)
 	$(CC) -O2 -fPIC -Ithird_party/alsa/include -c "$<" -o "$@"
 
 # --- poppler static (minimal, C++ API only) ------------------------------
-$(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB) $(JPEG_LIB) Makefile
+$(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB) $(JPEG_LIB)
 	@mkdir -p third_party
 	@if [ ! -f "$(POPPLER_TAR)" ]; then \
 		echo "downloading poppler $(POPPLER_VERSION)..."; \

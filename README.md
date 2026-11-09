@@ -21,7 +21,11 @@ parser and screen model, and the X11 frontend is built on the pure-Go
   font file installed on the system. Use `-f /path/to/font.ttf` to override.
 - **Self-contained build.** `third_party/` is gitignored; a fresh `make`
   downloads the needed source tarballs, extracts them, and builds the static
-  archives automatically.
+  archives automatically. Existing archives are reused across Makefile edits;
+  application binaries still rebuild when their build rules change. After
+  deliberately changing a third-party version or build settings, force that
+  archive target with `make -B path/to/archive.a` (or use `make distclean`
+  before a full rebuild).
 - **Tiered build sizes.** One source tree produces several binaries — from a
   minimal `st-min` (text only, ~8 MB) up to a full-featured `st` (~16.5 MB). See
   [Build targets](#build-targets).
@@ -509,9 +513,18 @@ it with `--open CODE` or `ST_FILE_BROWSER_OPEN`; `FILE`, `NAME`, and
 `BROWSER_DIR` are exported to `bash -c`, so dispatch functions and command
 sequences are supported:
 
-By default, text, markup, configuration, shell, and source-code extensions are
-opened through the exact st-go executable that launched the browser:
-`$ST_GO_EXECUTABLE vim "$FILE"`. Other formats continue to use `xdg-open`.
+By default, both browsers open `.pdf` with `zat` and `.tex`/`.md` with `vimtex`
+when the corresponding tool is in `$PATH` (extensions are case-insensitive).
+The tool runs in the **same terminal**, and exiting it restores the browser's
+directory, selection, and preview. Enter, `o`, double-click, and path entry all
+use this dispatch; the window is not collapsed for these in-terminal tools.
+Explicit `--open` or `ST_FILE_BROWSER_OPEN` settings take precedence, including
+an empty setting to disable opening.
+
+If the tool is unavailable, text, markup, configuration, shell, and source-code
+extensions fall back to the exact st-go executable that launched the browser:
+`$ST_GO_EXECUTABLE vim "$FILE"`. Other formats use `xdg-open` in the Bash browser
+and `bar external "$FILE"` in the Go browser.
 
 ```sh
 ./st -e ./demo/file-browser.sh --open '
@@ -527,9 +540,10 @@ opened through the exact st-go executable that launched the browser:
 ```
 
 Text, image, PDF, and directory selections redraw only the fixed preview
-rectangle, metadata, and changed list rows. Double-clicking a file remembers
-the full geometry, opens the configured command, and collapses the terminal to
-a mapped bottom-left strip; clicking that strip restores the saved geometry.
+rectangle, metadata, and changed list rows. Double-clicking an externally opened
+file remembers the full geometry, opens the configured command, and collapses
+the terminal to a mapped bottom-left strip; clicking that strip restores the
+saved geometry.
 
 > **tmux note:** the image DSL rides the DCS escape code, which tmux reserves
 > for its own protocol and does not forward from a pane to the outer terminal.
