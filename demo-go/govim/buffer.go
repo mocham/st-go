@@ -58,6 +58,7 @@ type Buffer struct {
 	warning                                       string
 	recoveryCursor                                int
 	placeholder                                   bool
+	syntax                                        syntaxCache
 }
 
 func canonicalPath(path string) (string, error) {

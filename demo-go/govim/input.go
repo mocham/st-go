@@ -85,6 +85,11 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 		if len(b) < 2 {
 			return
 		}
+		if key := map[byte]string{'b': "<A-b>", 'f': "<A-f>", 'd': "<A-d>", 0x7f: "<A-BS>", 0x08: "<A-BS>"}[b[1]]; key != "" {
+			emit(keyEvent{Key: key})
+			p.pending = b[2:]
+			continue
+		}
 		if b[1] == 'P' || b[1] == ']' {
 			end := bytes.Index(b[2:], []byte("\x1b\\"))
 			bel := bytes.IndexByte(b[2:], 7)
@@ -140,7 +145,7 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 				}
 				continue
 			}
-			if key := map[string]string{"[A": "<Up>", "[B": "<Down>", "[C": "<Right>", "[D": "<Left>", "OA": "<Up>", "OB": "<Down>", "OC": "<Right>", "OD": "<Left>", "[H": "<Home>", "[F": "<End>", "OH": "<Home>", "OF": "<End>", "[1~": "<Home>", "[4~": "<End>", "[7~": "<Home>", "[8~": "<End>", "[2~": "<Insert>", "[3~": "<Delete>", "[5~": "<PageUp>", "[6~": "<PageDown>", "[Z": "<S-Tab>", "[15~": "<F5>", "[15;5~": "<C-F5>"}[sequence]; key != "" {
+			if key := map[string]string{"[A": "<Up>", "[B": "<Down>", "[C": "<Right>", "[D": "<Left>", "OA": "<Up>", "OB": "<Down>", "OC": "<Right>", "OD": "<Left>", "[H": "<Home>", "[F": "<End>", "OH": "<Home>", "OF": "<End>", "[1~": "<Home>", "[4~": "<End>", "[7~": "<Home>", "[8~": "<End>", "[2~": "<Insert>", "[3~": "<Delete>", "[5~": "<PageUp>", "[6~": "<PageDown>", "[Z": "<S-Tab>", "[15~": "<F5>", "[15;5~": "<C-F5>", "[1;5D": "<C-Left>", "[1;5C": "<C-Right>"}[sequence]; key != "" {
 				emit(keyEvent{Key: key})
 			}
 			continue

@@ -321,6 +321,11 @@ SEARCH: / ? n N * #, Vim basic magic, \v (RE2), \V (literal).
 :noh clears highlights. :[range]s/pattern/replacement/gicn
 supports &, \1..\9 and \r; c asks y/n/a/q/l.
 
+PROMPTS (: / ?): Left/Right or Ctrl-B/F; Home/End or Ctrl-A/E;
+Backspace/Delete/Ctrl-D; Ctrl-U/K/W kill, Ctrl-Y yank;
+Ctrl-Left/Right or Alt-B/F word movement; Up/Down or Ctrl-P/N history.
+Type and paste at the cursor; long prompts scroll horizontally.
+
 EX: :w :w! :q :q! :wq :x :qa :wqa :wa :e :enew :n :prev
 :args :ls :b :bn :bp :bd :saveas :read :file :cd :pwd
 :split :vsplit :new :vnew :close :only :tabnew :tabnext :tabclose
@@ -335,7 +340,7 @@ checksummed .govim.swp before it is applied. fsync defaults to
 1 second / 64 KiB. :preserve forces it. govim -r FILE recovers.
 An existing swap is never overwritten. :q! deliberately discards.
 
-Fixed vimrc0 preferences, builtin syntax/desert colors; no Vimscript,
+Fixed vimrc0 preferences, pure-Go Chroma syntax/desert colors; no Vimscript,
 plugins, folds, tags engine, LSP, arbitrary options, or Vim swap ABI.
 Buffers are bounded to 16 MiB; RE2 searches to 65536 matches.
 Use :help for this reference. Press any key to return.`

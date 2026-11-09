@@ -14,8 +14,9 @@ make govim                 # pure Go; no native-library builds
 ```
 
 It runs inside st-go or another ANSI/SGR-mouse terminal. No new system packages,
-fonts, Xlib, or external clipboard programs are required. Building uses the
-repository's existing Go dependencies. `pdflatex`/`bibtex` are needed only when
+fonts, Xlib, or external clipboard programs are required. Syntax highlighting
+uses the pure-Go [Chroma v2](https://github.com/alecthomas/chroma) module.
+`pdflatex`/`bibtex` are needed only when
 you explicitly request TeX compilation.
 
 ## Recovery and saving
@@ -81,8 +82,23 @@ auto/smart indentation, unrestricted insert backspace, mouse selection, UTF-8
 with lossless GB18030 fallback, and double-width ambiguous characters.
 UTF-8 BOMs, uniform CRLF, and missing final newlines are retained.
 
-Syntax coloring is a builtin lexer for common source/text/TeX constructs, not
-Vim runtime syntax files. `:set` can show/accept the fixed preferences; there
+Syntax coloring uses **Chroma's language lexers and style inheritance**, with
+a desert-style foreground palette. Filename patterns (including names such as
+`Makefile`) and supported shebangs choose the language. Whole-document
+tokenization preserves multiline comments/strings and fenced or embedded
+languages supported by the selected Chroma lexer; Vim's syntax engine/runtime
+files are not cloned or loaded. Cursor-line, search, selection, and matching
+bracket backgrounds remain editor overlays.
+
+Highlighting runs on immutable snapshots in one background worker. Results are
+cached by buffer version and filename, and stale results are discarded after
+edits/undo/renames. For responsiveness, files above 1 MiB, results above 65,536
+tokens, and failed/over-budget lexers fall back to plain text without changing
+editing or recovery. The worker checks a one-second budget between tokens;
+Chroma also bounds individual regular-expression matches. No highlighter can
+write document text or invoke external programs.
+
+`:set` can show/accept the fixed preferences; there
 is no general options interpreter, Vimscript, plugin loader, or modeline
 execution. Indentation is a builtin heuristic, not Vim's full filetype engine.
 
@@ -112,6 +128,24 @@ reference; unsupported commands produce an error rather than calling Vim.
 Ex ranges support line numbers, `.`, `$`, marks, offsets, `%`, comma/semicolon,
 and visual marks. Mouse supports click/drag, double-click word selection,
 triple-click line selection, wheel scrolling, and middle-click PRIMARY put.
+
+### Command-line editing
+
+The `:`, `/`, and `?` prompts support readline-style editing independently of
+the document cursor:
+
+* Left/Right or Ctrl-B/F move; Home/End or Ctrl-A/E go to the start/end.
+* Backspace removes the preceding character; Delete/Ctrl-D removes the next.
+* Ctrl-U/K kill to the beginning/end, Ctrl-W kills the preceding word, and
+  Ctrl-Y reinserts the most recently killed prompt text.
+* Ctrl-Left/Right or Alt-B/F move by words; Alt-Backspace/Alt-D delete words.
+* Up/Down or Ctrl-P/N browse same-prefix history, restoring your unfinished
+  input and its cursor position when returning to the current entry.
+
+Insertion, deletion, and bracketed paste work at the actual prompt cursor.
+Unicode positions are rune-safe, long input scrolls horizontally with the
+prefix pinned, and prompts are bounded to 16 KiB. Pasted newlines/tabs become
+spaces; paste never submits a command by itself. Escape/Ctrl-C cancel.
 
 ### Clipboard
 

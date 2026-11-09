@@ -191,67 +191,6 @@ func (e *Editor) searchWord(backward, whole bool, count int) {
 	e.startSearch("\\V"+string(b.text[start:end]), backward, whole, count)
 }
 
-func (e *Editor) promptKey(key string) {
-	switch key {
-	case "<Esc>", "\x03":
-		e.prompt = ""
-		e.substitute = nil
-		e.reset()
-	case "<Enter>", "\r", "\n":
-		prompt := e.prompt
-		e.prompt = ""
-		e.promptHistory = append(e.promptHistory, prompt)
-		if len(e.promptHistory) > 100 {
-			e.promptHistory = e.promptHistory[1:]
-		}
-		if prompt[0] == ':' {
-			e.execute(prompt[1:])
-		} else {
-			count := e.number()
-			if e.operator != "" {
-				count = min(maxCount, count*e.operatorCount)
-			}
-			e.startSearch(prompt[1:], prompt[0] == '?', false, count)
-			if e.operator != "" {
-				target := e.pos()
-				e.window().cursor = e.promptStart
-				e.applyMotionOperator(target, false, false)
-			}
-		}
-		e.reset()
-	case "<BS>", "\x7f", "\b":
-		r := []rune(e.prompt)
-		if len(r) > 1 {
-			e.prompt = string(r[:len(r)-1])
-		} else {
-			e.prompt = ""
-			e.reset()
-		}
-	case "\x15":
-		e.prompt = e.prompt[:1]
-	case "<Up>", "<Down>":
-		delta := -1
-		if key == "<Down>" {
-			delta = 1
-		}
-		for index := clamp(e.historyIndex+delta, 0, len(e.promptHistory)); index >= 0 && index < len(e.promptHistory); index += delta {
-			if e.promptHistory[index][0] == e.prompt[0] {
-				e.historyIndex = index
-				e.prompt = e.promptHistory[index]
-				return
-			}
-		}
-		if key == "<Down>" {
-			e.historyIndex = len(e.promptHistory)
-			e.prompt = e.prompt[:1]
-		}
-	default:
-		if len([]rune(key)) == 1 && []rune(key)[0] >= 0x20 && len(e.prompt) < 16384 {
-			e.prompt += key
-		}
-	}
-}
-
 func parseSubstitute(value string) (pattern, replacement, flags string, err error) {
 	if value == "" {
 		return "", "", "", fmt.Errorf("missing substitution delimiter")

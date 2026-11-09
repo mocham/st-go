@@ -103,6 +103,10 @@ type Editor struct {
 	search                           searchState
 	prompt                           string
 	promptStart                      int
+	promptCursor, promptView         int // rune indexes, including the ':'/'/'/'?' prefix
+	promptDraft                      string
+	promptDraftCursor                int
+	promptKill                       string
 	promptHistory                    []string
 	historyIndex                     int
 	lastSubstitute                   string
@@ -116,6 +120,7 @@ type Editor struct {
 	rows, cols                       int
 	dirty                            bool
 	fullRedraw                       bool
+	syntax                           *syntaxHighlighter
 	clip                             clipboard
 	clipboardError                   string
 	registerReady                    bool
@@ -409,6 +414,15 @@ func (e *Editor) Feed(event keyEvent) {
 	if key == "" {
 		return
 	}
+	// ESC-b/f/d can also be a quickly typed Escape followed by a normal-mode
+	// command. Only command-line mode consumes them as readline Meta keys.
+	if e.prompt == "" {
+		if fallback, ok := map[string]string{"<A-b>": "b", "<A-f>": "f", "<A-d>": "d", "<A-BS>": "<BS>"}[key]; ok {
+			e.Feed(keyEvent{Key: "<Esc>"})
+			e.Feed(keyEvent{Key: fallback})
+			return
+		}
+	}
 	if len(e.pager) > 0 {
 		e.pager = nil
 		return
@@ -487,9 +501,7 @@ func (e *Editor) normalKey(key string) {
 		case ":":
 			e.rememberVisual()
 			e.mode = normalMode
-			e.prompt = ":'<,'>"
-			e.promptStart = e.pos()
-			e.historyIndex = len(e.promptHistory)
+			e.beginPrompt(":'<,'>")
 			return
 		case "v", "V", "\x16":
 			kind := map[string]mode{"v": visualMode, "V": visualLineMode, "\x16": visualBlockMode}[key]
@@ -530,8 +542,7 @@ func (e *Editor) normalKey(key string) {
 	}
 	if e.operator != "" {
 		if key == "/" || key == "?" {
-			e.prompt = key
-			e.promptStart = e.pos()
+			e.beginPrompt(key)
 			return
 		}
 		if key == "v" || key == "V" || key == "\x16" {
@@ -668,9 +679,7 @@ func (e *Editor) normalKey(key string) {
 		e.pending = "macro"
 		return
 	case "/", "?", ":":
-		e.prompt = key
-		e.promptStart = e.pos()
-		e.historyIndex = len(e.promptHistory)
+		e.beginPrompt(key)
 	case "n", "N":
 		e.searchNext(key == "N", n)
 	case "*", "#", "g*", "g#":
@@ -989,6 +998,7 @@ func (e *Editor) playMacro(reg rune, count int) {
 }
 
 func (e *Editor) tick(now time.Time) {
+	e.pollSyntax()
 	for _, b := range e.buffers {
 		if b.journal != nil {
 			e.error(b.journal.Tick(now))
@@ -996,6 +1006,7 @@ func (e *Editor) tick(now time.Time) {
 	}
 }
 func (e *Editor) close(normalExit bool) error {
+	e.syntax.close()
 	var first error
 	for _, b := range e.buffers {
 		if b.journal != nil {

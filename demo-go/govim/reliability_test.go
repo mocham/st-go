@@ -188,6 +188,7 @@ func TestInputFragmentation(t *testing.T) {
 
 func TestRenderIncrementalResizeAndControlSafety(t *testing.T) {
 	e := memoryEditor("α世界e\u0301\t\x1b[31m\nlast\n")
+	defer e.close(false)
 	var r renderer
 	var out strings.Builder
 	for _, size := range [][2]int{{24, 80}, {2, 8}, {10, 15}, {3, 8}} {

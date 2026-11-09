@@ -13,6 +13,11 @@ require github.com/hajimehoshi/go-mp3 v0.3.4
 require github.com/mattn/go-sqlite3 v1.14.32
 
 require (
+	github.com/alecthomas/chroma/v2 v2.27.0
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+)
+
+require (
 	codeberg.org/go-fonts/liberation v0.6.0
 	codeberg.org/go-pdf/fpdf v0.12.0 // indirect
 	github.com/d2lang/mathjax-go v0.1.0 // indirect

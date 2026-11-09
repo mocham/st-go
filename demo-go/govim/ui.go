@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -257,6 +256,7 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 	if len(e.tabs) == 0 {
 		return nil
 	}
+	e.pollSyntax()
 	if e.fullRedraw {
 		r.previous = nil
 		e.fullRedraw = false
@@ -294,6 +294,7 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 	}
 	cursorX, cursorY := 0, 0
 	for _, w := range e.windows() {
+		tokens := e.syntaxTokens(w.buffer)
 		e.viewport(w)
 		gutter := numberWidth(w.buffer) + 1
 		textWidth := max(1, w.rect.w-gutter)
@@ -319,15 +320,14 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 				number = fmt.Sprintf("%*d", gutter-1, row.line+1)
 			}
 			putCanvas(canvas, w.rect.x, y, number, numberStyle, gutter)
-			tokens := syntaxTokens(w.buffer.line(row.line), filepath.Ext(w.buffer.meta.Path))
+			tokenIndex := sort.Search(len(tokens), func(i int) bool { return tokens[i].end > row.start })
 			for _, cell := range row.cells {
 				cellStyle := style
-				for _, token := range tokens {
-					relative := cell.pos - w.buffer.start(row.line)
-					if relative >= token.start && relative < token.end {
-						cellStyle = token.style
-						break
-					}
+				for tokenIndex < len(tokens) && tokens[tokenIndex].end <= cell.pos {
+					tokenIndex++
+				}
+				if tokenIndex < len(tokens) && tokens[tokenIndex].start <= cell.pos {
+					cellStyle = syntaxCellStyle(tokens[tokenIndex].style, style == currentLineStyle)
 				}
 				if e.search.highlight && w.buffer == e.search.buffer {
 					index := sort.Search(len(e.search.matches), func(i int) bool { return e.search.matches[i].start > cell.pos }) - 1
@@ -399,8 +399,7 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 		message += " recording @" + string(e.recording)
 	}
 	if e.prompt != "" {
-		message = e.prompt
-		cursorX = min(e.cols-1, logicalColumn([]rune(message), len([]rune(message))))
+		message, cursorX = e.promptLine(e.cols - 1)
 		cursorY = e.rows - 1
 	}
 	putCanvas(canvas, 0, e.rows-1, truncateCells(message, e.cols-1), baseStyle, e.cols-1)
@@ -457,7 +456,7 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 		}
 	}
 	shape := 2
-	if e.mode == insertMode {
+	if e.mode == insertMode || e.prompt != "" {
 		shape = 6
 	}
 	if e.mode == replaceMode {
@@ -501,85 +500,4 @@ func truncateCells(text string, limit int) string {
 		column += w
 	}
 	return out.String()
-}
-
-type syntaxToken struct {
-	start, end int
-	style      string
-}
-
-var syntaxKeywords = func() map[string]bool {
-	m := map[string]bool{}
-	for _, word := range strings.Fields("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var void int char long short float double unsigned signed static typedef union enum volatile bool true false nil null class public private protected extends implements new delete try catch finally throw throws function let async await yield from def lambda pass None True False while with as except raise global nonlocal in is not and or include define endif fi then do done esac export local") {
-		m[word] = true
-	}
-	return m
-}()
-
-func syntaxTokens(line []rune, extension string) []syntaxToken {
-	var tokens []syntaxToken
-	tex := strings.EqualFold(extension, ".tex")
-	markdown := strings.EqualFold(extension, ".md") || strings.EqualFold(extension, ".markdown")
-	hashComment := extension == ".py" || extension == ".sh" || extension == ".yaml" || extension == ".yml"
-	add := func(start, end int, color string) {
-		if len(tokens) < 4096 {
-			tokens = append(tokens, syntaxToken{start, end, "\x1b[0;38;5;" + color + ";48;5;236m"})
-		}
-	}
-	if markdown && len(line) > 0 && line[0] == '#' {
-		add(0, len(line), "215")
-		return tokens
-	}
-	for at := 0; at < len(line) && len(tokens) < 4096; {
-		start := at
-		r := line[at]
-		if (tex && r == '%') || (hashComment && r == '#') || (r == '/' && at+1 < len(line) && line[at+1] == '/') {
-			add(at, len(line), "108")
-			break
-		}
-		if tex && r == '\\' {
-			at++
-			for at < len(line) && unicode.IsLetter(line[at]) {
-				at++
-			}
-			add(start, at, "81")
-			continue
-		}
-		if r == '"' || r == '\'' || (markdown && r == '`') {
-			at++
-			for at < len(line) {
-				if line[at] == '\\' {
-					at = min(len(line), at+2)
-					continue
-				}
-				if line[at] == r {
-					at++
-					break
-				}
-				at++
-			}
-			add(start, at, "180")
-			continue
-		}
-		if unicode.IsDigit(r) {
-			at++
-			for at < len(line) && (unicode.IsDigit(line[at]) || strings.ContainsRune(".xabcdefABCDEF", line[at])) {
-				at++
-			}
-			add(start, at, "215")
-			continue
-		}
-		if unicode.IsLetter(r) || r == '_' {
-			at++
-			for at < len(line) && (unicode.IsLetter(line[at]) || unicode.IsDigit(line[at]) || line[at] == '_') {
-				at++
-			}
-			if syntaxKeywords[string(line[start:at])] {
-				add(start, at, "111")
-			}
-			continue
-		}
-		at++
-	}
-	return tokens
 }

@@ -258,7 +258,9 @@ func (e *Editor) paste(text string) {
 		return
 	}
 	if e.prompt != "" {
-		e.prompt += strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", " "), "\n", " ")
+		text = strings.ReplaceAll(text, "\r\n", " ")
+		text = strings.NewReplacer("\r", " ", "\n", " ", "\t", " ").Replace(text)
+		e.insertPrompt(text)
 		return
 	}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
