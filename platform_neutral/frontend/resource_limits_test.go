@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"testing"
 
@@ -24,7 +25,7 @@ func oversizedPNG(t *testing.T) []byte {
 	t.Helper()
 	var out bytes.Buffer
 	// A valid, tiny compressed file whose decoded pixels exceed the budget.
-	img := solidImage{image.NewUniform(color.Black), image.Rect(0, 0, 4097, 4096)}
+	img := solidImage{image.NewUniform(color.Black), image.Rect(0, 0, 8193, 8192)}
 	if err := png.Encode(&out, img); err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +39,28 @@ func TestImageDecodeResourceLimit(t *testing.T) {
 	if _, _, _, failed := decodeImage(makeTestPNG(t)); failed {
 		t.Fatal("small image failed after rejection")
 	}
+}
+
+func TestLargeJPEGPreviewWithinDecodedImageLimit(t *testing.T) {
+	trm := regionTestTerminal(t)
+	var encoded bytes.Buffer
+	// Just over the old 64 MiB RGBA limit; the compressed input and preview
+	// remain small. Use a uniform source rather than allocating source pixels.
+	img := solidImage{image.NewUniform(color.RGBA{R: 200, G: 80, B: 30, A: 255}), image.Rect(0, 0, 4200, 4000)}
+	if err := jpeg.Encode(&encoded, img, &jpeg.Options{Quality: 75}); err != nil {
+		t.Fatal(err)
+	}
+	cols, rows, glyphs, ok := trm.ImageDecode(encoded.Bytes(), term.ImageDecodeOptions{FitContain: true})
+	if !ok || cols < 1 || rows < 1 || cols > trm.cols || rows > trm.rows || len(glyphs) != cols*rows {
+		t.Fatalf("large JPEG preview failed: %dx%d, %d glyphs, ok=%v", cols, rows, len(glyphs), ok)
+	}
+	for _, glyph := range glyphs {
+		offset := int(glyph.Fg)
+		if glyph.U == term.ImageRune && offset < len(imageAtlas) && imageAtlas[offset]&0xffffff != 0 {
+			return
+		}
+	}
+	t.Fatal("accepted large JPEG produced an all-black preview")
 }
 
 func TestFramebufferResourceLimit(t *testing.T) {

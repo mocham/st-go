@@ -39,7 +39,7 @@ func decodeWebP(data []byte) (w, h int, rgba []byte, ok bool) {
 		return 0, 0, nil, false
 	}
 	w, h = int(cw), int(ch)
-	size, valid := limits.RGBA("decoded WebP", w, h)
+	size, valid := limits.ImageRGBA("decoded WebP", w, h)
 	if !valid {
 		return 0, 0, nil, false
 	}

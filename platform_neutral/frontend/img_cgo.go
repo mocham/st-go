@@ -35,7 +35,7 @@ func decodeImage(data []byte) (w, h int, rgba []byte, err bool) {
 	if C.stb_image_info((*C.uchar)(unsafe.Pointer(&data[0])), C.int(len(data)), &cw, &ch) == 0 {
 		return 0, 0, nil, true
 	}
-	if _, ok := limits.RGBA("decoded image", int(cw), int(ch)); !ok {
+	if _, ok := limits.ImageRGBA("decoded image", int(cw), int(ch)); !ok {
 		return 0, 0, nil, true
 	}
 	p := C.stb_decode_rgba((*C.uchar)(unsafe.Pointer(&data[0])),
@@ -45,7 +45,7 @@ func decodeImage(data []byte) (w, h int, rgba []byte, err bool) {
 	}
 	defer C.free(unsafe.Pointer(p))
 	w, h = int(cw), int(ch)
-	size, ok := limits.RGBA("decoded image", w, h)
+	size, ok := limits.ImageRGBA("decoded image", w, h)
 	if !ok {
 		return 0, 0, nil, true
 	}

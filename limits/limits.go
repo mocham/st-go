@@ -12,13 +12,15 @@ import (
 	"time"
 )
 
-// MaxBytes is the common upper bound for one input, decoded bitmap, or buffer.
-// Other budgets below are derived from it. These are per-resource limits,
+// MaxBytes is the default upper bound for one input or buffer. Decoded still
+// images have a separate budget; other budgets below are derived from MaxBytes.
+// These are per-resource limits,
 // not a process-wide RSS limit (native decoders also use working memory).
 const (
 	MaxBytes             = 64 << 20
 	FileBytes            = MaxBytes
 	PixelBytes           = MaxBytes
+	DecodedImageBytes    = 256 << 20
 	ControlBytes         = MaxBytes / 64
 	ClipboardBytes       = MaxBytes / 8
 	GlyphCacheBytes      = MaxBytes / 2
@@ -98,6 +100,12 @@ func Product(scope string, maximum int, dimensions ...int) (int, bool) {
 
 func RGBA(scope string, width, height int) (int, bool) {
 	return Product(scope, PixelBytes, width, height, 4)
+}
+
+// ImageRGBA bounds decoded still-image pixels before display scaling without
+// increasing framebuffer, glyph, animation, or cache budgets.
+func ImageRGBA(scope string, width, height int) (int, bool) {
+	return Product(scope, DecodedImageBytes, width, height, 4)
 }
 
 func Grid(cols, rows int) bool {

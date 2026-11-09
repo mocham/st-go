@@ -214,7 +214,7 @@ func (t *Terminal) decodeWebPAnimationFrame(encoded []byte, frameIdx int) (w, h 
 // allocating a bounded atlas bitmap and writing each cell's pixel block into
 // it. Returns the grid size and the glyphs in row-major order.
 func (t *Terminal) imageToGlyphs(w, h int, rgba []byte, opts term.ImageDecodeOptions) (cols, rows int, glyphs []term.Glyph) {
-	size, valid := limits.RGBA("image pixels", w, h)
+	size, valid := limits.ImageRGBA("image pixels", w, h)
 	if !valid || len(rgba) != size {
 		return 0, 0, nil
 	}

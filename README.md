@@ -42,13 +42,14 @@ parser and screen model, and the X11 frontend is built on the pure-Go
 ## Resource limits and error logs
 
 Resource budgets are centralized in [`limits/limits.go`](limits/limits.go).
-`MaxBytes` defaults to **64 MiB** per input/buffer; other budgets are derived
-from it:
+`MaxBytes` defaults to **64 MiB** per input/buffer. Decoded still images have a
+separate **256 MiB** budget before preview scaling; other budgets remain unchanged:
 
 | Resource | Limit |
 | --- | --- |
 | Preview file / encoded image or PDF | 64 MiB |
-| Decoded bitmap, framebuffer, image atlas, pending WebP cache pixels | 64 MiB each |
+| Decoded still image (JPEG/PNG/GIF/BMP/TGA/WebP) | 256 MiB |
+| Framebuffer, PDF page bitmap, WebP animation canvas, image atlas, pending WebP cache pixels | 64 MiB each |
 | Terminal screen grids (both buffers plus bookkeeping) | 64 MiB |
 | Glyph cache | 32 MiB / 16,384 entries |
 | Continuous PDF cache | 256 MiB per strip, up to five screenfuls |

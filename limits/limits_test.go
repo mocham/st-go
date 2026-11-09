@@ -18,6 +18,26 @@ func TestProductRejectsOversizeAndOverflow(t *testing.T) {
 	}
 }
 
+func TestDecodedImageBudget(t *testing.T) {
+	for _, size := range [][2]int{{4097, 4096}, {6000, 4000}, {8192, 8192}} {
+		w, h := size[0], size[1]
+		if n, ok := ImageRGBA("decoded image", w, h); !ok || n != w*h*4 {
+			t.Fatalf("rejected image %dx%d: %d, %v", w, h, n, ok)
+		}
+	}
+	if n, ok := ImageRGBA("decoded image", 8192, 8192); !ok || n != 256<<20 {
+		t.Fatalf("256 MiB boundary = %d, %v", n, ok)
+	}
+	for _, size := range [][2]int{{8193, 8192}, {0, 1}, {-1, 1}, {1 << 30, 1 << 30}} {
+		if _, ok := ImageRGBA("decoded image", size[0], size[1]); ok {
+			t.Fatalf("accepted invalid/oversized image %v", size)
+		}
+	}
+	if FileBytes != 64<<20 || PixelBytes != 64<<20 {
+		t.Fatal("increasing the image budget changed unrelated file/framebuffer budgets")
+	}
+}
+
 func TestReadFileLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "preview")
 	if err := os.WriteFile(path, []byte("small preview"), 0600); err != nil {
