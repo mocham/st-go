@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"st-go/ptyutil"
 )
 
@@ -277,6 +278,81 @@ func TestHomeEndPageKeys(t *testing.T) {
 	f.send("\x1b[6~") // PageDown
 	time.Sleep(120 * time.Millisecond)
 	waitContains(t, f, "FILES  7-21 / 21", "page down")
+}
+
+func TestControlPageNavigation(t *testing.T) {
+	for _, shell := range []bool{false, true} {
+		name := "Go"
+		if shell {
+			name = "Bash"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			for i := 0; i < 50; i++ {
+				writeFiles(t, dir, fmt.Sprintf("f%02d.txt", i))
+			}
+			env := testEnv("ST_FILE_BROWSER_ICON_TEXT=T", "ST_FILE_BROWSER_LIST_WIDTH=34")
+			var f *fbTest
+			if shell {
+				f = startBrowserCommand(t, env, "bash", "../../demo/file-browser.sh", dir)
+			} else {
+				f = startBrowser(t, env, dir)
+			}
+			waitContains(t, f, "FILES  1-15 / 51", "initial page")
+			step := func(key, header string, row int, label string) {
+				t.Helper()
+				before := len(f.output())
+				f.send(key)
+				selected := fmt.Sprintf("\x1b[%d;47H\x1b[34X%s T  %s", row, selectedStyle, label)
+				waitFor(t, f, func() bool {
+					paint := f.output()[before:]
+					return strings.Contains(paint, header) && strings.Contains(paint, selected)
+				}, "page range and focused boundary entry")
+				if strings.Contains(f.output()[before:], "\x1b[2J") {
+					t.Fatal("list paging cleared the complete screen")
+				}
+			}
+			// The action is anchored to visible rows, not to the cursor position.
+			f.send(strings.Repeat("\x1b[B", 4))
+			waitContains(t, f, selectedStyle+" f03.txt", "cursor inside first page")
+			step("\x04", "FILES  15-29 / 51", 8, "f13.txt")
+			// Index 14 remains selected, but must be repainted at the bottom.
+			step("\x15", "FILES  1-15 / 51", 22, "f13.txt")
+			step("\x04", "FILES  15-29 / 51", 8, "f13.txt")
+			step("\x04", "FILES  29-43 / 51", 8, "f27.txt")
+			if shell {
+				f.send("q")
+				waitFor(t, f, func() bool {
+					mode, err := unix.IoctlGetTermios(int(f.master.Fd()), unix.TCGETS)
+					return err == nil && mode.Lflag&(unix.ICANON|unix.ECHO) == unix.ICANON|unix.ECHO
+				}, "original canonical/echo terminal mode after exit")
+			}
+		})
+	}
+}
+
+func TestBashCommandUsesOriginalInputMode(t *testing.T) {
+	dir := t.TempDir()
+	f := startBrowserCommand(t, testEnv(), "bash", "../../demo/file-browser.sh", dir)
+	f.send(":stty -a > .mode\r")
+	marker := filepath.Join(dir, ".mode")
+	waitFor(t, f, func() bool {
+		data, err := os.ReadFile(marker)
+		return err == nil && len(data) > 0
+	}, "command terminal-mode capture")
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range strings.Fields(string(data)) {
+		if field == "-icanon" || field == "-echo" {
+			t.Fatalf("shell command inherited browser input mode: %s", data)
+		}
+	}
+	waitFor(t, f, func() bool {
+		mode, err := unix.IoctlGetTermios(int(f.master.Fd()), unix.TCGETS)
+		return err == nil && mode.Lflag&(unix.ICANON|unix.ECHO) == 0
+	}, "browser noncanonical input mode after command")
 }
 
 // --- openers / directories ---

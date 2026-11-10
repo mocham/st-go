@@ -12,12 +12,12 @@ import (
 
 	"github.com/mocham/GoLS/latexpdf"
 	"st-go/semhtml"
+	"st-go/tui/preview"
 )
 
 const (
 	documentPreviewVersion = "latexpdf-document-v11-auxiliary-bibliography"
 	maxPreviewDocumentSize = 12 << 20
-	previewFontScale       = 1.7
 	maxPreviewVariants     = 4
 	maxDocumentPreviews    = 32
 )
@@ -82,6 +82,10 @@ func (renderer *previewDocumentRenderer) render(path string) (*documentPreview, 
 }
 
 func (renderer *previewDocumentRenderer) renderSized(path string, pageWidth, pageHeight float64) (*documentPreview, error) {
+	return renderer.renderScaled(path, pageWidth, pageHeight, preview.FontScale)
+}
+
+func (renderer *previewDocumentRenderer) renderScaled(path string, pageWidth, pageHeight, fontScale float64) (*documentPreview, error) {
 	extension := strings.ToLower(filepath.Ext(path))
 	switch extension {
 	case ".epub":
@@ -120,13 +124,13 @@ func (renderer *previewDocumentRenderer) renderSized(path string, pageWidth, pag
 	key := previewCacheDigest(
 		documentPreviewVersion, logicalPath, extension,
 		fmt.Sprintf("%.6f", pageWidth), fmt.Sprintf("%.6f", pageHeight),
-		fmt.Sprintf("%g", previewFontScale), modified.UTC().Format(time.RFC3339Nano), string(data),
+		fmt.Sprintf("%g", fontScale), modified.UTC().Format(time.RFC3339Nano), string(data),
 	)
 	if cached, ok := renderer.docs[key]; ok {
 		renderer.touchSourcePreview(key)
 		return cached, nil
 	}
-	result, err := renderer.renderPDFDocument(path, source, key, kind, modified, pageWidth, pageHeight)
+	result, err := renderer.renderPDFDocument(path, source, key, kind, modified, pageWidth, pageHeight, fontScale)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +138,7 @@ func (renderer *previewDocumentRenderer) renderSized(path string, pageWidth, pag
 	return result, nil
 }
 
-func (renderer *previewDocumentRenderer) renderPDFDocument(path, source, key, kind string, modified time.Time, pageWidth, pageHeight float64) (*documentPreview, error) {
+func (renderer *previewDocumentRenderer) renderPDFDocument(path, source, key, kind string, modified time.Time, pageWidth, pageHeight, fontScale float64) (*documentPreview, error) {
 	title := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	if kind == "TeX" {
 		if value, ok := latexpdf.FindCommandArgument(source, "title"); ok {
@@ -149,7 +153,7 @@ func (renderer *previewDocumentRenderer) renderPDFDocument(path, source, key, ki
 	}
 	rendered, err := renderer.latex.RenderPDFResultWithOptions(latexpdf.Document{
 		Source: source, Title: title, Author: author, Modified: modified,
-	}, latexpdf.PDFOptions{PageWidth: pageWidth, PageHeight: pageHeight, FontScale: previewFontScale})
+	}, latexpdf.PDFOptions{PageWidth: pageWidth, PageHeight: pageHeight, FontScale: fontScale})
 	if err != nil {
 		return nil, err
 	}

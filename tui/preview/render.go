@@ -9,6 +9,23 @@ import (
 	"st-go/limits"
 )
 
+const (
+	PageWidthMM         = 140.0
+	FontScale           = 0.64 // 80% of govim's previous 0.8 scale.
+	DefaultWidthPercent = 60
+)
+
+// FontScaleForPane matches govim's default fit-width preview text on the same
+// terminal. Pane-sized PDFs need a different PDF font scale than govim's fixed
+// 140 mm page; equal raw scales would not produce equal on-screen text sizes.
+func FontScaleForPane(pageWidthMM float64, paneColumns, terminalColumns int) float64 {
+	if pageWidthMM <= 0 || paneColumns <= 0 || terminalColumns <= 0 {
+		return FontScale
+	}
+	referenceColumns := terminalColumns * DefaultWidthPercent / 100
+	return FontScale * pageWidthMM / PageWidthMM * float64(max(1, referenceColumns)) / float64(paneColumns)
+}
+
 // Render uses the existing selectable-text/vector-math PDF pipeline in-process.
 // One renderer per saved revision releases its document/formula caches afterward.
 func Render(source *Snapshot) (pdf []byte, mathErrors int, err error) {
@@ -28,7 +45,7 @@ func Render(source *Snapshot) (pdf []byte, mathErrors int, err error) {
 		title = latexpdf.PlainText(value)
 	}
 	author, _ := latexpdf.FindCommandArgument(text, "author")
-	rendered, err := latexpdf.NewRenderer().RenderPDFResultWithOptions(latexpdf.Document{Source: text, Title: title, Author: latexpdf.PlainText(author)}, latexpdf.PDFOptions{PageWidth: 140, PageHeight: 297, Compact: true, FontScale: 0.8})
+	rendered, err := latexpdf.NewRenderer().RenderPDFResultWithOptions(latexpdf.Document{Source: text, Title: title, Author: latexpdf.PlainText(author)}, latexpdf.PDFOptions{PageWidth: PageWidthMM, PageHeight: 297, Compact: true, FontScale: FontScale})
 	if err == nil && len(rendered.PDF) > limits.FileBytes {
 		err = fmt.Errorf("preview PDF exceeds resource limit")
 	}

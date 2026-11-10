@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	"st-go/tui/navigation"
+	"st-go/tui/preview"
 	"st-go/tui/readline"
 )
 
@@ -738,6 +739,17 @@ func (b *Browser) selectIndex(target int) {
 	if !selection.Select(target, len(b.files), b.visible) {
 		return
 	}
+	b.applySelection(selection)
+}
+
+func (b *Browser) pageSelection(direction int) {
+	selection := navigation.Selection{Index: b.idx, Top: b.viewTop}
+	if selection.Page(direction, len(b.files), b.visible) {
+		b.applySelection(selection)
+	}
+}
+
+func (b *Browser) applySelection(selection navigation.Selection) {
 	old := b.idx
 	oldTop := b.viewTop
 	b.idx, b.viewTop = selection.Index, selection.Top
@@ -1258,7 +1270,8 @@ func (b *Browser) renderPreview() {
 		if isRenderedDocument(path) {
 			pageWidth, pageHeight = b.previewPDFPageSize()
 		}
-		document, err := b.documentPreviewer.renderSized(path, pageWidth, pageHeight)
+		fontScale := preview.FontScaleForPane(pageWidth, b.previewW, b.cols)
+		document, err := b.documentPreviewer.renderScaled(path, pageWidth, pageHeight, fontScale)
 		if err != nil || document.pages() == 0 {
 			b.previewWasGraphic = false
 			b.previewPageTotal = 0

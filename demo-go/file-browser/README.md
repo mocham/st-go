@@ -28,6 +28,11 @@ for hidden files, `r` to refresh, `/` for path entry, `:` for a shell command,
 and `q` to quit. `:help` opens the paged manual in the preview: `]`/`[` or the
 wheel change pages; `q`/Escape closes it.
 
+**Ctrl+D** pages down with one overlapping row: the last visible entry becomes
+the first entry and receives focus. **Ctrl+U** reverses this: the first visible
+entry becomes the last and receives focus. Paging is independent of the current
+cursor row and clamps at the directory boundaries. Page Up/Down are unchanged.
+
 The path prompt accepts absolute paths and paths relative to the browsed
 directory, including `file`, `./file`, and `../../file`. Backspace can remove
 the initial `/`; Ctrl+A/Ctrl+E move to the beginning/end. Live matching shows a
@@ -206,8 +211,11 @@ instructions. Formatting, images, headers, footnotes, and embedded documents
 are omitted. Encrypted/older Word files and RTF/HTML renamed to `.doc` are not
 supported. No `antiword`, `catdoc`, or Office installation is required.
 
-LaTeX/Markdown use a **1.7× font scale** in file-browser previews. GoLS uses
-**3.23×**; Vimtex uses **0.8×** for its fit-width editor pane.
+LaTeX/Markdown previews match govim's default 60%-width preview's on-screen text
+size: both are **80% of govim's previous size**. The browser compensates for its
+pane-sized PDF pages, keeping text size unchanged when its sidebar is pinned or
+hidden. Govim uses a **0.64×** scale on a 140 mm fit-width page. GoLS (**3.23×**)
+and Vimtex (**0.8×**) are unchanged.
 
 Generated previews are session-temporary. A changed source digest deletes all
 variants of the superseded revision. Each current revision retains at most four

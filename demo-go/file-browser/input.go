@@ -116,6 +116,12 @@ func (b *Browser) handleKey(k byte) {
 	case 'r', 'R':
 		b.resetClick()
 		b.refreshList()
+	case 0x04: // Ctrl+D: old bottom row becomes the selected top row.
+		b.resetClick()
+		b.pageSelection(1)
+	case 0x15: // Ctrl+U: old top row becomes the selected bottom row.
+		b.resetClick()
+		b.pageSelection(-1)
 	case 'o', 'O':
 		b.resetClick()
 		b.openSelected(0)

@@ -14,8 +14,10 @@ from rendered output. Treat the returned snapshot as immutable.
 preview's scroll range. These are proportional source-line estimates, not
 SyncTeX coordinates. Included-file mappings refer to their first occurrence.
 
-`Render(snapshot)` uses the same compact 140 mm / 0.8× font preview layout as
-vimtex. Text remains native selectable PDF text; math uses vector paths. The
+`Render(snapshot)` uses a compact 140 mm / **0.64×** font preview layout (80% of
+govim's previous 0.8× scale). `FontScaleForPane` maps that size to pane-sized
+file-browser PDFs, relative to govim's default 60%-width preview on the same
+terminal. Text remains native selectable PDF text; math uses vector paths. The
 existing renderer's supported LaTeX/Markdown subset applies. No TeX installation
 or system font packages are needed.
 

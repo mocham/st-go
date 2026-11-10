@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"st-go/tui/preview"
 )
 
 func TestPreviewPageAfterClampsBounds(t *testing.T) {
@@ -36,6 +38,46 @@ func TestPreviewPDFPageSizeMatchesPanePixels(t *testing.T) {
 	}
 	if width < 60 || height < 60 {
 		t.Fatalf("page size %.2fx%.2fmm is too small for latexpdf margins", width, height)
+	}
+}
+
+func TestTeXPreviewFontMatchesGovimAcrossSidebarModes(t *testing.T) {
+	for _, pane := range []int{240, 205} {
+		browser := &Browser{rows: 60, cols: 240, previewW: pane, cellPixelW: 16, cellPixelH: 32}
+		width, _ := browser.previewPDFPageSize()
+		scale := preview.FontScaleForPane(width, pane, browser.cols)
+		if scale <= 1.7 {
+			t.Fatalf("large-screen browser font scale = %g, want larger than previous 1.7", scale)
+		}
+		actual := scale * float64(pane) * browser.cellPixelW / width
+		expected := 0.8 * 0.8 * float64(browser.cols*60/100) * browser.cellPixelW / 140
+		if difference := actual - expected; difference < -1e-9 || difference > 1e-9 {
+			t.Fatalf("browser's displayed font density = %g, want %g", actual, expected)
+		}
+	}
+}
+
+func TestDocumentPreviewCacheDistinguishesFontSizes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "font.tex")
+	if err := os.WriteFile(path, []byte(`\begin{document}Body text.\end{document}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	renderer := newPreviewDocumentRenderer(dir)
+	first, err := renderer.renderScaled(path, 140, 200, 0.64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := renderer.renderScaled(path, 140, 200, 0.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.PDFPath == second.PDFPath {
+		t.Fatal("font-size change reused a stale PDF")
+	}
+	cached, err := renderer.renderScaled(path, 140, 200, 0.64)
+	if err != nil || cached != first {
+		t.Fatalf("same font-size preview was not cached: %v", err)
 	}
 }
 

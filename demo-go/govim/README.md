@@ -28,6 +28,10 @@ continuous scrolling, selectable PDF text, and vector mathematics. Govim stays
 the editor; no Vim, child editor, external typesetter, or extra font package is
 launched for previewing.
 
+Preview text and math use a **0.64×** font scale on a 140 mm fit-width page:
+**80% of the previous font size**, also used as the file-browser preview's
+on-screen size reference.
+
 ```sh
 make st govim
 ./BINARIES/st -e ./BINARIES/govim document.tex

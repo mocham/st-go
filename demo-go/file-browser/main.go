@@ -30,7 +30,8 @@ Framebuffer video uses mpv --vo=drm with --audio-device=alsa/plughw:1,0 by defau
 There is no default X11/web video player; matching custom openers still override.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
-scroll, [ and ] change PDF or rendered document pages, / enters a path, : runs a shell command
+scroll, Ctrl+D/Ctrl+U page with one overlapping row, [ and ] change PDF or
+rendered document pages, / enters a path, : runs a shell command
 (with $F = selected file and $D = current directory), :s/old/new/[g] renames
 matching entries, :help shows this manual, Tab shows/hides the navigation
 sidebar, Shift+Tab toggles floating/pinned navigation, . toggles hidden files,

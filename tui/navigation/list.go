@@ -37,3 +37,30 @@ func (selection *Selection) Select(index, count, rows int) bool {
 	selection.Normalize(count, rows)
 	return selection.Index != previous
 }
+
+// Page scrolls with one row of overlap, independent of the current cursor row.
+// Down selects the old bottom row and brings it to the top; up selects the old
+// top row and brings it to the bottom. At either end the viewport is clamped.
+// Unlike Select, a viewport-only change also counts as movement.
+func (selection *Selection) Page(direction, count, rows int) bool {
+	previous := *selection
+	selection.Normalize(count, rows)
+	if count > 0 && direction != 0 {
+		rows = max(1, rows)
+		if rows == 1 {
+			if direction > 0 {
+				selection.Index++
+			} else {
+				selection.Index--
+			}
+		} else if direction > 0 {
+			selection.Index = min(count-1, selection.Top+rows-1)
+			selection.Top += rows - 1
+		} else {
+			selection.Index = selection.Top
+			selection.Top -= rows - 1
+		}
+		selection.Normalize(count, rows)
+	}
+	return *selection != previous
+}

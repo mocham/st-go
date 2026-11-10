@@ -65,7 +65,7 @@ TUI_READLINE_SRC = $(wildcard tui/readline/*.go)
 STTERMINAL_SRC = $(wildcard term/*.go platform_neutral/stterminal/*.go)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 	       $(wildcard platform_neutral/api/*.go) \
-	       $(wildcard demo-go/file-browser/*.conf) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
+	       $(wildcard demo-go/file-browser/*.conf tui/preview/*.go) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
 GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) $(wildcard pdfmeta/*.go) $(wildcard limits/*.go)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
 	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)

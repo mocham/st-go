@@ -52,3 +52,31 @@ func TestSelectionClampsAndScrolls(t *testing.T) {
 		t.Fatalf("select did not report movement correctly: %+v", selection)
 	}
 }
+
+func TestPageKeepsBoundaryRowAndFocus(t *testing.T) {
+	for _, tc := range []struct {
+		name                                          string
+		index, top, count, rows, direction, want, pos int
+	}{
+		{"down ignores cursor row", 4, 0, 100, 15, 1, 14, 14},
+		{"down from selected bottom", 14, 0, 100, 15, 1, 14, 14},
+		{"up ignores cursor row", 25, 14, 100, 15, -1, 14, 0},
+		{"up from selected top", 14, 14, 100, 15, -1, 14, 0},
+		{"last full page", 90, 85, 100, 15, 1, 99, 85},
+		{"first page", 10, 0, 100, 15, -1, 0, 0},
+		{"short down", 0, 0, 3, 15, 1, 2, 0},
+		{"short up", 2, 0, 3, 15, -1, 0, 0},
+		{"single row down", 4, 4, 10, 1, 1, 5, 5},
+		{"single row up", 4, 4, 10, 1, -1, 3, 3},
+		{"empty", -1, 0, 0, 15, 1, -1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selection := Selection{Index: tc.index, Top: tc.top}
+			previous := selection
+			changed := selection.Page(tc.direction, tc.count, tc.rows)
+			if selection.Index != tc.want || selection.Top != tc.pos || changed != (selection != previous) {
+				t.Fatalf("page = %+v (changed=%t), want index=%d top=%d", selection, changed, tc.want, tc.pos)
+			}
+		})
+	}
+}

@@ -68,7 +68,8 @@ Framebuffer video uses mpv --vo=drm with --audio-device=alsa/plughw:1,0 by defau
 There is no default X11/web video player; matching custom openers still override.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
-scroll, [ and ] change PDF pages, / enters a path, : runs a shell command
+scroll, Ctrl+D/Ctrl+U page with one overlapping row, [ and ] change PDF pages,
+/ enters a path, : runs a shell command
 (with $F = selected file and $D = current directory), :s/old/new/[g] renames
 matching entries, :help shows this manual, . toggles hidden files, r refreshes,
 q quits.
@@ -185,6 +186,7 @@ MANUAL_ACTIVE=0
 MANUAL_PAGE=1
 MANUAL_TOTAL=1
 
+TTY_MODE=
 CACHE_DIR=$(mktemp -d /tmp/st-go-browser.XXXXXX) || exit 1
 PREVIEW_LINK=$CACHE_DIR/content
 GEOMETRY_TAG=file-browser-$$
@@ -231,11 +233,17 @@ window_dcs() {
 }
 cup() { printf '\033[%d;%dH' "$1" "$2"; }
 
+# Keep control keys as bytes even while rendering between read calls. Otherwise
+# Ctrl+D/Ctrl+U can be consumed as canonical EOF/line-kill before read starts.
+browser_input_mode() { stty -echo -icanon -iexten min 1 time 0 2>/dev/null || true; }
+restore_input_mode() { [[ -z $TTY_MODE ]] || stty "$TTY_MODE" 2>/dev/null; }
+
 cleanup() {
 	((CLEANED)) && return
 	CLEANED=1
 	window_dcs forget "$GEOMETRY_TAG"
 	printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l'
+	restore_input_mode
 	rm -rf -- "$CACHE_DIR"
 }
 trap cleanup EXIT
@@ -771,14 +779,15 @@ reset_click() {
 }
 
 select_index() {
-	local target=$1 old=$IDX old_top=$VIEW_TOP
+	local target=$1 old=$IDX old_top=$VIEW_TOP next_top=${2:-$VIEW_TOP}
 	((${#FILES[@]})) || return
 	((target < 0)) && target=0
 	((target >= ${#FILES[@]})) && target=$((${#FILES[@]} - 1))
-	((target == IDX)) && return
 	IDX=$target
-	PAGE=1
+	VIEW_TOP=$next_top
 	ensure_visible
+	((IDX == old && VIEW_TOP == old_top)) && return
+	PAGE=1
 	update_info
 	render_preview
 	if ((PREVIEW_FULL_REDRAW)); then
@@ -798,6 +807,17 @@ select_index() {
 move_selection() {
 	((${#FILES[@]})) || return
 	select_index "$((IDX + $1))"
+}
+
+page_selection() {
+	((${#FILES[@]})) || return
+	if ((VISIBLE <= 1)); then
+		move_selection "$1"
+	elif (($1 > 0)); then
+		select_index "$((VIEW_TOP + VISIBLE - 1))" "$((VIEW_TOP + VISIBLE - 1))"
+	else
+		select_index "$VIEW_TOP" "$((VIEW_TOP - VISIBLE + 1))"
+	fi
 }
 
 change_directory() {
@@ -925,6 +945,7 @@ run_terminal_tool() {
 	mode=$(stty -g 2>/dev/null) || mode=
 	TOOL_ACTIVE=1
 	printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l'
+	restore_input_mode
 	(cd -- "$DIR" && "$executable" "$@" "$path")
 	result=$?
 	TOOL_ACTIVE=0
@@ -1368,10 +1389,12 @@ run_shell_command() {
 		base_name "$f"; name=$REPLY
 	fi
 	printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l'
+	restore_input_mode
 	(
 		cd -- "$DIR" 2>/dev/null || exit 1
 		D=$DIR F=$f NAME=$name BROWSER_DIR=$DIR bash -c "$code"
 	)
+	browser_input_mode
 	printf '\033[?1049h\033[?25l\033[?1000h\033[?1006h'
 	STATUS='Command finished'
 	render_all
@@ -1384,6 +1407,8 @@ ST-GO FILE BROWSER  USER MANUAL
 NAVIGATION
   Up/Down or click      select an entry
   PageUp/PageDown       jump by a screen
+  Ctrl+D               old last visible entry to top, select it
+  Ctrl+U               old first visible entry to bottom, select it
   Home/End              first/last entry
   Enter                 open file or enter directory
   Backspace             go to parent directory
@@ -1571,6 +1596,8 @@ manual_mode() {
 	render_all
 }
 
+TTY_MODE=$(stty -g 2>/dev/null) || TTY_MODE=
+browser_input_mode
 terminal_size
 build_list
 printf '\033[?1049h\033[?25l\033[?1000h\033[?1006h'
@@ -1590,6 +1617,8 @@ while ((RUNNING)); do
 		':') reset_click; command_prompt ;;
 		'.') reset_click; toggle_hidden ;;
 		r|R) reset_click; refresh_list ;;
+		$'\004') reset_click; page_selection 1 ;;
+		$'\025') reset_click; page_selection -1 ;;
 		o|O) reset_click; open_selected 0 ;;
 		'[') reset_click; change_pdf_page -1 ;;
 		']') reset_click; change_pdf_page 1 ;;

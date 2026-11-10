@@ -22,7 +22,7 @@ type previewOptions struct {
 }
 
 func defaultPreviewOptions() previewOptions {
-	return previewOptions{60, "#f7f5ef", 2100 * time.Millisecond}
+	return previewOptions{preview.DefaultWidthPercent, "#f7f5ef", 2100 * time.Millisecond}
 }
 
 type previewRequest struct {

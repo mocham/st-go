@@ -7,6 +7,8 @@ const manualText = `ST-GO FILE BROWSER  USER MANUAL
 NAVIGATION
   Up/Down or click      select an entry
   PageUp/PageDown       jump by a screen
+  Ctrl+D               old last visible entry to top, select it
+  Ctrl+U               old first visible entry to bottom, select it
   Home/End              first/last entry
   Enter                 open file or enter directory
   Backspace             go to parent directory

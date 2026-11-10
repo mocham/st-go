@@ -7,6 +7,9 @@
 *.swp
 *.govim.swp.damaged-*
 
+# Local helper: per-module Go line counts
+/loc.sh
+
 # Logs
 *.log
 
