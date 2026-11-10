@@ -24,6 +24,9 @@ func (d *Driver) damage(r image.Rectangle) {
 	if r.Empty() {
 		return
 	}
+	if r.Empty() {
+		return
+	}
 	merged := false
 	for i, old := range d.dirty {
 		union := old.Union(r)
@@ -64,6 +67,23 @@ func (d *Driver) Upload(pixels []uint32, stride, x, y, w, h int) {
 		copy(d.pixels[row*d.width+r.Min.X:row*d.width+r.Max.X], pixels[row*stride+r.Min.X:row*stride+r.Max.X])
 	}
 	d.damage(r)
+}
+
+func (d *Driver) SetTextCursor(cursor api.TextCursor) {
+	if !cursor.Valid() {
+		cursor = api.TextCursor{}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.textCursor.Equal(cursor) {
+		return
+	}
+	old := d.textCursor.Bounds
+	d.textCursor.Bounds = cursor.Bounds
+	d.textCursor.Pixels = append(d.textCursor.Pixels[:0], cursor.Pixels...)
+	d.textCursor.Base = append(d.textCursor.Base[:0], cursor.Base...)
+	d.damage(old)
+	d.damage(cursor.Bounds)
 }
 
 type surface struct {
@@ -173,6 +193,13 @@ func (d *Driver) frames() []frame {
 				from := (y-s.bounds.Min.Y)*s.bounds.Dx() + clip.Min.X - s.bounds.Min.X
 				copy(f.pixels[at:at+clip.Dx()], s.pixels[from:from+clip.Dx()])
 			}
+		}
+		cursor := d.textCursor
+		clip := cursor.Bounds.Intersect(r)
+		for y := clip.Min.Y; y < clip.Max.Y; y++ {
+			at := (y-r.Min.Y)*r.Dx() + clip.Min.X - r.Min.X
+			from := (y-cursor.Bounds.Min.Y)*cursor.Bounds.Dx() + clip.Min.X - cursor.Bounds.Min.X
+			copy(f.pixels[at:at+clip.Dx()], cursor.Pixels[from:from+clip.Dx()])
 		}
 		frames = append(frames, f)
 	}

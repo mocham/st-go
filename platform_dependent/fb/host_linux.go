@@ -29,8 +29,8 @@ func RegisterFlags(fs *flag.FlagSet) api.OpenHost {
 	o := Options{}
 	fs.StringVar(&o.Device, "fb", "/dev/fb0", "Linux framebuffer device")
 	fs.StringVar(&o.TTY, "tty", "/dev/tty", "active Linux virtual console (not a PTY)")
-	fs.StringVar(&o.Mouse, "mouse", "auto", "evdev mouse paths (comma separated), auto, or none")
-	fs.BoolVar(&o.GrabMouse, "mouse-grab", false, "exclusively grab selected mice while the VT is active")
+	fs.StringVar(&o.Mouse, "mouse", "auto", "evdev mouse/touchpad paths (comma separated), auto, or none")
+	fs.BoolVar(&o.GrabMouse, "mouse-grab", false, "exclusively grab selected pointer devices while the VT is active")
 	fs.BoolFunc("mouse-list", "list mouse devices, access errors and capabilities without opening the framebuffer", func(value string) error {
 		enabled, err := strconv.ParseBool(value)
 		if err != nil {
@@ -58,6 +58,7 @@ type Driver struct {
 	console                 *console
 	keyboard                *keyboard
 	pixels                  []uint32
+	textCursor              api.TextCursor
 	surfaces                []*surface
 	clipboard               map[byte]string
 	pointer                 image.Point

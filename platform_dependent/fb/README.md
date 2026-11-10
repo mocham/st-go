@@ -27,7 +27,7 @@ there is no framebuffer-specific client channel or renderer rewrite.
   jobs or direct SSH takeover of another VT). The selected
   framebuffer must back that console (`FBIOGET_CON2FBMAP`). `-g`/`-i` cannot
   override the physical screen dimensions.
-* `-mouse auto`: scan up to 16 accessible relative evdev mice, rescan every two
+* `-mouse auto`: scan up to 16 accessible evdev mice/touchpads, rescan every two
   seconds, and recover after unplug/reconnect. Explicit comma-separated paths
   fail early if unavailable at startup; `-mouse none` disables discovery.
   Stable `/dev/input/by-id/*-event-mouse` paths are preferable to event numbers.
@@ -44,11 +44,18 @@ display owner against the same active framebuffer.
 
 ## Rendering and input
 
-Uniform `api.Painter` damage spans copy into retained terminal pixels and then
-into mapped scanout memory. Clean rows are not bridged. Independent preview
-surfaces are composited over terminal pixels, so a terminal erase cannot erase
-a retained preview. The software mouse pointer is another presentation overlay:
-moving it repaints only its old/new rectangles, never modifying terminal cells.
+Uniform `api.Painter` damage spans copy into retained, cursor-free terminal
+pixels. Preview surfaces are retained separately. A second presentation layer
+holds the text caret, system bar, and software mouse/touchpad pointer; moving or
+hiding an overlay restores its old rectangle from retained content without
+rerasterizing glyphs. Unchanged overlays are reapplied only where content damage
+intersects them. Clean rows are not bridged. Composition uses rectangle
+intersections and row spans, with a fast converter for common 32-bit layouts,
+rather than checking every layer at every content pixel. No second full-screen
+overlay framebuffer is allocated.
+
+The software mouse/touchpad pointer uses a **2× scale** (18×32 pixel bounds),
+with its hotspot at the unchanged top-left tip.
 
 A backend-owned bar overlays the **top-right corner**, above terminal and preview
 drawing and below the mouse pointer. It displays local `YYYY-MM-DD HH:MM:SS` and,
@@ -75,10 +82,32 @@ Evdev packets commit at `SYN_REPORT`, combine relative X/Y, track per-device
 button state and aggregate held buttons across mice. High-resolution wheel
 events accumulate 120 units per detent and are not double-counted with legacy
 wheel reports. `SYN_DROPPED` discards incomplete packets and queries current
-button state. Shift/Ctrl/Alt come from the console keyboard state. Absolute
-touchpads/tablets/touchscreens, pointer acceleration and gestures are not yet
-supported. Mouse events go through the neutral frontend's existing selection,
-region hit-testing and terminal mouse encoder, not directly to applications.
+button state. Shift/Ctrl/Alt come from the console keyboard state. Pointer events
+go through the neutral frontend's selection, region hit-testing and terminal
+mouse encoder, not directly to applications.
+
+### Touchpads
+
+Absolute evdev touchpads with `BTN_TOOL_FINGER`/`BTN_TOUCH` are discovered by the
+same `-mouse auto` or explicit-device option. Legacy `ABS_X/Y` and multitouch
+protocol-B slots are supported (up to 32 slots). Direct touchscreens/tablets
+are not treated as touchpads.
+
+- One finger moves the pointer relatively; landing/lifting/replacing fingers
+  establishes a new baseline rather than jumping to an absolute screen location.
+- Physical buttons support clicking and dragging. A short single-finger tap
+  produces a left click; physical clicks and larger movements suppress the tap.
+- Two-finger motion scrolls vertically/horizontally without moving the pointer.
+- Physical axis resolution controls sensitivity, with a range-based fallback;
+  fractional motion/wheel deltas accumulate across input packets.
+- Dropped packets cancel gestures and resynchronize physical buttons. VT switches,
+  native-video handoff and device removal clear gesture/button state.
+
+This is basic touchpad handling, not libinput feature parity. Acceleration,
+tap-and-drag, palm rejection, inertia, pinch/rotate, and multi-finger shortcuts
+are not implemented. Devices need legacy axes or protocol-B slots; protocol-A
+devices without legacy pointer emulation are unsupported. No new system library,
+input daemon, or package is required.
 
 Clipboard/PRIMARY text is local to this process; terminal authorization and
 bracketed paste remain unchanged. There is no desktop clipboard service.

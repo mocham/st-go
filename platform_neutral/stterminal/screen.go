@@ -405,7 +405,7 @@ func (t *Term) tmoveto(x, y int) {
 	t.c.state &^= cursorWrapNext
 	t.c.x = clamp(x, 0, t.col-1)
 	t.c.y = clamp(y, miny, maxy)
-	t.markDirty(t.c.x, t.c.y, t.c.x, t.c.y)
+	t.markCursorDirty()
 }
 
 var vt100_0 [62]rune
@@ -533,6 +533,7 @@ func (t *Term) tputtab(n int) {
 		}
 	}
 	t.c.x = clamp(x, 0, t.col-1)
+	t.markCursorDirty()
 }
 
 func (t *Term) tdefutf8(ascii rune) {
@@ -658,9 +659,9 @@ func (t *Term) Draw() Region {
 	return r
 }
 
-// DrawRegions paints dirty row spans and the old/new cursor cells in the same
-// serialized context as terminal mutation. Its returned rectangles cover only
-// those areas, never the clean rows between an edit, status line, or cursor.
+// DrawRegions paints dirty row spans in the same serialized context as terminal
+// mutation. Legacy hooks include old/new cursor cell damage; overlay-aware
+// frontends present caret changes separately without rerasterizing glyphs.
 func (t *Term) DrawRegions() []Region {
 	regions := t.TakeRegions()
 	if !t.xstartdraw() {
@@ -697,6 +698,11 @@ func (t *Term) DrawRegions() []Region {
 	}
 	t.xdrawcursor(cx, t.c.y, t.line[t.c.y][cx],
 		t.ocx, t.ocy, t.line[t.ocy][t.ocx])
+	t.cursorDirty = false
+	if overlay, ok := t.hooks.(CursorOverlayHooks); ok && overlay.CursorIsOverlay() {
+		t.ocx, t.ocy = cx, t.c.y
+		return painted
+	}
 	// Cursor painting restores its old cell and overlays its new cell. Keep
 	// these separate too; a cursor jump must not upload all intervening rows.
 	for _, cell := range [][2]int{{t.ocx, t.ocy}, {cx, t.c.y}} {

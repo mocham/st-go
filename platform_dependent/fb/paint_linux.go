@@ -10,6 +10,16 @@ import (
 	"st-go/platform_neutral/api"
 )
 
+const (
+	pointerScale  = 2
+	pointerWidth  = 9 * pointerScale
+	pointerHeight = 16 * pointerScale
+)
+
+func pointerBounds(p image.Point) image.Rectangle {
+	return image.Rectangle{Min: p, Max: p.Add(image.Pt(pointerWidth, pointerHeight))}
+}
+
 func (d *Driver) Show() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -26,28 +36,51 @@ func (d *Driver) paintRect(r image.Rectangle) {
 	}
 	l := d.screen.layout
 	r = r.Intersect(image.Rect(0, 0, l.width, l.height))
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		for x := r.Min.X; x < r.Max.X; x++ {
-			pixel := d.pixels[y*l.width+x]
-			for _, s := range d.surfaces {
-				if image.Pt(x, y).In(s.bounds) {
-					pixel = s.pixels[(y-s.bounds.Min.Y)*s.bounds.Dx()+x-s.bounds.Min.X]
+	// Content is copied in row spans. Layer intersection is determined once
+	// per rectangle, not once for every glyph/background pixel.
+	l.blit(d.screen.memory, r, image.Point{}, d.pixels, l.width)
+	for _, s := range d.surfaces {
+		l.blit(d.screen.memory, r.Intersect(s.bounds), s.bounds.Min, s.pixels, s.bounds.Dx())
+	}
+	c := d.textCursor
+	l.blit(d.screen.memory, r.Intersect(c.Bounds), c.Bounds.Min, c.Pixels, c.Bounds.Dx())
+	if b := d.systemBar; b != nil {
+		l.blit(d.screen.memory, r.Intersect(b.bounds), b.bounds.Min, b.pixels, b.bounds.Dx())
+	}
+	if d.pointerVisible {
+		clip := r.Intersect(pointerBounds(d.pointer))
+		for y := clip.Min.Y; y < clip.Max.Y; y++ {
+			for x := clip.Min.X; x < clip.Max.X; x++ {
+				if pixel, ok := pointerPixel(x-d.pointer.X, y-d.pointer.Y); ok {
+					l.pixel(d.screen.memory, x, y, pixel)
 				}
 			}
-			if b := d.systemBar; b != nil && image.Pt(x, y).In(b.bounds) {
-				pixel, _ = b.pixel(x, y)
-			}
-			if d.pointerVisible {
-				if value, ok := pointerPixel(x-d.pointer.X, y-d.pointer.Y); ok {
-					pixel = value
-				}
-			}
-			l.pixel(d.screen.memory, x, y, pixel)
 		}
 	}
 }
+
+func (d *Driver) SetTextCursor(cursor api.TextCursor) {
+	if !cursor.Valid() {
+		cursor = api.TextCursor{}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.closed || d.textCursor.Equal(cursor) {
+		return
+	}
+	old := d.textCursor.Bounds
+	d.textCursor.Bounds = cursor.Bounds
+	d.textCursor.Pixels = append(d.textCursor.Pixels[:0], cursor.Pixels...)
+	d.textCursor.Base = append(d.textCursor.Base[:0], cursor.Base...)
+	d.paintRect(old)
+	d.paintRect(cursor.Bounds)
+}
 func pointerPixel(x, y int) (uint32, bool) {
-	if x < 0 || y < 0 || y >= 16 || x > y/2 || x >= 9 {
+	if x < 0 || y < 0 || x >= pointerWidth || y >= pointerHeight {
+		return 0, false
+	}
+	x, y = x/pointerScale, y/pointerScale
+	if x > y/2 {
 		return 0, false
 	}
 	if x == 0 || x == y/2 || y == 15 {
@@ -62,12 +95,15 @@ func (d *Driver) movePointer(p image.Point, visible bool) {
 	p.X = max(0, min(p.X, l.width-1))
 	p.Y = max(0, min(p.Y, l.height-1))
 	old, oldVisible := d.pointer, d.pointerVisible
+	if old == p && oldVisible == visible {
+		return
+	}
 	d.pointer, d.pointerVisible = p, visible
 	if oldVisible {
-		d.paintRect(image.Rectangle{Min: old, Max: old.Add(image.Pt(9, 16))})
+		d.paintRect(pointerBounds(old))
 	}
 	if visible {
-		d.paintRect(image.Rectangle{Min: p, Max: p.Add(image.Pt(9, 16))})
+		d.paintRect(pointerBounds(p))
 	}
 }
 func (d *Driver) Upload(pixels []uint32, stride, x, y, w, h int) {

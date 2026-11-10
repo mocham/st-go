@@ -49,6 +49,7 @@ type Driver struct {
 	callbacks        api.Callbacks
 	width, height    int
 	pixels           []uint32
+	textCursor       api.TextCursor
 	surfaces         []*surface
 	dirty            []image.Rectangle
 	wake             chan struct{}

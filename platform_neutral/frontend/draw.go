@@ -69,6 +69,13 @@ func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
 	if fbW < 1 || fbH < 1 {
 		return
 	}
+	w, img := t.glyphPixels(u, fg, bg, wide)
+	px := t.borderpx + x*t.cw
+	py := t.borderpx + y*t.ch
+	t.blitTerminalPixels(px, py, w, t.ch, img)
+}
+
+func (t *Terminal) glyphPixels(u rune, fg, bg uint32, wide bool) (int, []uint32) {
 	w := t.cw
 	if wide {
 		w *= 2
@@ -80,7 +87,7 @@ func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
 	if !ok {
 		_, img = makeGlyph(u, fg, bg, w, t.ch, t.baseline)
 		if len(img) == 0 {
-			return
+			return 0, nil
 		}
 		glyphMu.Lock()
 		if size := len(img) * 4; size <= maxGlyphCacheBytes {
@@ -95,10 +102,7 @@ func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
 		}
 		glyphMu.Unlock()
 	}
-	// blit into framebuffer
-	px := t.borderpx + x*t.cw
-	py := t.borderpx + y*t.ch
-	t.blitTerminalPixels(px, py, w, t.ch, img)
+	return w, img
 }
 
 // Clip at the final pixel write as well as at the logical terminal grid. In
@@ -156,80 +160,6 @@ func (t *Terminal) DrawLine(line []term.Glyph, x1, y1, x2 int) {
 		bg := t.resolveBG(g)
 		wide := g.Mode&term.ATTRWide != 0
 		t.drawGlyphAt(g.U, fg, bg, x, y1, wide)
-	}
-}
-
-// DrawCursor ports x.c xdrawcursor.
-func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, ox, oy int, og term.Glyph) {
-	// remove the old cursor
-	if t.termCore.Selected(ox, oy) {
-		og.Mode ^= term.ATTRReverse
-	}
-	if og.U == term.ImageRune {
-		t.drawImageCell(og, ox, oy)
-	} else {
-		t.drawGlyphAt(og.U, t.resolveFG(og), t.resolveBG(og), ox, oy, og.Mode&term.ATTRWide != 0)
-	}
-
-	if t.winModeIs(term.ModeHide) {
-		return
-	}
-
-	// select the right colors
-	g.Mode &= term.ATTRBold | term.ATTRItalic | term.ATTRUnderline | term.ATTRStruck | term.ATTRWide
-
-	var drawcol uint32
-	sel := t.termCore.Selected(cx, cy)
-	if t.winModeIs(term.ModeReverse) {
-		g.Mode |= term.ATTRReverse
-		g.Bg = ColDefaultFg
-		if sel {
-			drawcol = t.colorAt(ColDefaultCs)
-			g.Fg = ColDefaultRcs
-		} else {
-			drawcol = t.colorAt(ColDefaultRcs)
-			g.Fg = ColDefaultCs
-		}
-	} else {
-		if sel {
-			g.Fg = ColDefaultFg
-			g.Bg = ColDefaultRcs
-		} else {
-			g.Fg = ColDefaultBg
-			g.Bg = ColDefaultCs
-		}
-		drawcol = t.colorAt(g.Bg)
-	}
-
-	// draw the new one
-	if t.winModeIs(term.ModeFocused) {
-		switch t.cursorShape {
-		case 7: // snowman
-			g.U = 0x2603
-			fallthrough
-		case 0, 1, 2: // block
-			if g.U == term.ImageRune {
-				t.drawImageCell(g, cx, cy)
-			} else {
-				t.drawGlyphAt(g.U, t.resolveFG(g), t.resolveBG(g), cx, cy, g.Mode&term.ATTRWide != 0)
-			}
-		case 3, 4: // underline
-			t.fillRect(drawcol, t.borderpx+cx*t.cw,
-				t.borderpx+(cy+1)*t.ch-int(t.cursorThick),
-				t.cw, int(t.cursorThick))
-		case 5, 6: // bar
-			t.fillRect(drawcol, t.borderpx+cx*t.cw,
-				t.borderpx+cy*t.ch,
-				int(t.cursorThick), t.ch)
-		}
-	} else {
-		// unfocused: 1px outline box
-		x := t.borderpx + cx*t.cw
-		y := t.borderpx + cy*t.ch
-		t.fillRect(drawcol, x, y, t.cw-1, 1)
-		t.fillRect(drawcol, x, y, 1, t.ch-1)
-		t.fillRect(drawcol, x+t.cw-1, y, 1, t.ch-1)
-		t.fillRect(drawcol, x, y+t.ch-1, t.cw, 1)
 	}
 }
 

@@ -97,7 +97,7 @@ func describeMice(w io.Writer, paths []string, infoFor func(string) mouseInfo, o
 		if info.relative {
 			kind = "relative pointer"
 		} else if info.absolute {
-			kind = "absolute-only device (not yet supported)"
+			kind = "absolute device (touchpad capabilities checked below)"
 		}
 		status := ""
 		m, err := open(path)
@@ -106,6 +106,10 @@ func describeMice(w io.Writer, paths []string, infoFor func(string) mouseInfo, o
 		} else {
 			available++
 			status = fmt.Sprintf("OK: relative mouse; high-resolution wheel=%t horizontal=%t", m.hiWheel, m.hiHWheel)
+			if m.touchpad != nil {
+				kind = "touchpad"
+				status = fmt.Sprintf("OK: touchpad; multitouch=%t", m.touchpad.multitouch)
+			}
 			m.close()
 		}
 		// Device names and errors may contain user/device supplied control bytes.

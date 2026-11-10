@@ -188,6 +188,7 @@ type Term struct {
 	// frontend's synchronous paint dispatcher.
 	dirtyRows          []Region
 	dirtyCount         int
+	cursorDirty        bool
 	syncOutput         bool
 	internalPaintDepth int
 	paintFn            func()
@@ -272,6 +273,12 @@ type WindowGeometryRequest struct {
 	Anchor     string
 	X, Y, W, H GeometryValue
 	RestoreTag string
+}
+
+// CursorOverlayHooks opts into caret presentation separate from glyph damage.
+// Legacy Hooks implementations still receive old/new cursor cell damage.
+type CursorOverlayHooks interface {
+	CursorIsOverlay() bool
 }
 
 // Hooks is the frontend interface (mirrors win.h).
@@ -466,21 +473,31 @@ func (t *Term) xsetcolorname(i int, s string) bool {
 func (t *Term) xgetcolor(i int) (byte, byte, byte, bool) {
 	return t.hooks.GetColor(i)
 }
-func (t *Term) xseticontitle(s string)    { t.hooks.SetIconTitle(s) }
-func (t *Term) xsettitle(s string)        { t.hooks.SetTitle(s) }
-func (t *Term) xsetcursor(i int) bool     { return t.hooks.SetCursor(i) }
+func (t *Term) xseticontitle(s string) { t.hooks.SetIconTitle(s) }
+func (t *Term) xsettitle(s string)     { t.hooks.SetTitle(s) }
+func (t *Term) xsetcursor(i int) bool {
+	invalid := t.hooks.SetCursor(i)
+	if !invalid {
+		t.markCursorDirty()
+	}
+	return invalid
+}
 func (t *Term) xsetmode(set bool, m uint) { t.hooks.SetMode(set, m) }
 func (t *Term) xsetpointermotion(on bool) { t.hooks.SetPointerMotion(on) }
 func (t *Term) xsetsel(s string)          { t.hooks.SetSel(s) }
 func (t *Term) xstartdraw() bool          { return t.hooks.StartDraw() }
 
 func (t *Term) setWinMode(set bool, mode uint) {
+	old := t.winMode
 	if set {
 		t.winMode |= mode
 	} else {
 		t.winMode &^= mode
 	}
 	t.hooks.SetMode(set, mode)
+	if (old^t.winMode)&ModeHide != 0 {
+		t.markCursorDirty()
+	}
 }
 
 func (t *Term) winModeIs(flag uint) bool { return t.winMode&flag != 0 }
@@ -732,7 +749,15 @@ func (t *Term) TakeRegions() []Region {
 func (t *Term) Invalidate(r Region) { t.markDirty(r.X1, r.Y1, r.X2, r.Y2) }
 
 // HasPendingPaint reports whether regions await repaint.
-func (t *Term) HasPendingPaint() bool { return t.dirtyCount > 0 }
+func (t *Term) HasPendingPaint() bool { return t.dirtyCount > 0 || t.cursorDirty }
+
+func (t *Term) markCursorDirty() {
+	if overlay, ok := t.hooks.(CursorOverlayHooks); ok && overlay.CursorIsOverlay() {
+		t.cursorDirty = true
+	} else {
+		t.markDirty(t.c.x, t.c.y, t.c.x, t.c.y)
+	}
+}
 
 // IsPaintPaused reports whether application synchronization or an internal
 // atomic update currently defers painting.

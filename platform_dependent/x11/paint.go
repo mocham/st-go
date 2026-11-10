@@ -19,6 +19,7 @@ func (t *Driver) Upload(framebuf []uint32, stride, px, py, w, h int) {
 	if w < 1 || h < 1 || len(framebuf) == 0 || t.conn == nil {
 		return
 	}
+	r := t.rememberCursorBase(framebuf, stride, image.Rect(px, py, px+w, py+h))
 	rowsPer := max(1, (262144-28)/(w*4))
 	rowsPer = min(rowsPer, h)
 	for ypos := 0; ypos < h; ypos += rowsPer {
@@ -37,6 +38,46 @@ func (t *Driver) Upload(framebuf []uint32, stride, px, py, w, h int) {
 		xproto.PutImage(t.conn, xproto.ImageFormatZPixmap, xproto.Drawable(t.win), t.gc,
 			uint16(w), uint16(chunkRows), int16(px), int16(py+ypos), 0, 24, pixelBytes(pixels))
 	}
+	if !r.Empty() {
+		t.putCursorPixels(t.textCursor.Bounds, t.textCursor.Pixels)
+	}
+}
+
+// Keep only the clean cell underneath the caret, never another screen. Content
+// updates must refresh this underlay before moving/hiding a stationary caret.
+func (t *Driver) rememberCursorBase(pixels []uint32, stride int, damage image.Rectangle) image.Rectangle {
+	r := damage.Intersect(t.textCursor.Bounds)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		at := (y-t.textCursor.Bounds.Min.Y)*t.textCursor.Bounds.Dx() + r.Min.X - t.textCursor.Bounds.Min.X
+		copy(t.textCursor.Base[at:at+r.Dx()], pixels[y*stride+r.Min.X:y*stride+r.Max.X])
+	}
+	return r
+}
+
+func (t *Driver) putCursorPixels(bounds image.Rectangle, pixels []uint32) {
+	if !bounds.Empty() && t.conn != nil {
+		w := bounds.Dx()
+		rows := max(1, (262144-28)/(w*4))
+		for y := 0; y < bounds.Dy(); y += rows {
+			n := min(rows, bounds.Dy()-y)
+			xproto.PutImage(t.conn, xproto.ImageFormatZPixmap, xproto.Drawable(t.win), t.gc,
+				uint16(w), uint16(n), int16(bounds.Min.X), int16(bounds.Min.Y+y), 0, 24, pixelBytes(pixels[y*w:(y+n)*w]))
+		}
+	}
+}
+
+func (t *Driver) SetTextCursor(cursor api.TextCursor) {
+	if !cursor.Valid() {
+		cursor = api.TextCursor{}
+	}
+	if t.textCursor.Equal(cursor) {
+		return
+	}
+	t.putCursorPixels(t.textCursor.Bounds, t.textCursor.Base)
+	t.textCursor.Bounds = cursor.Bounds
+	t.textCursor.Pixels = append(t.textCursor.Pixels[:0], cursor.Pixels...)
+	t.textCursor.Base = append(t.textCursor.Base[:0], cursor.Base...)
+	t.putCursorPixels(cursor.Bounds, t.textCursor.Pixels)
 }
 
 type Surface struct {

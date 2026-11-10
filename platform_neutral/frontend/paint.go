@@ -55,6 +55,7 @@ func (t *Terminal) paint() {
 	if t.closed() || t.termCore == nil || t.termCore.IsPaintPaused() {
 		return
 	}
+	defer t.presentTextCursor()
 	full := t.displayRegions.fullDirty
 	if full {
 		t.clearFramebuffer()

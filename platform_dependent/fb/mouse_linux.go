@@ -20,6 +20,7 @@ const (
 	evSyn       = 0
 	evKey       = 1
 	evRelative  = 2
+	evAbsolute  = 3
 	synReport   = 0
 	synDropped  = 3
 	relX        = 0
@@ -43,9 +44,10 @@ type mouse struct {
 	buttons               [12]bool
 	changes               []buttonChange
 	queryButtons          func() ([12]bool, error)
+	touchpad              *touchpad
 }
 
-var errNotRelativeMouse = errors.New("not a relative mouse (REL_X, REL_Y and BTN_LEFT required)")
+var errNotRelativeMouse = errors.New("not a supported relative mouse or absolute touchpad")
 
 type mouseQuery func(uintptr, unsafe.Pointer) error
 
@@ -120,10 +122,13 @@ func configureMouse(fd int, path string, query mouseQuery) (*mouse, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !hasBit(rel, relX) || !hasBit(rel, relY) || !hasBit(keys, 0x110) {
-		return nil, errNotRelativeMouse
-	}
 	m := &mouse{fd: fd, path: path, hiWheel: hasBit(rel, relWheelHi), hiHWheel: hasBit(rel, relHWheelHi)}
+	if !hasBit(rel, relX) || !hasBit(rel, relY) || !hasBit(keys, 0x110) {
+		m.touchpad, err = configureTouchpad(keys, query)
+		if err != nil {
+			return nil, err
+		}
+	}
 	m.queryButtons = func() ([12]bool, error) {
 		var state [12]bool
 		var bits [96]byte
@@ -158,6 +163,9 @@ func (m *mouse) reset() {
 	m.hWheel = 0
 	m.changes = nil
 	m.dropped = false
+	if m.touchpad != nil {
+		m.touchpad.reset()
+	}
 }
 func (m *mouse) drain() {
 	var buf [4096]byte
@@ -202,7 +210,7 @@ func (d *Driver) scanMice(initial bool) error {
 			// Auto discovery used to discard all failures here, making a mouse
 			// permission/ioctl problem indistinguishable from broken input.
 			info := readMouseInfo(path)
-			if !errors.Is(err, errNotRelativeMouse) && (!info.relKnown || info.relative) {
+			if !errors.Is(err, errNotRelativeMouse) && (!info.relKnown || info.relative || info.absolute) {
 				d.reportMouseFailure(path, fmt.Sprintf("%q: %v", info.name, err))
 			}
 			if initial && !auto {
@@ -224,7 +232,7 @@ func (d *Driver) scanMice(initial bool) error {
 		d.mice = append(d.mice, m)
 	}
 	if initial && auto && len(d.mice) == 0 {
-		limits.Report("fb mouse", "no accessible relative mice; run st-fb -mouse-list on the host to check device nodes, permissions and capabilities; keyboard-only until a mouse is discovered")
+		limits.Report("fb mouse", "no accessible mice/touchpads; run st-fb -mouse-list on the host to check device nodes, permissions and capabilities; keyboard-only until a pointer is discovered")
 	}
 	return nil
 }
@@ -288,6 +296,13 @@ func (m *mouse) event(d *Driver, kind, code uint16, value int32) error {
 				return err
 			}
 			m.dropped = false
+			if m.touchpad != nil {
+				touching, err := m.touchpad.queryContact()
+				if err != nil {
+					return err
+				}
+				m.touchpad.suppressed = touching
+			}
 			for button := byte(1); button < 12; button++ {
 				if state[button] != m.buttons[button] {
 					d.changeButton(m, button, state[button])
@@ -321,6 +336,9 @@ func (m *mouse) event(d *Driver, kind, code uint16, value int32) error {
 			}
 		}
 	case evKey:
+		if m.touchpad != nil {
+			m.touchpad.key(code, value)
+		}
 		if button := mouseButton(code); button != 0 && (value == 0 || value == 1) {
 			if len(m.changes) >= 64 {
 				m.reset()
@@ -329,8 +347,15 @@ func (m *mouse) event(d *Driver, kind, code uint16, value int32) error {
 			}
 			m.changes = append(m.changes, buttonChange{button, value == 1})
 		}
+	case evAbsolute:
+		if m.touchpad != nil {
+			m.touchpad.absolute(code, value)
+		}
 	case evSyn:
 		if code == synReport {
+			if m.touchpad != nil {
+				m.touchpad.flush(m)
+			}
 			m.flush(d)
 		}
 	}

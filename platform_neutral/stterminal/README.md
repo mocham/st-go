@@ -261,6 +261,20 @@ fallback to launching DRM mpv on a PTY.
 [`api/native_video.go`](../api/native_video.go) define the narrow native-video
 hook and host contracts. These capabilities remain display-backend-neutral.
 
+### Caret presentation
+
+`CursorOverlayHooks` lets the frontend keep the terminal text caret out of glyph
+content. Cursor position, visibility, shape, and tab changes queue separate caret
+damage while still obeying synchronized output and the normal paint scheduler.
+Legacy hook implementations retain the original old/new-cell damage behavior.
+
+All bundled backends implement
+[`api.TextCursorPainter`](../api/text_cursor.go). A cell-sized opaque cursor tile
+and clean underlay are retained independently of terminal content; moving or
+hiding it does not rerasterize glyphs. This is separate from the mouse pointer:
+X11/web use their native pointer, while framebuffer owns its software pointer
+and system-bar overlays. See [frontend rendering](../frontend/README.md#rendering-and-caching).
+
 ## Multiplexers
 
 tmux reserves DCS for its own protocol and does not forward these frames from a

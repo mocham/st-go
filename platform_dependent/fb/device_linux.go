@@ -7,6 +7,7 @@ package fb
 import (
 	"encoding/binary"
 	"fmt"
+	"image"
 	"runtime"
 	"structs"
 	"unsafe"
@@ -168,6 +169,35 @@ func channel(value uint32, c bitfield) uint32 {
 	}
 	return uint32(uint64(value)*((1<<c.Length)-1)/255) << c.Offset
 }
+
+// blit presents an already-clipped opaque rectangle. Common 32-bit RGB layouts
+// avoid per-channel scaling; uncommon formats retain the validated converter.
+func (l layout) blit(memory []byte, r image.Rectangle, origin image.Point, pixels []uint32, stride int) {
+	if r.Empty() {
+		return
+	}
+	fast := l.bytes == 4 && l.red == (bitfield{Offset: 16, Length: 8}) && l.green == (bitfield{Offset: 8, Length: 8}) && l.blue == (bitfield{Length: 8}) && (l.alpha.Length == 0 || l.alpha == (bitfield{Offset: 24, Length: 8}))
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		at := (y-origin.Y)*stride + r.Min.X - origin.X
+		row := pixels[at : at+r.Dx()]
+		if fast {
+			offset := (y+l.yOffset)*l.stride + (r.Min.X+l.xOffset)*4
+			dst := memory[offset : offset+len(row)*4]
+			mask := uint32(0)
+			if l.alpha.Length != 0 {
+				mask = 0xff000000
+			}
+			for x, pixel := range row {
+				binary.NativeEndian.PutUint32(dst[x*4:], pixel&0xffffff|mask)
+			}
+		} else {
+			for x, pixel := range row {
+				l.pixel(memory, r.Min.X+x, y, pixel)
+			}
+		}
+	}
+}
+
 func (l layout) pixel(memory []byte, x, y int, argb uint32) {
 	pixel := channel(argb>>16&255, l.red) | channel(argb>>8&255, l.green) | channel(argb&255, l.blue) | channel(255, l.alpha)
 	offset := (y+l.yOffset)*l.stride + (x+l.xOffset)*l.bytes

@@ -39,6 +39,7 @@ type Terminal struct {
 	title, iconTitle                  string
 	lockTitle                         bool
 	cursorShape, cursorThick          int
+	textCursor                        api.TextCursor
 	winMode, ignoreMod                uint
 	forceMouseMod                     uint16
 	doubleClick, tripleClick, blinkMs uint

@@ -16,6 +16,7 @@ type (
 	CSIEscape             = stterminal.CSIEscape
 	STREscape             = stterminal.STREscape
 	Hooks                 = stterminal.Hooks
+	CursorOverlayHooks    = stterminal.CursorOverlayHooks
 	ImageDecodeOptions    = stterminal.ImageDecodeOptions
 	GeometryUnit          = stterminal.GeometryUnit
 	GeometryValue         = stterminal.GeometryValue

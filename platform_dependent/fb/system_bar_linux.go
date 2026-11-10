@@ -28,6 +28,7 @@ type systemBar struct {
 	text            string
 	bounds          image.Rectangle
 	textLeft        int
+	pixels          []uint32
 }
 
 // Called by New and the input loop, not by a separate timer/goroutine. Sysfs
@@ -59,6 +60,12 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	b.bounds = image.Rect(max(0, l.width-width), 0, l.width, min(l.height, 2*systemBarPadding+systemBarFontCellHeight))
 	// Keep the right edge (including battery) visible even on a narrow display.
 	b.textLeft = l.width - width + systemBarPadding
+	b.pixels = make([]uint32, b.bounds.Dx()*b.bounds.Dy())
+	for y := b.bounds.Min.Y; y < b.bounds.Max.Y; y++ {
+		for x := b.bounds.Min.X; x < b.bounds.Max.X; x++ {
+			b.pixels[(y-b.bounds.Min.Y)*b.bounds.Dx()+x-b.bounds.Min.X], _ = b.pixel(x, y)
+		}
+	}
 	// If the battery disappears or its percentage shrinks, restore the uncovered
 	// area from retained application pixels. paintRect also suppresses inactive
 	// VT writes; acquire will compose the most recently cached bar on return.

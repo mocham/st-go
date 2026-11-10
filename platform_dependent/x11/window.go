@@ -28,9 +28,10 @@ const (
 )
 
 type Driver struct {
-	conn *xgb.Conn
-	xu   *xgbutil.XUtil
-	scr  *xproto.ScreenInfo
+	textCursor api.TextCursor
+	conn       *xgb.Conn
+	xu         *xgbutil.XUtil
+	scr        *xproto.ScreenInfo
 
 	win    xproto.Window
 	pixmap xproto.Pixmap

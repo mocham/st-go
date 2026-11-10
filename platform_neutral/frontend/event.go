@@ -93,7 +93,7 @@ func (t *Terminal) focus(focused bool) {
 		}
 		t.termCore.WriteToTTY([]byte(sequence), false)
 	}
-	t.termCore.Redraw()
+	t.paint()
 }
 
 // resize recomputes cols/rows and resizes the terminal.

@@ -56,6 +56,13 @@ writes the entry and its `stterm-256color` alias under
 
 ## Rendering and caching
 
+Glyph/image content stays separate from the terminal text caret. The frontend
+prepares a small caret tile and clean underlay through `api.TextCursorPainter`;
+cursor movement, hiding, shape and focus changes do not dirty glyph cells.
+Backends restore/recompose only the affected caret rectangles. X11 and browsers
+retain native mouse pointers; software mouse/touchpad pointer and system-bar
+painting belong exclusively to the framebuffer backend.
+
 The frontend decodes PNG, JPEG, GIF, BMP, and TGA through stb_image, WebP through
 libwebp, and PDF through static Poppler/Splash, including embedded JPEG images.
 Availability depends on the [build profile](../BUILDING.md#build-targets).
