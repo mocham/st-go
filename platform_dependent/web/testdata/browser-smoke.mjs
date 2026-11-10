@@ -47,7 +47,7 @@ function fixture() {
 let server, browser, socket;
 let serverLog = "", browserLog = "";
 try {
-  server = spawn(path.join(root, "BINARIES/st-web"), ["-port", "0", "-dir", dir, "-e", "/bin/sh"]);
+  server = spawn(path.join(root, "BINARIES/st-web"), ["-port", "0", "-config", path.join(root, "functionalities/config/config.json"), "-dir", dir, "-e", "/bin/sh"]);
   server.on("error", error => { serverLog += error.message; });
   server.stdout.on("data", data => { serverLog += data; });
   server.stderr.on("data", data => { serverLog += data; });
@@ -89,7 +89,14 @@ try {
   await command("Emulation.setDeviceMetricsOverride", { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
   await command("Page.navigate", { url: address });
   await wait(() => evaluate('Number(document.querySelector("canvas")?.dataset.frames || 0) > 0'), "canvas pixels");
-  await wait(() => evaluate('document.querySelector("canvas").width === 800 && document.querySelector("canvas").height === 564'), "initial terminal size");
+  await wait(() => evaluate('document.querySelector("canvas").width === 1282 && document.querySelector("canvas").height === 674'), "configured terminal size");
+  if (!await evaluate(`(() => { const c = document.querySelector("canvas"), r = c.getBoundingClientRect(); return r.width === c.width && r.height === c.height; })()`)) {
+    throw new Error("Canvas pixels were CSS-scaled");
+  }
+  await command("Emulation.setDeviceMetricsOverride", { width: 800, height: 600, deviceScaleFactor: 2, mobile: false });
+  await wait(() => evaluate(`(() => { const c = document.querySelector("canvas"), r = c.getBoundingClientRect(); return devicePixelRatio === 2 && r.width === c.width / 2 && r.height === c.height / 2; })()`), "device-pixel canvas dimensions");
+  await command("Emulation.setDeviceMetricsOverride", { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
+  await wait(() => evaluate(`(() => { const c = document.querySelector("canvas"), r = c.getBoundingClientRect(); return devicePixelRatio === 1 && r.width === c.width && r.height === c.height; })()`), "restored 1:1 canvas dimensions");
   async function type(text) {
     await command("Input.insertText", { text });
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
@@ -149,16 +156,17 @@ try {
   await wait(() => evaluate(greenPixels(true)), "retained preview survives erase");
   await type(`printf '\\033Pregion reset\\033\\'`);
   await command("Emulation.setDeviceMetricsOverride", { width: 1000, height: 700, deviceScaleFactor: 1, mobile: false });
-  await wait(() => evaluate('document.querySelector("canvas").width === 1000 && document.querySelector("canvas").height === 664'), "live resize");
+  await delay(150);
+  if (!await evaluate('document.querySelector("canvas").width === 1282 && document.querySelector("canvas").height === 674')) throw new Error("Browser viewport resized the terminal canvas");
   await type("stty size > browser.size");
-  await wait(fileEquals("browser.size", "23 62"), "PTY resize");
+  await wait(fileEquals("browser.size", "24 80"), "fixed PTY geometry");
   await evaluate("window.__reloadMarker = true");
   await command("Page.reload");
   await wait(() => evaluate('!window.__reloadMarker && Number(document.querySelector("canvas")?.dataset.frames || 0) > 0'), "reconnect pixels");
   await type("printf '%s' reconnected > browser.reconnected");
   await wait(fileEquals("browser.reconnected", "reconnected"), "reconnected PTY input");
   if (pageErrors.length) throw new Error("JavaScript errors: " + pageErrors.join("\n"));
-  console.log("PASS: Chromium canvas, keyboard/IME, clipboard/paste, SGR mouse, cwd, image, retained pane, ignored title, resize and reconnect.");
+  console.log("PASS: Chromium 1:1 canvas, keyboard/IME, clipboard/paste, SGR mouse, cwd, image, retained pane, fixed geometry and reconnect.");
   console.log("Test artifacts: " + dir);
 } catch (error) {
   console.error(serverLog, browserLog);

@@ -20,9 +20,13 @@ Terminal flags must precede `-e`.
 One server runs one terminal session with one attached browser at a time.
 Closing/reloading the browser leaves the PTY running; reconnecting receives its
 current pixels. Shell exit stops the server; Ctrl-C in the server's launching
-terminal stops it too. Browser resizing updates the PTY dimensions. Keyboard/IME,
-mouse reporting, selections, bracketed paste, images/PDFs, and retained previews
-use the same terminal engine and [text protocols](../../platform_neutral/stterminal/README.md).
+terminal stops it too. The configured terminal geometry remains fixed when the
+browser window changes: canvas presentation compensates for `devicePixelRatio`
+so each server-rendered glyph/image pixel maps to one browser device pixel. A
+smaller viewport scrolls instead of fitting or rerasterizing the terminal.
+Keyboard/IME, mouse reporting, selections, bracketed paste,
+images/PDFs, and retained previews use the same terminal engine and
+[text protocols](../../platform_neutral/stterminal/README.md).
 
 ## Ownership and protocol
 
@@ -42,8 +46,9 @@ use the same terminal engine and [text protocols](../../platform_neutral/sttermi
 * One browser controls the one server session. Disconnecting leaves its PTY
   alive; reconnecting gets a full snapshot. Idle heartbeats expire vanished
   attachments after 90 seconds. Slow writes time out after five seconds.
-* Titles/icon titles and `BAR_DATA` are ignored. Browser viewport resizing is
-  supported; desktop placement/collapse/restore is deliberately unsupported.
+* Titles/icon titles and `BAR_DATA` are ignored. Browser viewport resizing does
+  not resize the terminal; desktop placement/collapse/restore is deliberately
+  unsupported.
 
 Clipboard text stays terminal-owned. Selection/OSC 52 writes make the toolbar's
 Copy action available, rather than attempting unsolicited browser clipboard
@@ -68,7 +73,7 @@ multi-user authentication or reverse-proxy configuration. Direct exposure on
 an untrusted network is not safe.
 
 This is a native Linux server, not a `js/wasm` build. A modern browser with
-canvas, WebSocket, `createImageBitmap` and `ResizeObserver` is needed. Canvas
+canvas, WebSocket and `createImageBitmap` is needed. Canvas
 pixels do not provide a semantic accessibility tree. Browser/OS-reserved
 shortcuts may be unavailable to the terminal; Esc and Tab toolbar buttons
 provide basic alternatives. HTTP outside loopback may disable Clipboard APIs.

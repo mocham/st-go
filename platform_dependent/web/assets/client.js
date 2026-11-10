@@ -6,8 +6,8 @@
   const status = document.getElementById("status");
   const copy = document.getElementById("copy");
   const ctx = screen.getContext("2d", { alpha: false });
-  let socket, metrics, composing = false, clipboard = "", reconnect;
-  let paintQueue = Promise.resolve(), resizeTimer, wheel = 0;
+  let socket, composing = false, clipboard = "", reconnect, screenRatio = 0;
+  let paintQueue = Promise.resolve(), wheel = 0;
   const utf8 = new TextEncoder();
   const message = text => { status.textContent = text; };
   const send = value => {
@@ -25,14 +25,23 @@
     catch (_) { message("Clipboard write denied by browser"); }
     focus();
   };
-  const resize = () => {
-    if (!metrics) return;
-    const width = Math.max(2 * metrics.border + metrics.cellWidth, Math.floor(viewport.clientWidth));
-    const height = Math.max(2 * metrics.border + metrics.cellHeight, Math.floor(viewport.clientHeight));
-    if (width * height * 4 > 64 * 1024 * 1024) { message("Viewport exceeds pixel budget"); return; }
-    send({ type: "resize", width, height });
+  const sizeScreen = (width, height) => {
+    if (!width || !height) return;
+    if (screen.width !== width || screen.height !== height) {
+      screen.width = width; screen.height = height;
+    }
+    const ratio = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+    // Keep one server-rendered pixel per browser device pixel. CSS pixels can
+    // differ under display scaling or browser zoom, so compensate only the
+    // presentation size without resizing/rerasterizing the terminal buffer.
+    screen.style.width = width / ratio + "px"; screen.style.height = height / ratio + "px";
+    screenRatio = ratio;
   };
-  new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 60); }).observe(viewport);
+  window.addEventListener("resize", () => sizeScreen(screen.width, screen.height), { passive: true });
+  setInterval(() => {
+    const ratio = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+    if (ratio !== screenRatio) sizeScreen(screen.width, screen.height);
+  }, 250);
 
   async function paint(data) {
     if (data.byteLength < 28) throw new Error("Short pixel frame");
@@ -44,10 +53,7 @@
     const bitmap = await createImageBitmap(new Blob([data.slice(28)], { type: "image/png" }));
     try {
       if (bitmap.width !== w || bitmap.height !== h) throw new Error("Pixel dimensions differ");
-      if (screen.width !== width || screen.height !== height) {
-        screen.width = width; screen.height = height;
-        screen.style.width = width + "px"; screen.style.height = height + "px";
-      }
+      sizeScreen(width, height);
       ctx.drawImage(bitmap, x, y);
       screen.dataset.frames = String(Number(screen.dataset.frames || 0) + 1);
     } finally { bitmap.close(); }
@@ -61,12 +67,12 @@
     socket.binaryType = "arraybuffer";
     socket.onmessage = event => {
       if (typeof event.data !== "string") {
-        // Image decoding is asynchronous; commit in wire order, including resize.
+        // Image decoding is asynchronous; commit damage frames in wire order.
         paintQueue = paintQueue.then(() => paint(event.data)).catch(error => { message(error.message); socket.close(); });
         return;
       }
       const data = JSON.parse(event.data);
-      if (data.type === "hello") { metrics = data; message("Connected"); resize(); focus(); send({ type: "focus", focused: true }); }
+      if (data.type === "hello") { sizeScreen(data.width, data.height); message("Connected"); focus(); send({ type: "focus", focused: true }); }
       else if (data.type === "clipboard") { clipboard = data.text || ""; copy.disabled = false; message("Selection ready to copy"); }
       else if (data.type === "clipboard_read") {
         const replySocket = socket;

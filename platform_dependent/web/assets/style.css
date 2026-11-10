@@ -6,6 +6,6 @@ header { flex: 0 0 36px; display: flex; gap: 10px; align-items: center; padding:
 #status { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #ccc; }
 button { border: 1px solid #666; border-radius: 3px; background: #333; color: #eee; padding: 2px 9px; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
-#viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; }
-#screen { position: absolute; top: 0; left: 0; display: block; }
+#viewport { position: relative; flex: 1; min-height: 0; overflow: auto; }
+#screen { display: block; max-width: none; max-height: none; }
 #input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; pointer-events: none; }
