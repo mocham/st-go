@@ -8,6 +8,8 @@ the X code or the terminal core.
 `platform_neutral/stterminal/` (`term/` is a compatibility shim). Shared former
 root files live under `platform_neutral/frontend/`; native X operations live
 under `platform_dependent/x11/`. See the [split notes](platform_neutral/README.md).
+The current [terminal protocol reference](platform_neutral/stterminal/README.md)
+lives beside the engine; the notes below also describe historical implementations.
 The historical behavior notes still apply. `make test` remains the full suite;
 frontend-only test commands should target `./platform_neutral/frontend`.
 
@@ -201,9 +203,11 @@ modes are only gated in the term core; the frontend hooks must mirror them.
   **stopping at the last screen row** (no scrolling) — used for a file-browser
   text preview pane. Text vs image/PDF is sniffed by content (`looksLikeText`:
   PNG/PDF/WebP/JPEG/GIF/BMP magic, NUL/control-byte heuristics).
-- **Never have the terminal emit responses** (e.g. writing a page count back to
-  the pty). It is fragile (echo/raw-mode interactions) and races the script's
-  read. Keep the protocol one-way: script → terminal.
+- Legacy cursor-placement image commands do not require terminal replies.
+  Newer region, PDF search/metadata, and native-video protocols use explicitly
+  framed responses. Clients must parse these in their terminal input loop,
+  manage termios, and correlate tokens/IDs rather than racing a shell `read`.
+  See the [current protocol reference](platform_neutral/stterminal/README.md).
 
 ### 2.10 Draw/framebuffer
 

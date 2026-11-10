@@ -1,25 +1,34 @@
-# First-round platform split
+# Platform-neutral terminal
 
-The first round was a relocation and thin-adapter refactor, not a new frontend framework or
-a new backend. All clients still use the terminal's existing ANSI/OSC/DCS text
-protocol; its behavior and the existing X11 build target names are unchanged.
-The subsequent [web backend](../platform_dependent/web/README.md) implements
-the same contracts with an embedded server/browser client (`make st-web`).
-The [framebuffer backend](../platform_dependent/fb/README.md) implements them on
-a Linux console with fbdev output and evdev mice (`make st-fb`).
+The shared terminal engine, frontend, and host contracts serve the X11, Linux
+framebuffer, and web-browser backends. Clients communicate using ANSI/OSC/DCS
+terminal text rather than native display connections.
+
+## Documentation
+
+- [Building, targets, testing, packaging, and licensing](BUILDING.md)
+- [Shared frontend usage, configuration, rendering, and resource limits](frontend/README.md)
+- [Terminal engine and custom protocols](stterminal/README.md): DCS display DSL,
+  retained regions/lists, PDF search/metadata, clipboard policy, and native-video requests
+- [Backend guides](../platform_dependent/README.md):
+  [X11](../platform_dependent/x11/README.md),
+  [framebuffer](../platform_dependent/fb/README.md), and
+  [web browser](../platform_dependent/web/README.md)
+- [Go applications](../demo-go/README.md) and [shell demos](../demo/README.md)
+- [Implementation caveats and historical porting notes](../CAVEAT.md)
 
 ## Layout
 
-* **`stterminal/`**: the original `term/` engine and tests, with its screen model,
-  ANSI/VT parser, DCS dispatch, selection, animation and damage tracking. Its
-  existing `Hooks` and optional capability interfaces remain neutral contracts.
+* **[`stterminal/`](stterminal/README.md)**: the original `term/` engine and tests,
+  with its screen model, ANSI/VT parser, DCS dispatch, selection, animation and
+  damage tracking. `Hooks` and optional capability interfaces are neutral contracts.
 * **`api/`**: uniform terminal-to-event-host callbacks, painting/surface
   contracts, startup values, and the existing geometry-string parser. No X
   handles or native event types cross these contracts.
-* **`frontend/`**: the former root terminal host: PTY scheduling, terminal key and
-  mouse encoding, software glyph/image painting, retained previews/lists, and
-  native-codec integration. Native events arrive as discrete callback calls;
-  the native event loop and representation are not generalized.
+* **[`frontend/`](frontend/README.md)**: the former root terminal host: PTY
+  scheduling, terminal key and mouse encoding, software glyph/image painting,
+  retained previews/lists, and native-codec integration. Native events arrive as
+  discrete callback calls; the native event loop and representation are not generalized.
 * **`../platform_dependent/x11/`**: XGB resources, native event decoding,
   keyboard lookup, clipboard ownership/transfers, window-manager operations,
   and X pixel/pane presentation. These use the same request ordering, pixel
@@ -32,7 +41,7 @@ a Linux console with fbdev output and evdev mice (`make st-fb`).
 The root **`term/`** package is a type-alias/forwarding compatibility shim, not a
 second engine. Existing demo/client imports continue to work. Shared public
 helpers (`config`, `limits`, `pdfmeta`, `tui`, etc.) retain their existing paths
-in this first pass to avoid unrelated import churn.
+to avoid unrelated client import churn.
 
 ## Dependencies and ownership
 
@@ -49,15 +58,14 @@ dispatches semantic calls back into the host. The terminal engine never imports
 a display backend. The architecture test rejects backend imports in neutral
 production code; explicitly native integration tests may import XGB.
 
-This pass deliberately preserves the existing locks, global raster/cache state,
-timers, terminal protocols, configuration/key bindings, and feature boundaries.
-The original split did not add backend selection or a universal event model.
-The web follow-up adds committed UTF-8 input alongside existing key/paste
-callbacks and an optional geometry-support check; unsupported desktop geometry
-must not arm click-to-restore interception in a browser.
-The fbdev follow-up uses the same APIs. Initial physical sizing happens before
-PTY startup, and PTY exit returns through host cleanup rather than `os.Exit`,
-so Linux console keyboard/display modes can be restored.
+The separation preserves the existing locks, global raster/cache state, timers,
+terminal protocols, configuration/key bindings, and feature boundaries, without
+introducing a universal native event model. The web host accepts committed UTF-8
+input alongside key/paste callbacks and advertises unsupported desktop geometry,
+so click-to-restore interception is not armed in a browser. The framebuffer host
+uses the same APIs. Physical sizing happens before PTY startup, and PTY exit
+returns through host cleanup rather than `os.Exit`, so Linux console modes can
+be restored.
 
 Here **platform-neutral means display-backend-neutral**. The relocated host
 still uses Linux PTYs/signals and native FreeType/Poppler/WebP support. Making it

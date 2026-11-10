@@ -12,6 +12,18 @@ Use absolute program paths or programs on PATH when combining `-e` with `-dir`.
 Copying this one binary is enough; all browser assets and built-in fonts are
 embedded. There is no X connection or browser-side terminal reimplementation.
 
+Use the complete random session URL printed by the server, such as
+`http://127.0.0.1:8080/t/<token>/`. `-dir` selects the initial server-side PTY and
+relative-preview directory; it is not a browser file picker or static-file root.
+Terminal flags must precede `-e`.
+
+One server runs one terminal session with one attached browser at a time.
+Closing/reloading the browser leaves the PTY running; reconnecting receives its
+current pixels. Shell exit stops the server; Ctrl-C in the server's launching
+terminal stops it too. Browser resizing updates the PTY dimensions. Keyboard/IME,
+mouse reporting, selections, bracketed paste, images/PDFs, and retained previews
+use the same terminal engine and [text protocols](../../platform_neutral/stterminal/README.md).
+
 ## Ownership and protocol
 
 * The existing neutral frontend owns the Linux PTY, terminal parser, software
@@ -40,6 +52,11 @@ bracketed-paste handling). Authorized OSC 52 reads ask the browser and fail
 after 1.5 seconds or on denial/disconnect. Browsers may require an explicit
 gesture or permission; native Ctrl-Shift-V remains the fallback.
 
+Select with the mouse (Shift overrides application mouse reporting), then use
+**Copy** or Ctrl-Shift-C. Use native Ctrl-Shift-V or the **Paste** button to paste.
+Clipboard APIs depend on browser permissions and a secure context; loopback HTTP
+qualifies. Clipboard-read authorization remains disabled by default.
+
 ## Security and scope
 
 The directory is **not a sandbox**. Anyone with the random URL can use a shell
@@ -65,3 +82,6 @@ make test-web-browser     # optional: Node >=22 and Chromium; no npm packages
 ```
 
 Set `CHROMIUM=/path/to/chromium` for the optional live canvas smoke test.
+
+See [shared configuration and limits](../../platform_neutral/frontend/README.md)
+and the [build guide](../../platform_neutral/BUILDING.md).

@@ -100,8 +100,10 @@ using stale geometry/mappings. Do not change modes with `fbset` while running.
 
 ### Native video handoff
 
-The browser's authenticated `native-video` DCS request uses a narrow optional
-neutral API, not a client-owned X/VT connection or a general shell-exec channel.
+The browser's authenticated
+[`native-video` DCS request](../../platform_neutral/stterminal/README.md#native-video-handoff)
+uses a narrow optional neutral API, not a client-owned X/VT connection or a
+general shell-exec channel.
 Only fixed mpv DRM/decoder options, regular media/config paths, the selected ALSA
 PCM and a bounded software-volume value are accepted. The host derives
 `/dev/ttyN` from the kernel-validated console number and checks foreground/active
@@ -115,6 +117,11 @@ players and host shutdown all return through foreground/mode recovery. A changed
 fbdev mode fails closed; returning while another VT is active retains output
 without writing it, and repaint waits for reacquisition. Keyboard/mouse state is
 flushed/reset before resuming. No permissions are changed and no new VT is taken.
+
+The [browser guide](../../demo-go/file-browser/README.md#framebuffer-video) covers
+helper discovery, audio-device overrides, and volume. The default command is
+`mpv --vo=drm --hwdec=auto-copy --ao=alsa --audio-device=alsa/plughw:1,0 --volume=33 -- FILE`;
+it does not probe the MP3 player or force sample format/rate/channels.
 
 SIGKILL, a native crash and power loss cannot guarantee restoration. Keep another
 console/SSH recovery path available when first testing hardware. To recover a
@@ -151,3 +158,6 @@ translation, evdev framing/scroll/drop recovery, multi-mouse button ownership,
 VT transitions and partial-startup cleanup. Shared frontend process tests check
 cleanup on shell exit/spawn failure and the child's initial physical PTY size.
 Real device/driver behavior still requires a foreground-VT hardware smoke test.
+
+See [shared configuration and limits](../../platform_neutral/frontend/README.md)
+and the [build guide](../../platform_neutral/BUILDING.md).

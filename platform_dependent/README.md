@@ -1,6 +1,6 @@
 # Platform-dependent implementation
 
-`x11/` is the native X event and painting implementation. Production XGB,
+[`x11/`](x11/README.md) is the native X event and painting implementation. Production XGB,
 Xproto and XGBUtil imports are confined here. The root executable selects it by default;
 neutral terminal and frontend code use the interfaces in
 [`platform_neutral/api`](../platform_neutral/api).
@@ -19,5 +19,6 @@ composition and preview state remain outside the driver. Event handling and
 painting share the existing native connection rather than opening a connection
 per subsystem. The pre-existing XGBUtil auxiliary connection is unchanged.
 
-See the [split notes](../platform_neutral/README.md) for the first-round scope
-and verification commands. Web and framebuffer backends were added after that relocation.
+See the [architecture and documentation index](../platform_neutral/README.md),
+[build guide](../platform_neutral/BUILDING.md), and
+[terminal protocol reference](../platform_neutral/stterminal/README.md).

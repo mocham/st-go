@@ -1,0 +1,133 @@
+# Building and packaging st-go
+
+Run the commands below from the repository root. See the [documentation
+index](README.md) for architecture, usage, protocols, and backend guides.
+
+## Requirements
+
+- Go toolchain with cgo
+- A C compiler (`gcc`) and C++ compiler (`g++`)
+- `curl`, `tar`, and `cmake`/`ninja` for the initial library builds
+- A static glibc (`/usr/lib/libc.a`)
+
+## Build
+
+```sh
+make            # full X11 terminal: BINARIES/st
+make st-min     # text-only X11 terminal
+make st-web     # embedded HTTP server and browser client
+make st-fb      # Linux virtual-console framebuffer terminal
+make test       # full test suite with native libraries linked
+make install    # installs to $(BINDIR), default /usr/local/bin
+make clean      # removes built binaries
+make distclean  # removes binaries and downloaded/built third_party/ files
+```
+
+Generated executables live in **`BINARIES/`**, which is gitignored. Targets such
+as `make st`, `make govim`, and `make file-browser` keep their familiar names.
+To make the demo tools available by name, including default file-browser openers:
+
+```sh
+export PATH="$PWD/BINARIES:$PATH"
+```
+
+The default backend is X11. `backend_web` selects the web backend and
+`backend_fb` selects framebuffer; use only one backend tag at a time. Both use
+the full media profile. The [source layout](README.md#layout) separates the
+terminal engine and shared frontend from backend-owned event and painting code.
+
+## Self-contained binaries and libraries
+
+The binaries are statically linked. X11 uses pure-Go
+[`xgb`](https://github.com/BurntSushi/xgb) over X protocol sockets, without
+`libX11`, fontconfig, or Xft. FreeType2 is the only C library always linked;
+the full builds also link native media decoders. glibc is linked statically.
+
+The embedded `Monaco_Linux.ttf` is loaded directly from memory through
+FreeType's `FT_New_Memory_Face`; no installed font is needed. Use
+`-f /path/to/font.ttf` to override it. See [configuration](frontend/README.md#configuration)
+for fallback behavior.
+
+`third_party/` is gitignored. A fresh `make` downloads the required source
+tarballs and builds their static archives automatically. Existing archives
+are reused across Makefile edits; application binaries still rebuild when their
+build rules change. After deliberately changing a library version or build
+settings, force that archive target with `make -B path/to/archive.a`, or use
+`make distclean` before a full rebuild.
+
+All binary targets use Go's `-trimpath` to omit local source and module-cache
+paths from debug information and stack traces. For example:
+
+```text
+$ file ./BINARIES/st
+./BINARIES/st: ELF 64-bit LSB executable ... statically linked
+$ ldd ./BINARIES/st
+not a dynamic executable
+```
+
+## Build targets
+
+The X11 targets use the same Go sources and differ in their linked native
+libraries. A dropped decoder is replaced by a no-op dummy object, so unsupported
+formats do nothing instead of crashing. The full build enables the SQLite WebP
+cache with a build tag; reduced builds omit SQLite entirely.
+
+| Target | Extra libraries | Image/PDF support | Approximate size |
+| --- | --- | --- | --- |
+| `st-min` | FreeType only | None | 8 MB |
+| `st-stb` | + stb_image | PNG/JPEG/GIF/BMP/TGA | 8.6 MB |
+| `st-pdf` | + stb_image + Poppler | Raster images + PDF | 14.6 MB |
+| `st` | + stb_image + WebP + Poppler + SQLite | All of the above + WebP | 16.5 MB |
+
+`st-web` embeds its HTML, JavaScript, CSS, and fonts; no npm build, CDN, or
+separate asset directory is required. `st-fb` uses a pure-Go Linux fbdev/evdev
+driver. Neither backend links XGB; both retain the shared native font/media
+libraries.
+
+### Minimal terminal
+
+```sh
+make st-min
+./BINARIES/st-min
+```
+
+VT100/ANSI handling, colors, mouse reporting, selection, clipboard, bracketed
+paste, the embedded font, and JSON configuration remain available. There is no
+inline image or PDF decoding; display requests for these formats are no-ops.
+
+### Other media profiles
+
+- **`st-stb`** adds [stb_image](https://github.com/nothings/stb) for raster images;
+  WebP and PDF remain stubbed.
+- **`st-pdf`** adds a minimal static Poppler with the C++ API and Splash renderer,
+  plus FreeType, zlib, libpng, and libjpeg-turbo. The libjpeg API decodes embedded
+  JPEG (`DCTDecode`) images, including scanned covers/pages. NASM optionally
+  enables x86 SIMD when building libjpeg-turbo. PDF page selection is supported;
+  WebP remains stubbed.
+- **`st`** is the full default build, including libwebp and the SQLite WebP cache.
+
+Per-target libraries are passed through `-extldflags`, deliberately not through
+the cgo files' `#cgo LDFLAGS`. Stub objects come from
+`third_party_wrapper/dummy-{stb,webp,pdf}.c`. See
+[build and linking caveats](../CAVEAT.md#3-build--packaging-caveats).
+
+## Verification
+
+```sh
+go test ./platform_neutral/api ./platform_neutral/stterminal ./term
+make test
+```
+
+`make test` is the authoritative integrated suite: bare `go test ./...` lacks
+the native static link objects. Static-glibc linker warnings are expected;
+undefined image/PDF/WebP symbols are not. Backend-specific checks are documented
+with the [backends](../platform_dependent/README.md).
+
+## License
+
+See [LICENSE](../LICENSE). This repository does not ship downloaded third-party
+binaries or library sources. The Makefile builds those libraries on demand under
+the gitignored `third_party/` directory, and their own licenses apply. A
+distributed binary's combined work is subject to the most restrictive linked-library
+license. The [Pinyin helper guide](../demo-go/pinyind/README.md) also documents
+its bundled source/data notices and redistribution obligations.
