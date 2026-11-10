@@ -111,7 +111,8 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 		return nil, fmt.Errorf("no display backend configured")
 	}
 	host, err := openWindow(api.WindowOptions{Cols: t.cols, Rows: t.rows, CellWidth: t.cw, CellHeight: t.ch, Border: t.borderpx,
-		X: x, Y: y, GeometryMask: int(geomMask), Title: title, Instance: instance, Class: className, Fixed: fixed})
+		X: x, Y: y, GeometryMask: int(geomMask), Title: title, Instance: instance, Class: className, Fixed: fixed,
+		InitialAudioVolume: cfg.SystemBar.InitialVolume})
 	if err != nil {
 		return nil, err
 	}

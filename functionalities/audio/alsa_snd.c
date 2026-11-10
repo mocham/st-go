@@ -21,7 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 typedef struct alsa_player {
 	snd_pcm_t *pcm;
@@ -147,150 +146,132 @@ void alsa_player_close(void *handle) {
 	}
 }
 
-/* --- output-selector inspection and switching ---------------------------- */
+/* --- speaker/headphone switching ----------------------------------------- */
 
-int alsa_output_label(const char *label) {
-	char lower[128];
-	size_t i = 0;
-	for (; label[i] && i + 1 < sizeof(lower); ++i)
-		lower[i] = (char)tolower((unsigned char)label[i]);
-	lower[i] = '\0';
-	int speaker = strstr(lower, "speaker") != NULL || strcmp(lower, "spk") == 0;
-	int earphone = strstr(lower, "earphone") != NULL ||
-		strstr(lower, "headphone") != NULL || strstr(lower, "headset") != NULL ||
-		strcmp(lower, "hp") == 0;
-	return speaker == earphone ? -1 : earphone;
-}
-
-static int card_output_mode(int card, const char *requested, int desired) {
-	char device[32];
-	snprintf(device, sizeof(device), "hw:%d", card);
-	snd_ctl_t *ctl = NULL;
-	int flags = desired >= 0 ? SND_CTL_NONBLOCK : SND_CTL_READONLY | SND_CTL_NONBLOCK;
-	if (snd_ctl_open(&ctl, device, flags) < 0)
-		return -1;
-	snd_ctl_elem_list_t *list;
-	snd_ctl_elem_info_t *info;
-	snd_ctl_elem_value_t *value;
-	snd_ctl_elem_id_t *id;
-	snd_ctl_elem_list_alloca(&list);
-	snd_ctl_elem_info_alloca(&info);
-	snd_ctl_elem_value_alloca(&value);
-	snd_ctl_elem_id_alloca(&id);
-	int mode = -1;
-	unsigned int count = 0;
-	if (snd_ctl_elem_list(ctl, list) < 0 || (count = snd_ctl_elem_list_get_count(list)) > 1024)
-		goto done;
-	if (snd_ctl_elem_list_alloc_space(list, count) < 0)
-		goto done;
-	if (snd_ctl_elem_list(ctl, list) < 0)
-		goto free_list;
-	for (unsigned int at = 0; at < snd_ctl_elem_list_get_used(list); ++at) {
-		snd_ctl_elem_list_get_id(list, at, id);
-		if (*requested && strcmp(requested, snd_ctl_elem_id_get_name(id)) != 0)
-			continue;
-		snd_ctl_elem_info_clear(info);
-		snd_ctl_elem_info_set_id(info, id);
-		if (snd_ctl_elem_info(ctl, info) < 0 || !snd_ctl_elem_info_is_readable(info) ||
-			snd_ctl_elem_info_get_count(info) != 1)
-			continue;
-		snd_ctl_elem_value_clear(value);
-		snd_ctl_elem_value_set_id(value, id);
-		if (snd_ctl_elem_read(ctl, value) < 0)
-			continue;
-		snd_ctl_elem_type_t type = snd_ctl_elem_info_get_type(info);
-		if (*requested) {
-			long selected = -1;
-			if (type == SND_CTL_ELEM_TYPE_BOOLEAN)
-				selected = snd_ctl_elem_value_get_boolean(value, 0);
-			else if (type == SND_CTL_ELEM_TYPE_INTEGER &&
-				snd_ctl_elem_info_get_min(info) == 0 && snd_ctl_elem_info_get_max(info) == 1)
-				selected = snd_ctl_elem_value_get_integer(value, 0);
-			else if (type == SND_CTL_ELEM_TYPE_ENUMERATED && snd_ctl_elem_info_get_items(info) == 2)
-				selected = snd_ctl_elem_value_get_enumerated(value, 0);
-			if (selected == 0 || selected == 1) {
-				if (desired >= 0) {
-					if (type == SND_CTL_ELEM_TYPE_ENUMERATED)
-						snd_ctl_elem_value_set_enumerated(value, 0, desired);
-					else if (type == SND_CTL_ELEM_TYPE_BOOLEAN)
-						snd_ctl_elem_value_set_boolean(value, 0, desired);
-					else
-						snd_ctl_elem_value_set_integer(value, 0, desired);
-					mode = snd_ctl_elem_write(ctl, value) < 0 ? -1 : desired;
-				} else {
-					mode = (int)selected;
-				}
-				break;
-			}
-			continue;
-		}
-		if (type != SND_CTL_ELEM_TYPE_ENUMERATED)
-			continue;
-		unsigned int items = snd_ctl_elem_info_get_items(info);
-		if (items > 64)
-			continue;
-		unsigned int selected = snd_ctl_elem_value_get_enumerated(value, 0);
-		int has_speaker = 0, has_earphone = 0, selected_mode = -1, complete = 1;
-		for (unsigned int item = 0; item < items; ++item) {
-			snd_ctl_elem_info_set_item(info, item);
-			if (snd_ctl_elem_info(ctl, info) < 0) {
-				complete = 0;
-				break;
-			}
-			int item_mode = alsa_output_label(snd_ctl_elem_info_get_item_name(info));
-			has_speaker |= item_mode == 0;
-			has_earphone |= item_mode == 1;
-			if (item == selected)
-				selected_mode = item_mode;
-		}
-		if (complete && has_speaker && has_earphone && selected_mode >= 0) {
-			if (desired >= 0) {
-				for (unsigned int item = 0; item < items; ++item) {
-					snd_ctl_elem_info_set_item(info, item);
-					if (snd_ctl_elem_info(ctl, info) < 0 || alsa_output_label(snd_ctl_elem_info_get_item_name(info)) != desired)
-						continue;
-					snd_ctl_elem_value_set_enumerated(value, 0, item);
-					mode = snd_ctl_elem_write(ctl, value) < 0 ? -1 : desired;
-					break;
-				}
-			} else {
-				mode = selected_mode;
-			}
-			break;
-		}
-	}
-free_list:
-	snd_ctl_elem_list_free_space(list);
-done:
-	snd_ctl_close(ctl);
-	return mode;
-}
-
-int alsa_selected_output(int requested_card, const char *control) {
+/* Match TEST-ASSETS/plugin-snd.c: choose the highest of the first two ALSA
+ * cards, then use the Headphone and Speaker simple-element playback switches. */
+static int output_card(int requested_card) {
 	if (requested_card >= 0)
-		return card_output_mode(requested_card, control, -1);
-	int card = -1;
-	for (int scanned = 0; scanned < 32; ++scanned) {
+		return requested_card;
+	int card = -1, highest = -1;
+	for (int scanned = 0; scanned < 2; ++scanned) {
 		if (snd_card_next(&card) < 0 || card < 0)
 			break;
-		int mode = card_output_mode(card, control, -1);
-		if (mode >= 0)
-			return mode;
+		if (card > highest)
+			highest = card;
 	}
-	return -1;
+	return highest;
 }
 
-int alsa_set_output(int requested_card, const char *control, int mode) {
+static snd_mixer_elem_t *find_output(snd_mixer_t *mixer, const char *name) {
+	snd_mixer_selem_id_t *sid;
+	snd_mixer_selem_id_alloca(&sid);
+	snd_mixer_selem_id_set_index(sid, 0);
+	snd_mixer_selem_id_set_name(sid, name);
+	return snd_mixer_find_selem(mixer, sid);
+}
+
+static int playback_switch(snd_mixer_elem_t *elem, int *state) {
+	if (elem == NULL || !snd_mixer_selem_has_playback_switch(elem))
+		return -1;
+	if (snd_mixer_selem_get_playback_switch(elem, SND_MIXER_SCHN_FRONT_LEFT, state) >= 0)
+		return 0;
+	return snd_mixer_selem_get_playback_switch(elem, SND_MIXER_SCHN_MONO, state);
+}
+
+static int open_output_mixer(int requested_card, snd_mixer_t **mixer,
+			     snd_mixer_elem_t **headphone, snd_mixer_elem_t **speaker) {
+	int card = output_card(requested_card);
+	if (card < 0)
+		return -1;
+	char card_name[16];
+	snprintf(card_name, sizeof(card_name), "hw:%d", card);
+	if (snd_mixer_open(mixer, 0) < 0)
+		return -1;
+	if (snd_mixer_attach(*mixer, card_name) < 0 ||
+	    snd_mixer_selem_register(*mixer, NULL, NULL) < 0 ||
+	    snd_mixer_load(*mixer) < 0) {
+		snd_mixer_close(*mixer);
+		*mixer = NULL;
+		return -1;
+	}
+	*headphone = find_output(*mixer, "Headphone");
+	*speaker = find_output(*mixer, "Speaker");
+	if (*headphone == NULL || *speaker == NULL) {
+		snd_mixer_close(*mixer);
+		*mixer = NULL;
+		return -1;
+	}
+	return 0;
+}
+
+static snd_mixer_elem_t *selected_output_element(snd_mixer_elem_t *headphone,
+						  snd_mixer_elem_t *speaker) {
+	int hp = -1, sp = -1;
+	if (playback_switch(headphone, &hp) < 0 || playback_switch(speaker, &sp) < 0)
+		return NULL;
+	if (hp)
+		return headphone;
+	if (sp)
+		return speaker;
+	return NULL;
+}
+
+int alsa_selected_output(int requested_card) {
+	snd_mixer_t *mixer = NULL;
+	snd_mixer_elem_t *headphone = NULL, *speaker = NULL;
+	if (open_output_mixer(requested_card, &mixer, &headphone, &speaker) < 0)
+		return -1;
+	int hp = -1, sp = -1;
+	int ok = playback_switch(headphone, &hp) >= 0 && playback_switch(speaker, &sp) >= 0;
+	snd_mixer_close(mixer);
+	if (!ok)
+		return -1;
+	if (hp && !sp)
+		return 1;
+	if (sp && !hp)
+		return 0;
+	/* If old state left both enabled, active headphones still mean earphone;
+	 * if both are muted, neither route can be inferred. */
+	return hp ? 1 : -1;
+}
+
+int alsa_set_output(int requested_card, int mode) {
 	if (mode != 0 && mode != 1)
 		return -1;
-	if (requested_card >= 0)
-		return card_output_mode(requested_card, control, mode) < 0 ? -1 : 0;
-	int card = -1;
-	for (int scanned = 0; scanned < 32; ++scanned) {
-		if (snd_card_next(&card) < 0 || card < 0)
-			break;
-		if (card_output_mode(card, control, mode) >= 0)
-			return 0;
+	snd_mixer_t *mixer = NULL;
+	snd_mixer_elem_t *headphone = NULL, *speaker = NULL;
+	if (open_output_mixer(requested_card, &mixer, &headphone, &speaker) < 0)
+		return -1;
+	/* plugin-snd.c mutes the current route before unmuting the next. */
+	snd_mixer_elem_t *off = mode == 1 ? speaker : headphone;
+	snd_mixer_elem_t *on = mode == 1 ? headphone : speaker;
+	int ok = snd_mixer_selem_set_playback_switch_all(off, 0) >= 0 &&
+		snd_mixer_selem_set_playback_switch_all(on, 1) >= 0;
+	snd_mixer_close(mixer);
+	return ok ? 0 : -1;
+}
+
+int alsa_set_volume(int requested_card, int percent) {
+	if (percent < 0 || percent > 100)
+		return -1;
+	snd_mixer_t *mixer = NULL;
+	snd_mixer_elem_t *headphone = NULL, *speaker = NULL;
+	if (open_output_mixer(requested_card, &mixer, &headphone, &speaker) < 0)
+		return -1;
+	snd_mixer_elem_t *selected = selected_output_element(headphone, speaker);
+	if (selected == NULL) {
+		snd_mixer_close(mixer);
+		return -1;
 	}
-	return -1;
+	long minimum = 0, maximum = 0;
+	snd_mixer_selem_get_playback_volume_range(selected, &minimum, &maximum);
+	if (maximum <= minimum) {
+		snd_mixer_close(mixer);
+		return -1;
+	}
+	long volume = minimum + (long)((double)(maximum - minimum) * percent / 100.0);
+	int ok = snd_mixer_selem_set_playback_volume_all(selected, volume) >= 0;
+	snd_mixer_close(mixer);
+	return ok ? 0 : -1;
 }

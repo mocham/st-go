@@ -30,6 +30,12 @@ func TestDefaultFileBrowserIcons(t *testing.T) {
 	}
 }
 
+func TestDefaultSystemBarVolume(t *testing.T) {
+	if got := Default().SystemBar.InitialVolume; got != 33 {
+		t.Fatalf("default initial system-bar volume = %d, want 33", got)
+	}
+}
+
 func TestInvalidConfigFallsBack(t *testing.T) {
 	palette16, _ := json.Marshal(map[string]any{"colorname": Default().Colorname[:16]})
 	for name, contents := range map[string]string{
@@ -47,6 +53,8 @@ func TestInvalidConfigFallsBack(t *testing.T) {
 		"latency":      `{"minlatency":86400000,"maxlatency":86400000}`,
 		"color index":  `{"defaultfg":4294967295}`,
 		"invisible":    `{"defaultfg":259}`,
+		"volume low":   `{"system_bar":{"initial_volume":-1}}`,
+		"volume high":  `{"system_bar":{"initial_volume":51}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")

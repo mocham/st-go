@@ -8,10 +8,10 @@ extern void alsa_emit_error(const char *msg);
 extern void *alsa_player_open(unsigned int sample_rate, int channels);
 extern int alsa_player_send(void *handle, const void *data, size_t bytes);
 extern void alsa_player_close(void *handle);
-// Selector inspection uses a separate read-only control handle, never PCM.
-extern int alsa_selected_output(int card, const char *control);
-extern int alsa_set_output(int card, const char *control, int mode);
-extern int alsa_output_label(const char *label);
+// Mixer operations use short-lived control handles, never PCM handles.
+extern int alsa_selected_output(int card);
+extern int alsa_set_output(int card, int mode);
+extern int alsa_set_volume(int card, int percent);
 */
 import "C"
 
@@ -21,7 +21,6 @@ import (
 	"io"
 	"os"
 	"strconv"
-	"strings"
 	"syscall"
 	"unsafe"
 
@@ -111,17 +110,15 @@ func alsaEmitError(message string) {
 // SelectedOutput reads the ALSA output selector without opening a playback
 // stream or changing mixer/device state. Mode 0 is the speaker, 1 the earphone
 // outlet. Unknown/inaccessible controls never imply that a speaker is selected.
-// Enumerated speaker/earphone controls are discovered automatically. A named
-// binary selector can be supplied through ST_GO_AUDIO_OUTPUT_CONTROL (and an
-// optional numeric ST_GO_AUDIO_OUTPUT_CARD); its values must be 0/1.
+// This mirrors TEST-ASSETS/plugin-snd.c: Headphone and Speaker playback
+// switches on the highest of the first two discovered cards. An optional
+// numeric ST_GO_AUDIO_OUTPUT_CARD overrides card discovery.
 func SelectedOutput() (mode int, known bool) {
-	card, name, ok := outputSelector()
+	card, ok := outputCard()
 	if !ok {
 		return 0, false
 	}
-	control := C.CString(name)
-	defer C.free(unsafe.Pointer(control))
-	mode = int(C.alsa_selected_output(C.int(card), control))
+	mode = int(C.alsa_selected_output(C.int(card)))
 	return mode, mode == 0 || mode == 1
 }
 
@@ -132,33 +129,34 @@ func SetOutput(mode int) bool {
 	if mode != 0 && mode != 1 {
 		return false
 	}
-	card, name, ok := outputSelector()
+	card, ok := outputCard()
 	if !ok {
 		return false
 	}
-	control := C.CString(name)
-	defer C.free(unsafe.Pointer(control))
-	return C.alsa_set_output(C.int(card), control, C.int(mode)) == 0
+	return C.alsa_set_output(C.int(card), C.int(mode)) == 0
 }
 
-func outputSelector() (card int, name string, ok bool) {
+// SetVolume sets the playback volume of the currently selected Speaker or
+// Headphone route. Percentages outside 0..100 are rejected rather than clamped.
+func SetVolume(percent int) bool {
+	if percent < 0 || percent > 100 {
+		return false
+	}
+	card, ok := outputCard()
+	if !ok {
+		return false
+	}
+	return C.alsa_set_volume(C.int(card), C.int(percent)) == 0
+}
+
+func outputCard() (card int, ok bool) {
 	card = -1
 	if value := os.Getenv("ST_GO_AUDIO_OUTPUT_CARD"); value != "" {
 		var err error
 		card, err = strconv.Atoi(value)
 		if err != nil || card < 0 || card > 31 {
-			return 0, "", false
+			return 0, false
 		}
 	}
-	name = os.Getenv("ST_GO_AUDIO_OUTPUT_CONTROL")
-	if len(name) > 43 || strings.IndexByte(name, 0) >= 0 {
-		return 0, "", false
-	}
-	return card, name, true
-}
-
-func alsaOutputLabel(label string) int {
-	c := C.CString(label)
-	defer C.free(unsafe.Pointer(c))
-	return int(C.alsa_output_label(c))
+	return card, true
 }

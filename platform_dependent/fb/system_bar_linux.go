@@ -15,32 +15,58 @@ import (
 )
 
 const (
-	systemBarBatteryIcon  = byte(0x80)
-	systemBarSpeakerIcon  = byte(0x81)
-	systemBarEarphoneIcon = byte(0x82)
-	systemBarAudioIcon    = byte(0x83)
+	systemBarBatteryIcon        = byte(0x80)
+	systemBarCheckedIcon        = byte(0x81)
+	systemBarUncheckedIcon      = byte(0x82)
+	systemBarUnknownIcon        = byte(0x83)
+	systemBarVolumeDownIcon     = byte(0x84)
+	systemBarVolumeUpIcon       = byte(0x85)
+	systemBarBrightnessDownIcon = byte(0x86)
+	systemBarBrightnessUpIcon   = byte(0x87)
 )
 
 const (
-	systemBarInterval   = 30 * time.Second
-	systemBarPadding    = 8
-	systemBarBackground = 0xff2d2b46 // Muted dark blue, slightly purple.
-	systemBarForeground = 0xffc4dfb5 // Soft light green.
+	systemBarInterval           = 30 * time.Second
+	systemBarPadding            = 8
+	systemBarBackground         = 0xff2d2b46 // Muted dark blue, slightly purple.
+	systemBarForeground         = 0xffc4dfb5 // Soft light green.
+	systemBarMaxInitialVolume   = 50
+	systemBarMaxVolume          = 100
+	systemBarVolumeDownStep     = 4
+	systemBarVolumeUpStep       = 3
+	systemBarBrightnessDownStep = 4
+	systemBarBrightnessUpStep   = 5
 )
 
 // Backend-owned presentation state, protected by Driver.mu. No rows are
 // reserved in the terminal and no system information is sent to applications.
 type systemBar struct {
-	powerSupplyPath string
-	nextRefresh     time.Time
-	text            string
-	bounds          image.Rectangle
-	textLeft        int
-	pixels          []uint32
-	widget          api.Widget
-	audioOutput     func() (mode int, known bool)
-	setAudioOutput  func(mode int) bool
-	audioLeft       int
+	powerSupplyPath       string
+	nextRefresh           time.Time
+	text                  string
+	bounds                image.Rectangle
+	textLeft              int
+	pixels                []uint32
+	widget                api.Widget
+	audioOutput           func() (mode int, known bool)
+	setAudioOutput        func(mode int) bool
+	setAudioVolume        func(percent int) bool
+	audioLeft             int
+	audioMode             int
+	audioModeValid        bool
+	displayAudioMode      int
+	displayAudioModeValid bool
+	volumeLevel           int
+	volumeDownLeft        int
+	volumeUpLeft          int
+	brightness            func() (level, maximum int, known bool)
+	changeBrightness      func(delta int) (level int, ok bool)
+	brightnessLevel       int
+	brightnessMaximum     int
+	brightnessValid       bool
+	brightnessOptimistic  bool
+	brightnessDownLeft    int
+	brightnessUpLeft      int
 }
 
 // AttachWidgets gives the passive bar the same identity, local buffer, and
@@ -82,29 +108,61 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	}
 	root := b.powerSupplyPath
 	output := b.audioOutput
+	setVolume, volumeLevel := b.setAudioVolume, b.volumeLevel
+	readBrightness, changeBrightness := b.brightness, b.changeBrightness
+	brightnessLevel, brightnessMaximum := b.brightnessLevel, b.brightnessMaximum
+	brightnessKnown, brightnessOptimistic := b.brightnessValid, b.brightnessOptimistic
+	overrideMode, overrideValid := b.audioMode, b.audioModeValid
 	d.mu.Unlock()
+	if !brightnessOptimistic && readBrightness != nil {
+		brightnessLevel, brightnessMaximum, brightnessKnown = readBrightness()
+	}
 
 	text := systemBarText(now, root)
+	volumeDownLeft, volumeUpLeft := -1, -1
+	if setVolume != nil {
+		text += "  "
+		volumeDownLeft = len(text)
+		text += string([]byte{systemBarVolumeDownIcon, ' '}) + strconv.Itoa(volumeLevel) + "% "
+		volumeUpLeft = len(text)
+		text += string([]byte{systemBarVolumeUpIcon})
+	}
+	brightnessDownLeft, brightnessUpLeft := -1, -1
+	if changeBrightness != nil && brightnessKnown {
+		text += "  "
+		brightnessDownLeft = len(text)
+		text += string([]byte{systemBarBrightnessDownIcon, ' '}) + strconv.Itoa(brightnessLevel) + " "
+		brightnessUpLeft = len(text)
+		text += string([]byte{systemBarBrightnessUpIcon})
+	}
 	audioLeft := -1
+	displayMode, displayKnown := 0, false
 	if output != nil {
 		mode, known := output()
+		if overrideValid {
+			mode, known = overrideMode, true
+		}
+		displayMode, displayKnown = mode, known && (mode == 0 || mode == 1)
 		switch {
 		case !known || mode != 0 && mode != 1:
 			audioLeft = len(text)
-			text += string([]byte{' ', ' ', systemBarAudioIcon})
+			text += string([]byte{' ', ' ', systemBarUnknownIcon})
 		case mode == 1:
 			audioLeft = len(text)
-			text += string([]byte{' ', ' ', systemBarEarphoneIcon})
+			text += string([]byte{' ', ' ', systemBarCheckedIcon})
 		default:
 			audioLeft = len(text)
-			text += string([]byte{' ', ' ', systemBarSpeakerIcon})
+			text += string([]byte{' ', ' ', systemBarUncheckedIcon})
 		}
 	}
 	d.mu.Lock()
-	if d.closed {
+	if d.closed || d.systemBar != b {
 		d.mu.Unlock()
 		return
 	}
+	b.displayAudioMode, b.displayAudioModeValid = displayMode, displayKnown
+	b.brightnessLevel, b.brightnessMaximum, b.brightnessValid = brightnessLevel, brightnessMaximum, brightnessKnown
+	b.brightnessOptimistic = false
 	b.nextRefresh = now.Add(systemBarInterval)
 	if b.text == text {
 		d.mu.Unlock()
@@ -118,8 +176,20 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	// Keep the right edge (including audio output) visible on a narrow display.
 	b.textLeft = l.width - width + systemBarPadding
 	b.audioLeft = -1
+	b.volumeDownLeft = -1
+	b.volumeUpLeft = -1
+	b.brightnessDownLeft = -1
+	b.brightnessUpLeft = -1
 	if audioLeft >= 0 {
 		b.audioLeft = b.textLeft + audioLeft*systemBarFontCellWidth
+	}
+	if volumeDownLeft >= 0 {
+		b.volumeDownLeft = b.textLeft + volumeDownLeft*systemBarFontCellWidth
+		b.volumeUpLeft = b.textLeft + volumeUpLeft*systemBarFontCellWidth
+	}
+	if brightnessDownLeft >= 0 {
+		b.brightnessDownLeft = b.textLeft + brightnessDownLeft*systemBarFontCellWidth
+		b.brightnessUpLeft = b.textLeft + brightnessUpLeft*systemBarFontCellWidth
 	}
 	b.pixels = make([]uint32, b.bounds.Dx()*b.bounds.Dy())
 	for y := b.bounds.Min.Y; y < b.bounds.Max.Y; y++ {
@@ -154,25 +224,86 @@ func systemBarText(now time.Time, powerSupplyPath string) string {
 func (d *Driver) systemBarClick(x, y int) {
 	d.mu.Lock()
 	b := d.systemBar
-	if d.closed || b == nil || b.audioOutput == nil || b.audioLeft < 0 ||
-		!image.Pt(x+b.bounds.Min.X, y+b.bounds.Min.Y).In(b.bounds) || x+b.bounds.Min.X < b.audioLeft {
+	if d.closed || b == nil {
 		d.mu.Unlock()
 		return
 	}
-	set := b.setAudioOutput
-	current, known := b.audioOutput()
-	d.mu.Unlock()
-	if set == nil || !known || (current != 0 && current != 1) {
+	point := image.Pt(x+b.bounds.Min.X, y+b.bounds.Min.Y)
+	if !point.In(b.bounds) {
+		d.mu.Unlock()
 		return
 	}
-	if !set(1 - current) {
+	down := b.volumeDownLeft >= 0 && point.X >= b.volumeDownLeft && point.X < b.volumeDownLeft+systemBarFontCellWidth
+	up := b.volumeUpLeft >= 0 && point.X >= b.volumeUpLeft && point.X < b.volumeUpLeft+systemBarFontCellWidth
+	if b.setAudioVolume != nil && (down || up) {
+		next := b.volumeLevel
+		if down {
+			next = max(0, next-systemBarVolumeDownStep)
+		} else {
+			next = min(systemBarMaxVolume, next+systemBarVolumeUpStep)
+		}
+		b.volumeLevel = next
+		b.nextRefresh = time.Time{}
+		setVolume := b.setAudioVolume
+		d.mu.Unlock()
+		setVolume(next)
 		return
 	}
-	// The input callback runs in the native event serialization domain. Defer
-	// the repaint to the normal loop so widget callbacks cannot re-enter it.
-	d.mu.Lock()
+	brightnessDown := b.brightnessDownLeft >= 0 && point.X >= b.brightnessDownLeft && point.X < b.brightnessDownLeft+systemBarFontCellWidth
+	brightnessUp := b.brightnessUpLeft >= 0 && point.X >= b.brightnessUpLeft && point.X < b.brightnessUpLeft+systemBarFontCellWidth
+	if b.changeBrightness != nil && b.brightnessValid && (brightnessDown || brightnessUp) {
+		delta := systemBarBrightnessUpStep
+		if brightnessDown {
+			delta = -systemBarBrightnessDownStep
+		}
+		next := max(0, min(b.brightnessMaximum, b.brightnessLevel+delta))
+		b.brightnessLevel = next
+		b.brightnessOptimistic = true
+		b.nextRefresh = time.Time{}
+		change := b.changeBrightness
+		d.mu.Unlock()
+		actual, ok := change(delta)
+		if ok && actual != next {
+			d.mu.Lock()
+			if !d.closed && d.systemBar == b {
+				b.brightnessLevel = actual
+				b.brightnessOptimistic = true
+				b.nextRefresh = time.Time{}
+			}
+			d.mu.Unlock()
+		}
+		return
+	}
+	if b.audioOutput == nil || b.audioLeft < 0 {
+		d.mu.Unlock()
+		return
+	}
+	setOutput, setVolume := b.setAudioOutput, b.setAudioVolume
+	current, known := b.displayAudioMode, b.displayAudioModeValid
+	next := 0 // Unknown state starts at the explicit speaker position.
+	if known && (current == 0 || current == 1) {
+		next = 1 - current
+	}
+	// Flip the UI state before touching ALSA. The native event callback must
+	// never make the visual checker depend on mixer permissions or latency.
+	b.audioMode, b.audioModeValid = next, true
+	b.displayAudioMode, b.displayAudioModeValid = next, true
+	volume := b.volumeLevel
 	b.nextRefresh = time.Time{}
 	d.mu.Unlock()
+	if setOutput == nil {
+		return
+	}
+	if !setOutput(next) {
+		// Keep the optimistic checker state visible; a later successful mixer
+		// read can reconcile it without losing the user's click feedback.
+		return
+	}
+	// Speaker and headphone elements may have independent levels. Apply the
+	// displayed level after a successful route change so switching cannot jump.
+	if setVolume != nil {
+		setVolume(volume)
+	}
 }
 
 // Use the first readable, present system battery in stable name order. Supply

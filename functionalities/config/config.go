@@ -65,11 +65,16 @@ type Config struct {
 	WebPCachePath       string   `json:"webp_cache_path"`
 
 	FileBrowser FileBrowserConfig `json:"file_browser"`
+	SystemBar   SystemBarConfig   `json:"system_bar"`
 
 	Mshortcuts []Mshortcut `json:"mshortcuts"`
 	Shortcuts  []Shortcut  `json:"shortcuts"`
 	Keymap     []Keydef    `json:"keymap"`
 	Selmasks   [3]uint     `json:"selmasks"`
+}
+
+type SystemBarConfig struct {
+	InitialVolume int `json:"initial_volume"`
 }
 
 type FileBrowserConfig struct {
@@ -196,6 +201,9 @@ func (c *Config) validate() error {
 	}
 	if c.BlinkTimeout > 60000 || c.CursorShape > 7 || c.CursorThick == 0 || c.CursorThick > c.GlyphHeight {
 		return fmt.Errorf("invalid cursor or blink settings")
+	}
+	if c.SystemBar.InitialVolume < 0 || c.SystemBar.InitialVolume > 50 {
+		return fmt.Errorf("system bar initial volume must be between 0 and 50 percent")
 	}
 	// The frontend always uses slots 256..259 for cursor/foreground/background.
 	// A 16-color array alone previously made the missing text colors both black.

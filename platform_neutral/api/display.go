@@ -10,6 +10,7 @@ type WindowOptions struct {
 	X, Y, GeometryMask                        int
 	Title, Instance, Class                    string
 	Fixed                                     bool
+	InitialAudioVolume                        int
 }
 
 type Rect struct{ X, Y, Width, Height int }

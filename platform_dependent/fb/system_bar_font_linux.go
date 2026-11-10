@@ -21,37 +21,29 @@ var systemBarGlyphs = loadSystemBarGlyphs()
 // remain available on every framebuffer image and cannot degrade to '?'.
 var systemBarIcons = loadSystemBarIcons()
 
-var systemBarIconPatterns = map[byte][]string{
-	systemBarBatteryIcon: {
-		"  #####  ", " ######## ", "##      #", "## #### #", "## #### #", "## #### #", "## #### #", "##      #", " ######## ", "  #####  ",
-	},
-	systemBarSpeakerIcon: {
-		"    ##   ", "   ###   ", "  ####   ", "######## ", "######## ", "  ####   ", "   ###   ", "    ##   ", "  ##  ## ", " ##    ##",
-	},
-	systemBarEarphoneIcon: {
-		"  ##  ## ", " ##    ##", "##      #", "##      #", "##      #", "##      #", " ##    ##", "  ###### ", "    ##   ", "    ##   ",
-	},
-	systemBarAudioIcon: {
-		"   ####  ", "  ##  ## ", " ##    ##", "##      #", "##      #", " ##    ##", "  ##  ## ", "   ####  ", "    ##   ", "    ##   ",
-	},
-}
-
 func loadSystemBarIcons() map[byte][]uint32 {
-	icons := make(map[byte][]uint32, len(systemBarIconPatterns))
-	for kind, pattern := range systemBarIconPatterns {
+	icons := make(map[byte][]uint32, len(systemBarIconBitmapBase64))
+	for kind, encoded := range systemBarIconBitmapBase64 {
+		packed, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			panic(fmt.Sprintf("invalid system-bar icon %x: %v", kind, err))
+		}
+		zr, err := zlib.NewReader(bytes.NewReader(packed))
+		if err != nil {
+			panic(fmt.Sprintf("invalid system-bar icon %x: %v", kind, err))
+		}
+		alpha, err := io.ReadAll(io.LimitReader(zr, int64(systemBarIconBitmapWidth*systemBarIconBitmapHeight+1)))
+		zr.Close()
+		if err != nil || len(alpha) != systemBarIconBitmapWidth*systemBarIconBitmapHeight {
+			panic(fmt.Sprintf("invalid system-bar icon %x size", kind))
+		}
 		glyph := make([]uint32, systemBarFontCellWidth*systemBarFontCellHeight)
 		for i := range glyph {
 			glyph[i] = systemBarBackground
 		}
-		for y, row := range pattern {
-			if y >= systemBarFontCellHeight {
-				break
-			}
-			for x, pixel := range row {
-				if pixel != '#' || x >= systemBarFontCellWidth {
-					continue
-				}
-				glyph[y*systemBarFontCellWidth+x] = systemBarForeground
+		for y := 0; y < systemBarIconBitmapHeight && y < systemBarFontCellHeight; y++ {
+			for x := 0; x < systemBarIconBitmapWidth && x < systemBarFontCellWidth; x++ {
+				glyph[y*systemBarFontCellWidth+x] = systemBarBlend(alpha[y*systemBarIconBitmapWidth+x])
 			}
 		}
 		icons[kind] = glyph

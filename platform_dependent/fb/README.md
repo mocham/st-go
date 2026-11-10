@@ -97,16 +97,29 @@ reserved until tabs initialize; then the tab band shares its height, with fixed
 The bar does not change application input or `BAR_DATA`.
 
 The same 30-second refresh also checks the ALSA mixer output selector, showing a
-pre-rendered earphone, speaker, or generic audio icon for modes 1, 0, or unknown.
-Clicking the audio icon toggles between modes 0 and 1 through the mixer. No PCM
-device is opened; MP3/video routing is unchanged apart from the requested mixer
-selection.
-Speaker/earphone enumerated controls are discovered by their item labels, not
-by card number. For a numeric or unusually named binary selector, set its exact
-name with `ST_GO_AUDIO_OUTPUT_CONTROL='Output Select'`; optionally constrain the
-card using `ST_GO_AUDIO_OUTPUT_CARD=0`. The named control's 0/1 values follow the
-speaker/earphone mapping above. Unavailable/ambiguous controls remain unknown;
-the indicator is not a physical jack-presence test.
+pre-rendered checked-box, unchecked-box, or headphones bitmap for modes 1, 0,
+or unknown. Bitmap volume-down and volume-up buttons surround the displayed
+hardware playback percentage. They subtract 4 and add 3 percentage points,
+respectively, clamped to 0..100. The startup level defaults to 33 and is
+configurable only up to 50 with `system_bar.initial_volume` in `st.json`; the
+live up button may continue above 50. Clicking elsewhere on the bar toggles
+between output modes 0 and 1. No PCM device is opened or reconfigured.
+
+When `/sys/class/backlight` exposes a readable device, half-lit-circle and sun
+bitmap buttons show its raw `brightness` value and adjust it by -4 and +5,
+clamped to `0..max_brightness`. As in `TEST-ASSETS/bright.go`, writes use
+`dbus-send` and login1's session `SetBrightness` method; unavailable backlights,
+missing `dbus-send`, or denied login1 requests leave brightness unchanged.
+
+The bundled sources are `square-check.svg`, regular `square.svg`,
+`headphones.svg`, `battery-three-quarters.svg`, `volume-low.svg`, and
+`volume-high.svg`, `circle-half-stroke.svg`, and `sun.svg` from the Font Awesome
+Free 6.x SVG tree.
+The switch matches `TEST-ASSETS/plugin-snd.c`: it uses the `Headphone` and
+`Speaker` playback switches on the highest of the first two discovered cards,
+muting one before unmuting the other. Set `ST_GO_AUDIO_OUTPUT_CARD=0` to override
+card discovery. Unavailable/ambiguous switches remain unknown; the indicator is
+not a physical jack-presence test.
 
 Console input uses **K_MEDIUMRAW**, with snapshots of the kernel's normal,
 Shift, AltGr and Shift+AltGr maps and Unicode accent table. Common modifiers,

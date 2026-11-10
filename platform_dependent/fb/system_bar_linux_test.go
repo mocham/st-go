@@ -101,6 +101,102 @@ func TestSystemBarLocalDateTimeAndOptionalBattery(t *testing.T) {
 			t.Fatalf("missing glyph %q", ch)
 		}
 	}
+	for _, icon := range []byte{systemBarBatteryIcon, systemBarVolumeDownIcon, systemBarVolumeUpIcon, systemBarBrightnessDownIcon, systemBarBrightnessUpIcon} {
+		glyph := systemBarIcons[icon]
+		ink := false
+		for _, pixel := range glyph {
+			ink = ink || pixel != systemBarBackground
+		}
+		if !ink {
+			t.Fatalf("bitmap icon %#x rendered blank", icon)
+		}
+	}
+}
+
+func TestSystemBarBrightnessButtonsUseRawAsymmetricSteps(t *testing.T) {
+	d := memoryDriver(t, 960, 64)
+	level := 20
+	var deltas []int
+	d.systemBar = &systemBar{
+		powerSupplyPath: t.TempDir(),
+		brightness:      func() (int, int, bool) { return level, 100, true },
+		changeBrightness: func(delta int) (int, bool) {
+			deltas = append(deltas, delta)
+			level = max(0, min(100, level+delta))
+			return level, true
+		},
+	}
+	now := time.Now()
+	d.refreshSystemBar(now)
+	b := d.systemBar
+	if !bytes.Contains([]byte(b.text), []byte{systemBarBrightnessDownIcon, ' ', '2', '0', ' ', systemBarBrightnessUpIcon}) {
+		t.Fatal("brightness controls/level are missing from system bar", []byte(b.text))
+	}
+	d.systemBarClick(b.brightnessDownLeft-b.bounds.Min.X+1, b.bounds.Dy()/2)
+	d.refreshSystemBar(now)
+	if level != 16 || b.brightnessLevel != 16 || !slices.Equal(deltas, []int{-4}) {
+		t.Fatal("brightness-down button did not subtract four raw units", level, b.brightnessLevel, deltas)
+	}
+	d.systemBarClick(b.brightnessUpLeft-b.bounds.Min.X+1, b.bounds.Dy()/2)
+	if level != 21 || b.brightnessLevel != 21 || !slices.Equal(deltas, []int{-4, 5}) {
+		t.Fatal("brightness-up button did not add five raw units", level, b.brightnessLevel, deltas)
+	}
+}
+
+func TestSystemBarVolumeButtonsUseAsymmetricStepsAndLiveRange(t *testing.T) {
+	d := memoryDriver(t, 960, 64)
+	mode := 1
+	var volumes []int
+	d.systemBar = &systemBar{
+		powerSupplyPath: t.TempDir(),
+		audioOutput:     func() (int, bool) { return mode, true },
+		setAudioOutput:  func(next int) bool { mode = next; return true },
+		setAudioVolume: func(percent int) bool {
+			volumes = append(volumes, percent)
+			return true
+		},
+		volumeLevel: 33,
+	}
+	now := time.Now()
+	d.refreshSystemBar(now)
+	b := d.systemBar
+	if !bytes.Contains([]byte(b.text), []byte{systemBarVolumeDownIcon, ' ', '3', '3', '%', ' ', systemBarVolumeUpIcon}) {
+		t.Fatal("volume controls/level are missing from system bar", []byte(b.text))
+	}
+	click := func(left int) {
+		t.Helper()
+		d.systemBarClick(left-b.bounds.Min.X+1, b.bounds.Dy()/2)
+		d.refreshSystemBar(now)
+	}
+	click(b.volumeDownLeft)
+	if b.volumeLevel != 29 || !slices.Equal(volumes, []int{29}) {
+		t.Fatal("volume-down button did not subtract four points", b.volumeLevel, volumes)
+	}
+	click(b.volumeUpLeft)
+	if b.volumeLevel != 32 || !slices.Equal(volumes, []int{29, 32}) {
+		t.Fatal("volume-up button did not add three points", b.volumeLevel, volumes)
+	}
+
+	// The 50% restriction applies only to configuration/startup. Live controls
+	// may continue through 50 and clamp only at the ALSA percentage limit.
+	b.volumeLevel = 49
+	d.refreshSystemBar(now)
+	click(b.volumeUpLeft)
+	if b.volumeLevel != 52 {
+		t.Fatal("live volume was incorrectly capped at the startup maximum", b.volumeLevel)
+	}
+	b.volumeLevel = 99
+	d.refreshSystemBar(now)
+	click(b.volumeUpLeft)
+	if b.volumeLevel != 100 {
+		t.Fatal("volume-up did not clamp at 100", b.volumeLevel)
+	}
+	b.volumeLevel = 2
+	d.refreshSystemBar(now)
+	click(b.volumeDownLeft)
+	if b.volumeLevel != 0 {
+		t.Fatal("volume-down did not clamp at zero", b.volumeLevel)
+	}
 }
 
 func TestSystemBarUsesBundledMonacoAt28Pixels(t *testing.T) {
@@ -386,9 +482,6 @@ func TestSystemBarAudioClickTogglesSelectedMode(t *testing.T) {
 		audioOutput:     func() (int, bool) { return mode, true },
 		setAudioOutput: func(next int) bool {
 			setCalls++
-			if next != 0 {
-				return false
-			}
 			mode = next
 			return true
 		},
@@ -399,10 +492,10 @@ func TestSystemBarAudioClickTogglesSelectedMode(t *testing.T) {
 	if mode != 0 || setCalls != 1 || !d.systemBar.nextRefresh.IsZero() {
 		t.Fatal("audio checker click did not switch earphone to speaker", mode, setCalls)
 	}
-	// The battery/clock side is not an audio control.
+	// The whole status bar is the output checker, not only the bitmap cell.
 	d.systemBarClick(0, b.bounds.Dy()/2)
-	if setCalls != 1 {
-		t.Fatal("non-audio system-bar click changed ALSA mode")
+	if mode != 1 || setCalls != 2 {
+		t.Fatal("status-bar click did not toggle ALSA mode", mode, setCalls)
 	}
 }
 
@@ -415,21 +508,21 @@ func TestSystemBarReadsSpeakerEarphoneAndUnknownWithoutChangingPlayback(t *testi
 	}}
 	now := time.Now()
 	d.refreshSystemBar(now)
-	if len(d.systemBar.text) == 0 || d.systemBar.text[len(d.systemBar.text)-1] != systemBarEarphoneIcon || calls != 1 {
+	if len(d.systemBar.text) == 0 || d.systemBar.text[len(d.systemBar.text)-1] != systemBarCheckedIcon || calls != 1 {
 		t.Fatal("selected earphone mode was not shown", d.systemBar.text, calls)
 	}
 	mode = 0
 	d.refreshSystemBar(now.Add(systemBarInterval - time.Nanosecond))
-	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarEarphoneIcon || calls != 1 {
+	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarCheckedIcon || calls != 1 {
 		t.Fatal("audio checker ignored the refresh interval")
 	}
 	d.refreshSystemBar(now.Add(systemBarInterval))
-	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarSpeakerIcon || calls != 2 {
+	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarUncheckedIcon || calls != 2 {
 		t.Fatal("speaker selector change was not shown", d.systemBar.text, calls)
 	}
 	known = false
 	d.refreshSystemBar(now.Add(2 * systemBarInterval))
-	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarAudioIcon || calls != 3 {
+	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarUnknownIcon || calls != 3 {
 		t.Fatal("unreadable mixer was misreported as speaker", d.systemBar.text, calls)
 	}
 	for at := 0; at < len(d.systemBar.text); at++ {

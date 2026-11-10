@@ -2,7 +2,9 @@
 
 `st-go/audio` is a session-owned host service. It preserves the original
 Go MP3 decoder → 16-bit stereo PCM → direct-hardware ALSA playback chain,
-without subprocess players, mixer changes, or PCM attenuation.
+without subprocess players or PCM attenuation. The framebuffer system bar is
+the one mixer client: it switches output and adjusts the selected route's
+hardware playback volume.
 
 Only st-go imports this module. Clients use `st-go/tui/audio` and the
 [authenticated terminal protocol](../../platform_neutral/stterminal/README.md#native-audio).
@@ -22,7 +24,9 @@ still requires an available sound device and permission to open it.
 
 `SelectedOutput` inspects ALSA controls read-only for the framebuffer system-bar
 indicator (0 speaker, 1 earphone, otherwise unknown). Clicking the indicator
-calls `SetOutput` to write the opposite value through the mixer control; it does
-not open or reconfigure a PCM stream. Enumerated speaker/headphone labels are
-auto-discovered; `ST_GO_AUDIO_OUTPUT_CONTROL` selects an exact binary 0/1
-control, optionally on `ST_GO_AUDIO_OUTPUT_CARD`.
+calls `SetOutput` to mute one and unmute the other using the `Speaker` and
+`Headphone` playback switches, matching `TEST-ASSETS/plugin-snd.c`; it does not
+open or reconfigure a PCM stream. The highest of the first two discovered cards
+is used unless `ST_GO_AUDIO_OUTPUT_CARD` supplies an explicit card number.
+`SetVolume` adjusts the selected `Headphone` or `Speaker` playback element in
+the ALSA 0..100 percentage range without reopening or reconfiguring PCM.

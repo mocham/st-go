@@ -62,6 +62,81 @@ func TestSystemBarWidgetPreservesOverlayAndRefreshBehavior(t *testing.T) {
 	}
 }
 
+func TestSystemBarPointerClickTogglesOutputThroughWidgetRouting(t *testing.T) {
+	d := memoryDriver(t, 960, 64)
+	mode, clicks := 1, 0
+	d.systemBar = &systemBar{
+		powerSupplyPath: t.TempDir(),
+		audioOutput:     func() (int, bool) { return mode, true },
+		setAudioOutput: func(next int) bool {
+			clicks++
+			mode = next
+			return true
+		},
+	}
+	d.refreshSystemBar(time.Now())
+	root, err := widgets.Wrap(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	b := d.systemBar
+	d.callbacks.PointerPress(1, 0, b.bounds.Min.X+2, b.bounds.Min.Y+2)
+	if mode != 0 || clicks != 1 {
+		t.Fatal("system-bar click was not routed to the output checker", mode, clicks)
+	}
+}
+
+func TestSystemBarVolumeClickUsesWidgetRouting(t *testing.T) {
+	d := memoryDriver(t, 960, 64)
+	volume, calls := 33, 0
+	d.systemBar = &systemBar{
+		powerSupplyPath: t.TempDir(),
+		setAudioVolume: func(next int) bool {
+			calls++
+			volume = next
+			return true
+		},
+		volumeLevel: volume,
+	}
+	d.refreshSystemBar(time.Now())
+	root, err := widgets.Wrap(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	b := d.systemBar
+	d.callbacks.PointerPress(1, 0, b.volumeUpLeft+1, b.bounds.Min.Y+2)
+	if volume != 36 || calls != 1 || b.volumeLevel != 36 {
+		t.Fatal("system-bar volume click was not routed to the up button", volume, calls, b.volumeLevel)
+	}
+}
+
+func TestSystemBarBrightnessClickUsesWidgetRouting(t *testing.T) {
+	d := memoryDriver(t, 960, 64)
+	level, calls := 20, 0
+	d.systemBar = &systemBar{
+		powerSupplyPath: t.TempDir(),
+		brightness:      func() (int, int, bool) { return level, 100, true },
+		changeBrightness: func(delta int) (int, bool) {
+			calls++
+			level += delta
+			return level, true
+		},
+	}
+	d.refreshSystemBar(time.Now())
+	root, err := widgets.Wrap(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	b := d.systemBar
+	d.callbacks.PointerPress(1, 0, b.brightnessUpLeft+1, b.bounds.Min.Y+2)
+	if level != 25 || calls != 1 || b.brightnessLevel != 25 {
+		t.Fatal("system-bar brightness click was not routed to the up button", level, calls, b.brightnessLevel)
+	}
+}
+
 func TestPositionedUploadClipsSourceAndDestinationTogether(t *testing.T) {
 	d := memoryDriver(t, 8, 4)
 	d.UploadAt([]uint32{1, 2, 3, 4, 5, 6, 7, 8}, 4, image.Rect(1, 0, 4, 2), image.Pt(-1, 1))
