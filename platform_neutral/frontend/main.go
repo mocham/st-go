@@ -233,12 +233,18 @@ func main() {
 	t.attachTerm(core)
 	t.setupKeys()
 	t.mu.Lock()
+	// Console hosts have a physical size independent of the configured grid.
+	// Match it before spawning the child, not after its first output/resize.
+	if w, h, err := t.host.ClientSize(); err == nil {
+		t.resize(w, h)
+	}
 	core.Redraw()
 	t.mu.Unlock()
 
 	// pty
 	master, slave, err := ptyutil.Open()
 	if err != nil {
+		t.Close()
 		log.Fatalf("pty: %v", err)
 	}
 	defer master.Close()
@@ -262,6 +268,7 @@ func main() {
 		var prog string
 		prog, env, err = ResolveShell(cfg, "")
 		if err != nil {
+			t.Close()
 			log.Fatalf("shell: %v", err)
 		}
 		cmdline = []string{prog}
@@ -271,6 +278,7 @@ func main() {
 	}
 	child, err := ptyutil.StartDir(slave, cmdline, env, childDir)
 	if err != nil {
+		t.Close()
 		log.Fatalf("spawn: %v", err)
 	}
 	defer func() {
@@ -278,17 +286,16 @@ func main() {
 			child.Process.Kill()
 		}
 	}()
-	go func() {
-		child.Wait()
-		os.Exit(0)
-	}()
-
 	core.SetWriter(func(b []byte) {
 		master.Write(b)
 	})
 	t.ttyResize = func(rows, cols int) {
 		ptyutil.SetWinSizePixels(master, rows, cols, cols*t.cw, rows*t.ch)
 	}
+	go func() {
+		child.Wait()
+		t.closeSession()
+	}()
 
 	// The PTY reader owns terminal-output paint scheduling. Interactive bursts
 	// settle for MinLatency, continuous output paints by MaxLatency, and DEC
@@ -308,7 +315,8 @@ func main() {
 			// A raw read error used to close the window even with a live shell.
 			n, err := master.Read(buf)
 			if err != nil || n == 0 {
-				os.Exit(0)
+				t.closeSession()
+				return
 			}
 			pending = append(pending, buf[:n]...)
 			written := t.writeTerminalOutput(core, pending)
@@ -354,7 +362,8 @@ func main() {
 				// detect EOF/EIO rather than treating the poll flag as an error.
 				m, rerr := master.Read(buf)
 				if rerr != nil || m == 0 {
-					os.Exit(0)
+					t.closeSession()
+					return
 				}
 				pending = append(pending, buf[:m]...)
 				written := t.writeTerminalOutput(core, pending)
@@ -364,7 +373,7 @@ func main() {
 		}
 	}()
 
-	t.run(core)
+	t.run()
 }
 
 func durationMilliseconds(ms float64) time.Duration {

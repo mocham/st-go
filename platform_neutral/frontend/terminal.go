@@ -168,6 +168,11 @@ func (t *Terminal) setWinMode(set bool, mode uint) {
 }
 func (t *Terminal) winModeIs(flag uint) bool { return t.winMode&flag != 0 }
 func (t *Terminal) StartDraw() bool          { return true }
+
+// Background PTY exit paths must return through Main's deferred cleanup, not
+// os.Exit: console hosts have keyboard/display modes to restore.
+func (t *Terminal) closeSession() { t.mu.Lock(); defer t.mu.Unlock(); t.Close() }
+
 func (t *Terminal) Close() {
 	if !atomic.CompareAndSwapInt32(&t.isClosed, 0, 1) {
 		return

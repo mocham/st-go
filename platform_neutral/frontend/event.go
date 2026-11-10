@@ -8,12 +8,9 @@ import (
 	term "st-go/platform_neutral/stterminal"
 )
 
-// run is the X event loop, mirroring st's run(). X/input/timer mutations paint
-// synchronously under t.mu; PTY output owns its separate latency scheduler.
-func (t *Terminal) run(termCore *term.Term) {
-	// keyboard mapping setup
-	t.termCore = termCore
-
+// run starts neutral timers and delegates native event dispatch to the host.
+// The core was attached before PTY startup; don't reassign it while output runs.
+func (t *Terminal) run() {
 	// Blinking cells are an external drawing trigger and paint immediately.
 	if t.blinkMs > 0 {
 		go func() {
@@ -23,7 +20,7 @@ func (t *Terminal) run(termCore *term.Term) {
 				select {
 				case <-ticker.C:
 					t.mu.Lock()
-					if t.termCore != nil && t.termCore.Tattrset(term.ATTRBlink) {
+					if !t.closed() && t.termCore != nil && t.termCore.Tattrset(term.ATTRBlink) {
 						t.toggleBlink()
 						t.termCore.RedrawAttr(term.ATTRBlink)
 					}
@@ -45,7 +42,7 @@ func (t *Terminal) run(termCore *term.Term) {
 			select {
 			case now := <-ticker.C:
 				t.mu.Lock()
-				if t.termCore != nil {
+				if !t.closed() && t.termCore != nil {
 					t.termCore.TickAnim(now)
 					t.flushRegionReplies()
 				}

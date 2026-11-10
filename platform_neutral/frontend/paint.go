@@ -21,6 +21,10 @@ func (t *Terminal) attachTerm(core *term.Term) {
 
 func (t *Terminal) writeTerminalOutput(core *term.Term, data []byte) int {
 	t.mu.Lock()
+	if t.closed() {
+		t.mu.Unlock()
+		return len(data)
+	}
 	t.inPTYWrite = true
 	written := core.Twrite(data, false)
 	t.inPTYWrite = false

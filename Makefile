@@ -40,7 +40,7 @@ STB_URL     = https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
-BINARY_NAMES = st st-min st-stb st-pdf st-web file-browser gols vimtex zat govim govim-pinyind
+BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat govim govim-pinyind
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 CFG         = config/config.json
 PREFIX     ?= /usr/local
@@ -431,6 +431,10 @@ $(OUTPUT_DIR)/st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WE
 $(OUTPUT_DIR)/st-web: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
 	go build -trimpath -tags 'backend_web netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
+# Linux console fbdev/evdev host, with the existing full software media renderer.
+$(OUTPUT_DIR)/st-fb: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
+	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
+
 $(OUTPUT_DIR)/st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
 	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
 
@@ -499,7 +503,7 @@ install: st
 # are needed because the Go file-browser package uses cgo.
 TEST_EXTRA = $(FULL_EXTRA) $(ALSA_EXTRA)
 
-test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O) govim-pinyind st-web
+test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O) govim-pinyind st-web st-fb
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 # Optional live canvas check using installed Chromium and Node's built-in CDP.

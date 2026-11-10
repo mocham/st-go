@@ -26,9 +26,16 @@ func (t *Driver) Run() {
 			continue
 		}
 		if ev == nil {
+			if t.closed() {
+				return
+			}
 			continue
 		}
 		t.callbacks.Lock()
+		if t.callbacks.Closed() {
+			t.callbacks.Unlock()
+			return
+		}
 		t.Dispatch(ev)
 		t.callbacks.PaintDirty()
 		t.callbacks.Unlock()

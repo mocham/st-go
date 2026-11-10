@@ -3,8 +3,9 @@
 **st-go** is a from-scratch Go implementation of the suckless [st](https://st.suckless.org/)
 terminal emulator. The terminal core is a faithful port of `st`'s escape-sequence
 parser and screen model, and the X11 frontend is built on the pure-Go
-[`xgb`](https://github.com/BurntSushi/xgb) library. An optional
-[web backend](#web-backend) serves the same terminal through an embedded browser client.
+[`xgb`](https://github.com/BurntSushi/xgb) library. Optional
+[web](#web-backend) and [Linux framebuffer](#framebuffer-backend) backends
+present the same terminal without X11.
 
 ## Features
 
@@ -39,6 +40,7 @@ parser and screen model, and the X11 frontend is built on the pure-Go
 - Inline image display via a DCS display DSL (stb_image / libwebp decoders)
 - PDF display via static Poppler/Splash, including embedded JPEG images
 - Self-contained HTTP/canvas backend with server-side PTY, fonts and media decoding
+- Linux console framebuffer/evdev backend with software mouse pointer and VT switching
 - JSON configuration (`config.json`)
 
 ## Resource limits and error logs
@@ -347,7 +349,7 @@ PDF rendering and caching stay in st-go. See the demo's
 
 Source layout: [`platform_neutral/`](platform_neutral/README.md) contains the
 terminal engine (`stterminal`), shared host logic and uniform APIs;
-[`platform_dependent/`](platform_dependent/README.md) contains the X11 and web
+[`platform_dependent/`](platform_dependent/README.md) contains the X11, web and fbdev
 event/painting implementations. `main.go` and backend-tagged wiring select one
 backend at build time. Existing client protocols and X11 targets are unchanged.
 
@@ -355,6 +357,7 @@ backend at build time. Existing client protocols and X11 targets are unchanged.
 make          # builds ./BINARIES/st (full: all feature libraries) — see targets below
 make st-min   # minimal: text-only terminal
 make st-web   # self-contained HTTP server and browser client (full media support)
+make st-fb    # Linux virtual-console framebuffer terminal (full media support)
 make test     # run the test suite (links the full feature set)
 make install  # installs to $(BINDIR), default /usr/local/bin
 make clean    # removes all built binaries
@@ -398,6 +401,8 @@ with a build tag; reduced builds omit SQLite entirely.
 
 `st-web` uses the full media profile with the web backend instead of X11;
 its HTML, JavaScript, CSS and fonts are embedded in `BINARIES/st-web`.
+`st-fb` uses the same full media profile with a pure-Go Linux fbdev/evdev
+driver. Neither backend links XGB; existing native font/media libraries remain.
 
 ### `st-min` — the minimal build
 
@@ -494,6 +499,43 @@ user. Keep it private. The server checks Host/Origin and binds loopback by
 default, but provides HTTP, not TLS or multi-user authentication. Prefer an SSH
 tunnel for remote use; do not expose it to untrusted networks with
 `-listen 0.0.0.0`. See [backend notes](platform_dependent/web/README.md).
+
+### Framebuffer backend
+
+```sh
+make st-fb
+# Run from a real Linux text VT, not an X/web terminal or SSH PTY:
+./BINARIES/st-fb -dir /path/to/project
+./BINARIES/st-fb -fb /dev/fb0 -mouse /dev/input/by-id/YOUR-MOUSE-event-mouse -e /bin/bash
+```
+
+The device's existing resolution is used; no modesetting or `fbset` is invoked.
+Packed truecolor 16/24/32-bit modes are supported, including padded scanlines,
+RGB/BGR layouts and virtual-screen offsets. The framebuffer must back the
+selected active text console. `-tty` defaults to `/dev/tty`; mouse discovery
+defaults to `-mouse auto`, accepts comma-separated evdev paths, or can be disabled
+with `-mouse none`. In auto mode, unavailable mice do not prevent keyboard use.
+Device permissions must allow framebuffer writes, console control and mouse
+reads; the program does not change permissions or install privileged helpers.
+
+Keyboard input uses the console's normal/Shift/AltGr keymap layers, Unicode
+entries and accent table. Mouse motion, buttons and high-resolution wheel events
+go through the same terminal callbacks as X11/web, preserving selection, SGR
+mouse reporting and previews. Relative mice are supported; absolute touchpads,
+touchscreens and gesture processing are not yet implemented. Clipboard data is
+local to this terminal process, not shared with a desktop clipboard. Titles,
+`BAR_DATA` and desktop window-placement requests are ignored.
+
+**Ctrl-Alt-F1…F12** switches VTs; **Ctrl-Alt-Backspace** exits the framebuffer
+host. Normal shell exit and SIGINT/SIGTERM/SIGHUP/SIGQUIT restore console modes.
+Writes stop while another VT is active; returning repaints retained pixels.
+SIGKILL/power loss cannot run restoration; keep another console/SSH recovery
+path available. Recovery may need keyboard, termios and `KD_TEXT`/`VT_AUTO`
+restoration; see the backend's recovery instructions. Do not run
+another display owner on the same VT; optional `-mouse-grab` excludes other
+mouse consumers only while this VT is active. See [backend details and testing](platform_dependent/fb/README.md).
+
+### Configuration
 
 Configuration lookup is `-config <file>`, then `st.json` beside the executable
 (the name written by `make install`), then legacy `config.json` beside it,

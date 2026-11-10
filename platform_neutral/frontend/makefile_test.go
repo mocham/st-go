@@ -74,6 +74,7 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 	}
 	question("st", 1)
 	question("st-web", 1)
+	question("st-fb", 1)
 	question("file-browser", 1)
 	// Real native dependencies still invalidate their consumers.
 	write("third_party/jpeg/lib/libjpeg.a", nil, old.Add(30*time.Minute))
