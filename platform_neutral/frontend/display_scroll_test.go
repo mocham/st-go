@@ -3,8 +3,10 @@ package frontend
 import (
 	"bytes"
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,6 +179,162 @@ func TestContinuousPageNavigationZoomAndStatus(t *testing.T) {
 	_ = trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "pan", Value: 999})
 	if s.pan != 80 {
 		t.Fatal("horizontal pan did not clamp")
+	}
+}
+
+func TestRasterViewerFitZoomDragAndStatus(t *testing.T) {
+	trm := regionTestTerminal(t)
+	trm.writeTerminalOutput(trm.termCore, []byte("\x1bPregion stack 1\x1b\\"))
+	trm.displayRegions.jobs = make(chan regionJob, 1)
+	if err := trm.OpenRegion(term.SecondaryRegion, term.RegionImage{Path: "image.png", Viewer: true, Options: term.ImageDecodeOptions{FitWidth: true}}); err != nil {
+		t.Fatal(err)
+	}
+	job := <-trm.displayRegions.jobs
+	if job.width != trm.secondaryPixels().Dx() {
+		t.Fatalf("initial fit width = %d", job.width)
+	}
+	bitmap := regionBitmap{width: job.width, height: 5 * job.height, contentHeight: 160,
+		sourceWidth: 20, sourceHeight: 40, pixels: make([]uint32, job.width*5*job.height)}
+	trm.acceptRegionImage(job, bitmap, nil)
+	s := trm.displayRegions.secondary
+	if s.sourceWidth != 20 || s.sourceHeight != 40 {
+		t.Fatal("viewer source dimensions were not retained")
+	}
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "fit-height"}); err != nil {
+		t.Fatal(err)
+	}
+	job = <-trm.displayRegions.jobs
+	if want := trm.secondaryPixels().Dy() * 20 / 40; job.width != want {
+		t.Fatalf("fit-height width = %d, want %d", job.width, want)
+	}
+	// Publish that scale before switching to native source pixels.
+	bitmap.width, bitmap.contentHeight = job.width, trm.secondaryPixels().Dy()
+	bitmap.height, bitmap.pixels = bitmap.contentHeight, make([]uint32, bitmap.width*bitmap.contentHeight)
+	trm.acceptRegionImage(job, bitmap, nil)
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "fit-original"}); err != nil {
+		t.Fatal(err)
+	}
+	job = <-trm.displayRegions.jobs
+	if job.width != 20 {
+		t.Fatalf("original width = %d", job.width)
+	}
+	bitmap.width, bitmap.height, bitmap.contentHeight = job.width, 40, 40
+	bitmap.pixels = make([]uint32, bitmap.width*bitmap.height)
+	trm.acceptRegionImage(job, bitmap, nil)
+	before := s.zoomPercent()
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "zoomstep", Value: 1}); err != nil {
+		t.Fatal(err)
+	}
+	job = <-trm.displayRegions.jobs
+	if s.imageMode != imageZoom || s.zoomPercent() <= before || job.width <= 20 {
+		t.Fatalf("zoom step: mode=%d zoom=%d width=%d", s.imageMode, s.zoomPercent(), job.width)
+	}
+	wheelZoom := s.zoomPercent()
+	var wheelReply bytes.Buffer
+	trm.termCore.SetWriter(func(b []byte) { wheelReply.Write(b) })
+	trm.regionMousePress(4, ControlMask, trm.secondaryPixels().Min.X+1, trm.secondaryPixels().Min.Y+1)
+	trm.pointerRelease(4, ControlMask, trm.secondaryPixels().Min.X+1, trm.secondaryPixels().Min.Y+1)
+	job = <-trm.displayRegions.jobs
+	if s.zoomPercent() <= wheelZoom || job.width <= 20 || !strings.Contains(wheelReply.String(), "image-status") || !strings.Contains(wheelReply.String(), " zoom ") {
+		t.Fatalf("Ctrl+wheel did not zoom: zoom=%d width=%d", s.zoomPercent(), job.width)
+	}
+	// Give drag enough content in each direction without another decode.
+	r := trm.secondaryPixels()
+	s.viewWidth = 2 * r.Dx()
+	s.zoom = 200
+	s.scrollY, s.targetY, s.pan = 0, 0, 0
+	s.bitmap = regionBitmap{width: 2 * r.Dx(), height: 3 * r.Dy(), contentHeight: 3 * r.Dy(), sourceWidth: 20, sourceHeight: 40,
+		pixels: make([]uint32, 2*r.Dx()*3*r.Dy())}
+	trm.regionMousePress(1, 0, r.Min.X+20, r.Min.Y+20)
+	trm.regionMouseMotion(r.Min.X+10, r.Min.Y+10)
+	trm.regionMouseRelease(1)
+	if s.pan != 10 || s.scrollY != 10 || s.dragging {
+		t.Fatalf("drag state: pan=%d scroll=%g dragging=%v", s.pan, s.scrollY, s.dragging)
+	}
+	var reply bytes.Buffer
+	trm.termCore.SetWriter(func(b []byte) { reply.Write(b) })
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "info"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply.String(), "status 1 1 ") || !strings.Contains(reply.String(), "image-status 20 40 ") || !strings.Contains(reply.String(), " zoom ") {
+		t.Fatalf("viewer status = %q", reply.String())
+	}
+}
+
+func TestRasterViewerInitialChoiceRendersOnce(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		req  term.RegionImage
+		want func(image.Rectangle) int
+	}{
+		{"fit-height", term.RegionImage{Path: "image.png", Viewer: true, Options: term.ImageDecodeOptions{FitHeight: true}}, func(r image.Rectangle) int { return r.Dy() / 2 }},
+		{"original", term.RegionImage{Path: "image.png", Viewer: true}, func(image.Rectangle) int { return 20 }},
+		{"zoom", term.RegionImage{Path: "image.png", Viewer: true, ViewerZoom: 175}, func(r image.Rectangle) int { return r.Dx() * 175 / 100 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			trm := regionTestTerminal(t)
+			trm.writeTerminalOutput(trm.termCore, []byte("\x1bPregion stack 1\x1b\\"))
+			trm.displayRegions.jobs = make(chan regionJob, 2)
+			if err := trm.OpenRegion(term.SecondaryRegion, test.req); err != nil {
+				t.Fatal(err)
+			}
+			job := <-trm.displayRegions.jobs
+			source := &scrollImage{width: 20, height: 40, rgba: make([]byte, 20*40*4)}
+			bitmap, err := source.renderJob(job)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := test.want(trm.secondaryPixels()); bitmap.width != want {
+				t.Fatalf("first render width = %d, want %d", bitmap.width, want)
+			}
+			trm.acceptRegionImage(job, bitmap, nil)
+			select {
+			case extra := <-trm.displayRegions.jobs:
+				t.Fatalf("accepted first render queued a second job: %+v", extra)
+			default:
+			}
+		})
+	}
+}
+
+func TestRasterViewerBoundedStripAndAlpha(t *testing.T) {
+	image := &scrollImage{width: 2, height: 4, rgba: []byte{
+		0xff, 0x00, 0x00, 0xff, 0x00, 0xff, 0x00, 0x80,
+		0xff, 0x00, 0x00, 0xff, 0x00, 0xff, 0x00, 0x80,
+		0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,
+		0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00,
+	}}
+	bitmap, err := image.render(4, 2, 1, 0xff000000, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bitmap.width != 4 || bitmap.height != 4 || bitmap.contentHeight != 8 || bitmap.top != 0 || bitmap.sourceWidth != 2 || bitmap.sourceHeight != 4 {
+		t.Fatalf("bitmap geometry = %+v", bitmap)
+	}
+	if got := bitmap.pixels[0]; got != 0xffff0000 {
+		t.Fatalf("opaque source = %#x", got)
+	}
+	if got := bitmap.pixels[2]; got != 0xff008000 {
+		t.Fatalf("alpha composite = %#x", got)
+	}
+	again, err := image.render(4, 2, 1, 0xff000000, 2)
+	if err != nil || len(again.pixels) == 0 || &again.pixels[0] != &bitmap.pixels[0] {
+		t.Fatal("identical raster strip did not reuse its worker cache")
+	}
+}
+
+func TestRasterViewerExtremeNarrowScalesClampToOnePixel(t *testing.T) {
+	s := regionSurface{request: &term.RegionImage{Viewer: true}, imageMode: imageFitHeight, sourceWidth: 1, sourceHeight: 1000}
+	if width := s.renderWidth(80, 100); width != 1 {
+		t.Fatalf("fit-height width = %d, want 1", width)
+	}
+	s.imageMode, s.zoom = imageZoom, 1
+	if width := s.renderWidth(80, 100); width != 1 {
+		t.Fatalf("one-percent width = %d, want 1", width)
+	}
+	s.sourceWidth, s.sourceHeight, s.zoom = 1000, 1000, term.RegionViewerZoomMaximum
+	if width := s.renderWidth(1<<20, 100); width*100*4 > limits.PreviewCacheBytes {
+		t.Fatalf("zoom width %d exceeds the visible strip budget", width)
 	}
 }
 

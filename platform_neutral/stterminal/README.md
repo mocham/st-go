@@ -158,6 +158,7 @@ apply, and failures use the bounded diagnostic log.
 | `region layout main X Y W H secondary X Y W H` | Atomically set explicit cell rectangles |
 | `region secondary open '<path>' [page N\|current] [fit-contain\|fit-width\|fit-height\|native]` | Replace the preview with a static image or PDF page |
 | `region secondary open '<path>' fit-width continuous [background '#RRGGBB']` | Show a continuous PDF with local animated pixel scrolling and optional paper/canvas color |
+| `region secondary open '<path>' viewer [fit-width\|fit-height\|native\|zoom N]` | Show a retained, pannable raster image viewer at its initial scale |
 | `region secondary clear` | Clear the preview, retaining the split |
 | `region secondary list BASE64` | Overlay a retained, smoothly scrollable text list encoded as base64 JSON |
 | `region secondary list restore` | Restore the previous image/PDF and navigation without changing layout |
@@ -166,7 +167,9 @@ apply, and failures use the bounded diagnostic log.
 | `region secondary position N` | Set continuous scroll position in millionths of its range (0–1000000) |
 | `region secondary page N` / `pages N` | Jump to a page / move by signed pages using actual page dimensions |
 | `region secondary view N` | Animate by millionths of viewport height (500000 = half a screen) |
-| `region secondary zoom N` | Set 10–500% of fit-width; 0 best-fits the current page |
+| `region secondary fit width\|height\|original` | Select raster-viewer fit mode |
+| `region secondary zoom N` | Set PDF zoom to 10–500% of fit-width (0 best-fit), or raster-viewer zoom to 1–6400% |
+| `region secondary zoomstep -1\|1` | Change raster-viewer zoom multiplicatively |
 | `region secondary pan N` | Pan horizontally by signed steps when zoomed in |
 | `region secondary find forward\|backward\|next\|previous 'text'` | Case-insensitive PDF search with retained highlights; next/previous wraps by occurrence |
 | `region secondary find clear` | Cancel pending search and clear highlights |
@@ -195,6 +198,9 @@ is the default; PDF `fit-width` fills the width and clips vertical overflow.
 independently of client refresh timing. A three-pixel divider occupies the left
 edge of a side-by-side pane. Continuous PDFs retain their native document across
 zoom/resize; a new `open` reloads it. Failed reloads retain previous pixels.
+`viewer` retains a decoded raster source and publishes bounded scaled strips;
+normal wheel input scrolls, Ctrl+wheel zooms, and left-button dragging pans the
+image without sending pointer traffic through the application's PTY.
 
 Search replies with `DCS region secondary found PAGE ST` (0 means no match), then
 `DCS region secondary matches PAGE INDEX TOTAL LOCAL_INDEX TRUNCATED ST`.
@@ -203,6 +209,9 @@ Next/previous includes other occurrences on the same page. At most 4096 hits
 are retained as zoom-independent rectangles; `TRUNCATED` reports that limit.
 Status positions use millionths, zoom uses percent, and loading/failed are 0 or
 1. Background prefetch does not report loading when the visible area is cached.
+Raster viewers also receive `DCS region secondary image-status WIDTH HEIGHT
+POSITION ZOOM MODE LOADING FAILED ST`, where `MODE` is `width`, `height`,
+`original`, or `zoom`; this reports Ctrl+wheel changes performed by the host.
 
 By default, the wheel over a preview changes PDF pages, wrapping at the ends;
 preview clicks are consumed locally. Keyboard input stays with the main grid.

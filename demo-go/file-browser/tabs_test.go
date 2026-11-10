@@ -51,16 +51,16 @@ func TestBrowserRequestsFocusedTabAndKeepsItsPTY(t *testing.T) {
 	for _, backend := range []string{"x11", "fb", "web"} {
 		t.Run(backend, func(t *testing.T) {
 			dir, tools := t.TempDir(), documentToolTestPath(t)
-			name := "a '; 世界.txt"
+			name := "a '; 世界.png"
 			writeFiles(t, dir, name)
 			marker := filepath.Join(tools, "opened")
-			writeDocumentTool(t, tools, "govim", `printf 'local' > "$MARKER"`)
+			writeDocumentTool(t, tools, "goiv", `printf 'local' > "$MARKER"`)
 			env := envWithout(testEnv("PATH="+tools, "MARKER="+marker, "ST_GO_BACKEND="+backend, "ST_GO_TABS=1", "ST_GO_TAB_TOKEN="+strings.Repeat("ab", 16)), "ST_FILE_BROWSER_OPEN")
 			f := startBrowser(t, env, dir)
 			before := len(f.output())
 			f.send("\x1b[B\r")
 			id, request := browserTabRequest(t, f)
-			if request.Detached || request.Directory != dir || len(request.Command) != 2 || request.Command[0] != filepath.Join(tools, "govim") || request.Command[1] != filepath.Join(dir, name) {
+			if request.Detached || request.Directory != dir || len(request.Command) != 2 || request.Command[0] != filepath.Join(tools, "goiv") || request.Command[1] != filepath.Join(dir, name) {
 				t.Fatal("incorrect literal request", request)
 			}
 			if strings.Contains(f.output()[before:], "\x1b[?1049l") || strings.Contains(f.output()[before:], "place bottom-left") {

@@ -41,7 +41,7 @@ func (t *Terminal) pointerPress(btn byte, state uint16, px, py int) {
 	if t.restoreGeometryOnPress(btn) {
 		return
 	}
-	if t.regionMousePress(btn, px, py) {
+	if t.regionMousePress(btn, state, px, py) {
 		return
 	}
 	x := t.evcol(px)
@@ -81,6 +81,9 @@ func (t *Terminal) pointerMotion(state uint16, px, py int) {
 		return
 	}
 	if t.regionButtons != 0 || (t.buttons == 0 && t.overSecondary(px, py)) {
+		if t.regionButtons != 0 {
+			t.regionMouseMotion(px, py)
+		}
 		return
 	}
 	x := t.evcol(px)
@@ -109,6 +112,7 @@ func (t *Terminal) pointerRelease(btn byte, state uint16, px, py int) {
 	}
 	if t.regionButtons&buttonmask(btn) != 0 {
 		t.regionButtons &^= buttonmask(btn)
+		t.regionMouseRelease(btn)
 		return
 	}
 	if t.buttons == 0 && t.overSecondary(px, py) {

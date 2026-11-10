@@ -126,11 +126,11 @@ func regionScrollCopy(previous *regionFrame, next regionFrame) (int, bool) {
 		return 0, false
 	}
 	a, b := previous.surface, next.surface
-	if a.request == nil || b.request == nil || !a.request.Continuous || !b.request.Continuous ||
+	if a.request == nil || b.request == nil || !a.scrollable() || !b.scrollable() ||
 		a.search != b.search ||
 		a.pan != b.pan || a.zoomPercent() != b.zoomPercent() ||
 		len(a.bitmap.pixels) == 0 || len(b.bitmap.pixels) == 0 || &a.bitmap.pixels[0] != &b.bitmap.pixels[0] ||
-		a.bitmap.width != b.renderWidth(next.viewport.Dx()) {
+		a.bitmap.width != b.renderWidth(next.viewport.Dx(), next.viewport.Dy()) {
 		return 0, false
 	}
 	return int(math.Round(b.scrollY)) - int(math.Round(a.scrollY)), true

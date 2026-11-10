@@ -61,7 +61,12 @@ type regionSurface struct {
 	viewWidth             int
 	seekPosition          *int
 	seekPage              *int
-	zoom, pan             int         // zoom percent of fit-width; zero means 100
+	zoom, pan             int // zoom percent of fit-width; zero means 100
+	imageMode             imageScaleMode
+	sourceWidth           int
+	sourceHeight          int
+	dragX, dragY          int
+	dragging              bool
 	search                *pdfMatches // immutable painter snapshot
 	pendingSearch         *regionSearch
 	searchAnchored        bool // selected occurrence remains current at short-page boundaries
@@ -70,11 +75,22 @@ type regionSurface struct {
 type regionBitmap struct {
 	pixels             []uint32
 	width, height      int
+	sourceWidth        int
+	sourceHeight       int
 	page               int // resolved zero-based page, including modulo wrapping
 	top, contentHeight int // cached strip origin and full continuous height
 	background         uint32
 	pageTops           []int // one offset per page plus the document end
 }
+
+type imageScaleMode uint8
+
+const (
+	imageFitWidth imageScaleMode = iota
+	imageFitHeight
+	imageOriginal
+	imageZoom
+)
 
 type regionJob struct {
 	generation    uint64
@@ -261,6 +277,9 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 	if !limits.Check("region path", int64(len(request.Path)), limits.ControlBytes) {
 		return fmt.Errorf("region path exceeds resource limit")
 	}
+	if request.Continuous && request.Viewer {
+		return fmt.Errorf("a region cannot be both a continuous PDF and an image viewer")
+	}
 	if request.Background != 0 && (!request.Continuous || request.Background>>24 != 255) {
 		return fmt.Errorf("region background requires an opaque color and a continuous PDF view")
 	}
@@ -278,7 +297,24 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 	}
 	initialPage := request.Continuous && request.Options.Page > 0 && !request.KeepPage
 	request.KeepPage = false
-	if !request.Continuous || surface.request == nil || !surface.request.Continuous {
+	if request.Viewer {
+		surface.scrollY, surface.targetY = 0, 0
+		surface.seekPosition, surface.seekPage = nil, nil
+		surface.pan, surface.sourceWidth, surface.sourceHeight = 0, 0, 0
+		surface.dragging = false
+		surface.zoom = 100
+		switch {
+		case request.ViewerZoom > 0:
+			surface.imageMode = imageZoom
+			surface.zoom = request.ViewerZoom
+		case request.Options.FitHeight:
+			surface.imageMode = imageFitHeight
+		case request.Options.FitWidth || request.Options.FitContain:
+			surface.imageMode = imageFitWidth
+		default:
+			surface.imageMode = imageOriginal
+		}
+	} else if !request.Continuous || surface.request == nil || !surface.request.Continuous {
 		surface.scrollY, surface.targetY = 0, 0
 		surface.seekPosition = nil
 		surface.seekPage = nil
@@ -321,6 +357,8 @@ func (t *Terminal) ClearRegion(id term.RegionID) error {
 	surface.searchAnchored = false
 	surface.bitmap = regionBitmap{}
 	surface.scrollY, surface.targetY = 0, 0
+	surface.pan, surface.sourceWidth, surface.sourceHeight = 0, 0, 0
+	surface.dragging = false
 	surface.seekPosition = nil
 	surface.seekPage = nil
 	surface.loading, surface.scrollFailed = false, false
@@ -358,15 +396,29 @@ func (t *Terminal) queueRegionImage() {
 	if r.Empty() {
 		return
 	}
-	width := surface.renderWidth(r.Dx())
+	width := surface.renderWidth(r.Dx(), r.Dy())
 	if surface.bitmap.contentHeight > 0 && surface.viewWidth > 0 && surface.viewWidth != width {
 		// Keep the same document coordinate when the fit-width scale changes.
 		scale := float64(width) / float64(surface.viewWidth)
-		surface.scrollY *= scale
-		surface.targetY *= scale
+		if surface.request.Viewer {
+			surface.scrollY = (surface.scrollY+float64(r.Dy())/2)*scale - float64(r.Dy())/2
+			surface.targetY = surface.scrollY
+			surface.pan = int(math.Round((float64(surface.pan)+float64(r.Dx())/2)*scale - float64(r.Dx())/2))
+		} else {
+			surface.scrollY *= scale
+			surface.targetY *= scale
+		}
 	}
 	surface.viewWidth = width
+	if surface.request.Viewer {
+		surface.zoom = max(1, int(math.Round(float64(width)*100/float64(max(1, r.Dx())))))
+		if surface.imageMode == imageZoom {
+			surface.request.ViewerZoom = surface.zoom
+		}
+	}
 	surface.pan = clampInt(surface.pan, 0, max(0, width-r.Dx()))
+	surface.scrollY = max(0, min(surface.scrollY, t.regionScrollMaximum()))
+	surface.targetY = max(0, min(surface.targetY, t.regionScrollMaximum()))
 	surface.scrollFailed = false
 	t.enqueueRegionJob(regionJob{generation: s.generation, revision: s.documentRevision, request: *surface.request,
 		width: width, height: r.Dy(), background: surface.background(s.background), position: int(surface.scrollY), search: surface.pendingSearch})
@@ -379,11 +431,34 @@ func (s *regionSurface) zoomPercent() int {
 	return s.zoom
 }
 
-func (s *regionSurface) renderWidth(width int) int {
-	if s.request == nil || !s.request.Continuous {
+func (s *regionSurface) renderWidth(width, height int) int {
+	if s.request == nil {
+		return width
+	}
+	if s.request.Viewer {
+		result := int64(width)
+		switch s.imageMode {
+		case imageFitHeight:
+			if s.sourceWidth > 0 && s.sourceHeight > 0 {
+				result = max(1, int64(height)*int64(s.sourceWidth)/int64(s.sourceHeight))
+			}
+		case imageOriginal:
+			if s.sourceWidth > 0 {
+				result = int64(s.sourceWidth)
+			}
+		case imageZoom:
+			result = max(1, int64(width)*int64(s.zoomPercent())/100)
+		}
+		return clampImageViewerWidth(result, height, s.sourceWidth, s.sourceHeight)
+	}
+	if !s.request.Continuous {
 		return width
 	}
 	return max(1, width*s.zoomPercent()/100)
+}
+
+func (s *regionSurface) scrollable() bool {
+	return s.request != nil && (s.request.Continuous || s.request.Viewer)
 }
 
 func (s *regionSurface) background(fallback uint32) uint32 {
@@ -426,7 +501,9 @@ func (t *Terminal) enqueueRegionJob(job regionJob) {
 
 func (t *Terminal) regionDecoder(jobs <-chan regionJob, metadata <-chan regionMetadataJob, done <-chan struct{}) {
 	var document *scrollPDF
+	var viewerImage *scrollImage
 	var documentRevision uint64
+	var imageRevision uint64
 	var metadataCache regionMetadataCache
 	defer func() { document.close() }()
 	for {
@@ -458,7 +535,24 @@ func (t *Terminal) regionDecoder(jobs <-chan regionJob, metadata <-chan regionMe
 			found := 0
 			var matches *pdfMatches
 			visibleFirst := false
-			if job.request.Continuous {
+			if job.request.Viewer {
+				document.close()
+				document = nil
+				if viewerImage == nil || imageRevision != job.revision {
+					var data []byte
+					data, err = limits.ReadFile(job.request.Path)
+					if err == nil {
+						viewerImage, err = openScrollImage(data)
+						if err == nil {
+							imageRevision = job.revision
+						}
+					}
+				}
+				if err == nil {
+					bitmap, err = viewerImage.renderJob(job)
+				}
+			} else if job.request.Continuous {
+				viewerImage = nil
 				if document == nil || documentRevision != job.revision {
 					var data []byte
 					data, err = limits.ReadFile(job.request.Path)
@@ -500,6 +594,7 @@ func (t *Terminal) regionDecoder(jobs <-chan regionJob, metadata <-chan regionMe
 			} else {
 				document.close()
 				document = nil
+				viewerImage = nil
 				bitmap, err = renderRegionImage(job)
 			}
 			t.displayRegions.mu.Lock()
@@ -551,6 +646,16 @@ func (t *Terminal) acceptRegionImage(job regionJob, bitmap regionBitmap, err err
 	}
 	surface.scrollFailed = false
 	surface.bitmap = bitmap
+	if surface.request != nil && surface.request.Viewer {
+		surface.sourceWidth, surface.sourceHeight = bitmap.sourceWidth, bitmap.sourceHeight
+		surface.viewWidth = bitmap.width
+		r := t.displayRegions.viewport
+		surface.zoom = max(1, int(math.Round(float64(bitmap.width)*100/float64(max(1, r.Dx())))))
+		if surface.imageMode == imageZoom {
+			surface.request.ViewerZoom = surface.zoom
+		}
+		surface.pan = clampInt(surface.pan, 0, max(0, bitmap.width-r.Dx()))
+	}
 	if bitmap.contentHeight > 0 {
 		maximum := float64(max(0, bitmap.contentHeight-t.displayRegions.viewport.Dy()))
 		if surface.seekPosition != nil {
@@ -568,11 +673,17 @@ func (t *Terminal) acceptRegionImage(job regionJob, bitmap regionBitmap, err err
 		surface.targetY = max(0, min(surface.targetY, maximum))
 		t.queueRegionScroll()
 	}
-	if request := t.displayRegions.secondary.request; request != nil && !request.Continuous {
+	if request := t.displayRegions.secondary.request; request != nil && !request.Continuous && !request.Viewer {
 		request.Options.Page = bitmap.page
 	}
 	t.displayRegions.secondary.dirty = true
 	t.requestRegionPaint()
+	if surface.request != nil && surface.request.Viewer {
+		r := t.displayRegions.viewport
+		if wanted := surface.renderWidth(r.Dx(), r.Dy()); wanted != bitmap.width {
+			t.queueRegionImage()
+		}
+	}
 }
 
 func (t *Terminal) requestRegionPaint() {
@@ -611,7 +722,7 @@ func (t *Terminal) overSecondary(px, py int) bool {
 	return t.displayRegions.secondary != nil && image.Pt(px, py).In(t.secondaryPanePixels())
 }
 
-func (t *Terminal) regionMousePress(button byte, px, py int) bool {
+func (t *Terminal) regionMousePress(button byte, state uint16, px, py int) bool {
 	if t.buttons != 0 || !t.overSecondary(px, py) {
 		return false // a main-region drag keeps ownership through its release
 	}
@@ -628,7 +739,14 @@ func (t *Terminal) regionMousePress(button byte, px, py int) bool {
 		if button == 4 {
 			delta = -1
 		}
-		if surface.request != nil && surface.request.Continuous {
+		if surface.request != nil && surface.request.Viewer && state&ControlMask != 0 {
+			t.zoomRegionImage(surface, -delta)
+			if t.termCore != nil {
+				t.termCore.WriteToTTY([]byte(t.regionStatusReply(term.SecondaryRegion, surface)), false)
+			}
+			return true
+		}
+		if surface.scrollable() {
 			t.scrollRegionBy(delta)
 			return true
 		}
@@ -643,7 +761,39 @@ func (t *Terminal) regionMousePress(button byte, px, py int) bool {
 		req.Options.Page += delta
 		_ = t.openRegion(term.SecondaryRegion, req)
 	}
+	if button == 1 && surface.request != nil && surface.request.Viewer {
+		surface.dragging = true
+		surface.dragX, surface.dragY = px, py
+	}
 	return true
+}
+
+func (t *Terminal) regionMouseMotion(px, py int) {
+	t.displayRegions.mu.Lock()
+	defer t.displayRegions.mu.Unlock()
+	s := t.displayRegions.secondary
+	if s == nil || !s.dragging || s.request == nil || !s.request.Viewer {
+		return
+	}
+	r := t.displayRegions.viewport
+	s.pan = clampInt(s.pan+s.dragX-px, 0, max(0, s.renderWidth(r.Dx(), r.Dy())-r.Dx()))
+	s.scrollY = max(0, min(s.scrollY+float64(s.dragY-py), t.regionScrollMaximum()))
+	s.targetY = s.scrollY
+	s.dragX, s.dragY = px, py
+	s.dirty = true
+	t.queueRegionScroll()
+	t.requestRegionPaint()
+}
+
+func (t *Terminal) regionMouseRelease(button byte) {
+	if button != 1 {
+		return
+	}
+	t.displayRegions.mu.Lock()
+	if s := t.displayRegions.secondary; s != nil {
+		s.dragging = false
+	}
+	t.displayRegions.mu.Unlock()
 }
 
 func (t *Terminal) SetRegionScrollReporting(id term.RegionID, enabled bool) error {
@@ -705,7 +855,7 @@ func (t *Terminal) FindRegion(id term.RegionID, text string, direction int, next
 	t.displayRegions.generation++
 	r := t.secondaryPixels()
 	t.enqueueRegionJob(regionJob{generation: t.displayRegions.generation, revision: t.displayRegions.documentRevision,
-		request: *s.request, width: s.renderWidth(r.Dx()), height: r.Dy(), background: s.background(t.colorAt(ColDefaultBg)),
+		request: *s.request, width: s.renderWidth(r.Dx(), r.Dy()), height: r.Dy(), background: s.background(t.colorAt(ColDefaultBg)),
 		search: s.pendingSearch})
 	t.requestRegionPaint()
 	return nil
@@ -748,25 +898,54 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 		return nil
 	}
 	if event.Kind == "info" {
-		page, pages := surface.currentPage(), max(0, len(surface.bitmap.pageTops)-1)
-		position := int(surface.scrollY / max(1, t.regionScrollMaximum()) * 1e6)
-		loading, failed := 0, 0
-		if surface.loading && !surface.covers(t.displayRegions.viewport.Dy()) {
-			loading = 1
-		}
-		if surface.scrollFailed {
-			failed = 1
-		}
-		t.termCore.WriteToTTY([]byte(fmt.Sprintf("\x1bPregion %s status %d %d %d %d %d %d\x1b\\", id, page, pages, clampInt(position, 0, 1000000), surface.zoomPercent(), loading, failed)), false)
+		t.termCore.WriteToTTY([]byte(t.regionStatusReply(id, surface)), false)
 		return nil
 	}
 	switch event.Kind {
+	case "fit-width", "fit-height", "fit-original":
+		if surface.request == nil || !surface.request.Viewer {
+			return fmt.Errorf("fit navigation requires an image viewer")
+		}
+		switch event.Kind {
+		case "fit-height":
+			surface.imageMode = imageFitHeight
+			surface.request.Options.FitContain, surface.request.Options.FitWidth, surface.request.Options.FitHeight = false, false, true
+		case "fit-original":
+			surface.imageMode = imageOriginal
+			surface.request.Options.FitContain, surface.request.Options.FitWidth, surface.request.Options.FitHeight = false, false, false
+		default:
+			surface.imageMode = imageFitWidth
+			surface.request.Options.FitContain, surface.request.Options.FitWidth, surface.request.Options.FitHeight = false, true, false
+		}
+		surface.request.ViewerZoom = 0
+		surface.pan, surface.scrollY, surface.targetY = 0, 0, 0
+		t.queueRegionImage()
+		return nil
+	case "zoomstep":
+		if surface.request == nil || !surface.request.Viewer || event.Value == 0 {
+			return fmt.Errorf("zoomstep requires an image viewer and a nonzero direction")
+		}
+		t.zoomRegionImage(surface, event.Value)
+		return nil
 	case "page", "pages", "view", "zoom", "pan":
-		if surface.request == nil || !surface.request.Continuous {
-			return fmt.Errorf("navigation requires a continuous PDF")
+		if !surface.scrollable() {
+			return fmt.Errorf("navigation requires a continuous document or image viewer")
 		}
 		switch event.Kind {
 		case "zoom":
+			if surface.request.Viewer {
+				if event.Value < 1 || event.Value > term.RegionViewerZoomMaximum {
+					return fmt.Errorf("image zoom must be 1..%d percent", term.RegionViewerZoomMaximum)
+				}
+				if event.Value != surface.zoomPercent() || surface.imageMode != imageZoom {
+					surface.zoom = event.Value
+					surface.imageMode = imageZoom
+					surface.request.ViewerZoom = event.Value
+					surface.request.Options.FitContain, surface.request.Options.FitWidth, surface.request.Options.FitHeight = false, false, false
+					t.queueRegionImage()
+				}
+				return nil
+			}
 			// 0 is best-fit for the current page; 100 is fit-width.
 			zoom := event.Value
 			if zoom == 0 && len(surface.bitmap.pageTops) > 1 {
@@ -788,6 +967,9 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 		case "view":
 			t.scrollRegionPixels(float64(event.Value) * float64(t.secondaryPixels().Dy()) / 1e6)
 		case "page", "pages":
+			if !surface.request.Continuous {
+				return fmt.Errorf("page navigation requires a continuous PDF")
+			}
 			page := event.Value
 			if event.Kind == "pages" {
 				page += surface.currentPage()
@@ -812,8 +994,8 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 	}
 	if event.Kind == "position" {
 		surface.searchAnchored = false
-		if event.Value < 0 || event.Value > 1000000 || surface.request == nil || !surface.request.Continuous {
-			return fmt.Errorf("position requires a continuous PDF and a value from 0 to 1000000")
+		if event.Value < 0 || event.Value > 1000000 || !surface.scrollable() {
+			return fmt.Errorf("position requires a scrollable region and a value from 0 to 1000000")
 		}
 		if surface.loading {
 			value := event.Value
@@ -828,7 +1010,7 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 		t.requestRegionPaint()
 		return nil
 	}
-	if event.Kind == "scroll" && surface.request != nil && surface.request.Continuous {
+	if event.Kind == "scroll" && surface.scrollable() {
 		t.scrollRegionBy(event.Value)
 		return nil
 	}
@@ -837,6 +1019,79 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 	}
 	t.termCore.WriteToTTY([]byte(fmt.Sprintf("\x1bPregion %s event %s %d\x1b\\", id, event.Kind, event.Value)), false)
 	return nil
+}
+
+// regionStatusReply is also emitted immediately for host-owned Ctrl+wheel
+// zoom, so the client can preserve that mode if the next key changes images.
+// The display-region mutex is held by every caller.
+func (t *Terminal) regionStatusReply(id term.RegionID, surface *regionSurface) string {
+	page, pages := surface.currentPage(), max(0, len(surface.bitmap.pageTops)-1)
+	if surface.request != nil && surface.request.Viewer && surface.sourceWidth > 0 {
+		page, pages = 1, 1
+	}
+	position := int(surface.scrollY / max(1, t.regionScrollMaximum()) * 1e6)
+	loading, failed := 0, 0
+	if surface.loading && !surface.covers(t.displayRegions.viewport.Dy()) {
+		loading = 1
+	}
+	if surface.scrollFailed {
+		failed = 1
+	}
+	reply := fmt.Sprintf("\x1bPregion %s status %d %d %d %d %d %d\x1b\\", id, page, pages, clampInt(position, 0, 1000000), surface.zoomPercent(), loading, failed)
+	if surface.request != nil && surface.request.Viewer {
+		reply += fmt.Sprintf("\x1bPregion %s image-status %d %d %d %d %s %d %d\x1b\\", id,
+			surface.sourceWidth, surface.sourceHeight, clampInt(position, 0, 1000000), surface.zoomPercent(), surface.imageModeName(), loading, failed)
+	}
+	return reply
+}
+
+func (s *regionSurface) imageModeName() string {
+	switch s.imageMode {
+	case imageFitHeight:
+		return "height"
+	case imageOriginal:
+		return "original"
+	case imageZoom:
+		return "zoom"
+	default:
+		return "width"
+	}
+}
+
+// zoomRegionImage changes a raster viewer relative to its current fit-width
+// percentage. Keeping this in the frontend lets Ctrl+wheel work before the TUI
+// receives another status reply and keeps all backends behaviorally identical.
+// The display-region mutex is held by every caller.
+func (t *Terminal) zoomRegionImage(surface *regionSurface, steps int) {
+	steps = clampInt(steps, -20, 20)
+	zoom := surface.zoomPercent()
+	initial := zoom
+	for steps > 0 {
+		if zoom >= term.RegionViewerZoomMaximum {
+			break
+		}
+		next := max(zoom+1, (zoom*5+3)/4)
+		zoom = min(term.RegionViewerZoomMaximum, next)
+		steps--
+	}
+	for steps < 0 {
+		if zoom > term.RegionViewerZoomMaximum {
+			zoom = term.RegionViewerZoomMaximum
+			steps++
+			continue
+		}
+		next := min(zoom-1, zoom*4/5)
+		zoom = max(1, next)
+		steps++
+	}
+	if zoom == initial {
+		return
+	}
+	surface.zoom = zoom
+	surface.imageMode = imageZoom
+	surface.request.ViewerZoom = zoom
+	surface.request.Options.FitContain, surface.request.Options.FitWidth, surface.request.Options.FitHeight = false, false, false
+	t.queueRegionImage()
 }
 
 func (s *regionSurface) currentPage() int {
@@ -871,12 +1126,12 @@ func (t *Terminal) regionScrollMaximum() float64 {
 	}
 	b := t.displayRegions.secondary.bitmap
 	r := t.displayRegions.viewport
-	return max(0, float64(b.contentHeight)*float64(t.displayRegions.secondary.renderWidth(r.Dx()))/float64(max(1, b.width))-float64(r.Dy()))
+	return max(0, float64(b.contentHeight)*float64(t.displayRegions.secondary.renderWidth(r.Dx(), r.Dy()))/float64(max(1, b.width))-float64(r.Dy()))
 }
 
 func (t *Terminal) tickRegionScroll(now time.Time) {
 	s := t.displayRegions.secondary
-	if s == nil || s.list == nil && (s.request == nil || !s.request.Continuous) || s.scrollY == s.targetY {
+	if s == nil || s.list == nil && !s.scrollable() || s.scrollY == s.targetY {
 		return
 	}
 	dt := max(0, min(now.Sub(s.lastScroll).Seconds(), 0.05))
@@ -892,7 +1147,7 @@ func (t *Terminal) tickRegionScroll(now time.Time) {
 
 func (t *Terminal) queueRegionScroll() {
 	s := t.displayRegions.secondary
-	if s == nil || s.request == nil || !s.request.Continuous || s.loading || s.scrollFailed || s.bitmap.contentHeight == 0 {
+	if s == nil || !s.scrollable() || s.loading || s.scrollFailed || s.bitmap.contentHeight == 0 {
 		return
 	}
 	r := t.displayRegions.viewport
@@ -914,7 +1169,7 @@ func (t *Terminal) queueRegionScroll() {
 		return
 	}
 	t.enqueueRegionJob(regionJob{generation: t.displayRegions.generation, revision: t.displayRegions.documentRevision, request: *s.request,
-		width: s.renderWidth(r.Dx()), height: r.Dy(), position: position, background: s.background(t.displayRegions.background)})
+		width: s.renderWidth(r.Dx(), r.Dy()), height: r.Dy(), position: position, background: s.background(t.displayRegions.background)})
 }
 
 func (s *regionSurface) covers(height int) bool {
@@ -961,8 +1216,12 @@ func renderRegionPixels(surface regionSurface, r, pane image.Rectangle, fallback
 	}
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		if bitmap.contentHeight > 0 && len(bitmap.pixels) > 0 {
-			width := surface.renderWidth(r.Dx())
-			sy := int(math.Round((surface.scrollY+float64(y-r.Min.Y))*float64(bitmap.width)/float64(width))) - bitmap.top
+			width := surface.renderWidth(r.Dx(), r.Dy())
+			viewY := float64(y - r.Min.Y)
+			if surface.request != nil && surface.request.Viewer && bitmap.contentHeight < r.Dy() {
+				viewY -= float64(r.Dy()-bitmap.contentHeight) / 2
+			}
+			sy := int(math.Round((surface.scrollY+viewY)*float64(bitmap.width)/float64(width))) - bitmap.top
 			if sy >= 0 && sy < bitmap.height && bitmap.width == width && width >= r.Dx() {
 				start := sy*bitmap.width + surface.pan
 				copy(pixels[y*stride+r.Min.X:y*stride+r.Max.X], bitmap.pixels[start:start+r.Dx()])

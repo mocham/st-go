@@ -36,10 +36,19 @@ type RegionImage struct {
 	KeepPage bool
 	// Continuous displays PDF pages as one locally scrollable, fit-width view.
 	Continuous bool
+	// Viewer displays one raster image on a locally pannable and zoomable
+	// canvas. It is separate from Continuous because that mode owns PDF page,
+	// search and document metadata semantics.
+	Viewer bool
+	// ViewerZoom selects a fit-width percentage for the initial viewer render.
+	// Zero uses Options to select fit-width, fit-height, or native size.
+	ViewerZoom int
 	// Background is an opaque 0xAARRGGBB paper/canvas color for continuous
 	// PDF views. Zero keeps the default white background.
 	Background uint32
 }
+
+const RegionViewerZoomMaximum = 6400
 
 // RegionHooks is an optional frontend capability. Keeping rectangle-based
 // layouts and explicit targets allows more layouts without changing callers.
@@ -248,7 +257,16 @@ func (t *Term) dslRegion(args []string) error {
 			return fmt.Errorf("region navigation is not supported by this frontend")
 		}
 		return navigation.NavigateRegion(id, RegionNavigation{Kind: "info"})
-	case "scroll", "seek", "position", "page", "pages", "view", "zoom", "pan":
+	case "fit":
+		if len(args) != 3 || (args[2] != "width" && args[2] != "height" && args[2] != "original") {
+			return fmt.Errorf("region fit requires width, height, or original")
+		}
+		navigation, ok := t.hooks.(RegionNavigationHooks)
+		if !ok {
+			return fmt.Errorf("region navigation is not supported by this frontend")
+		}
+		return navigation.NavigateRegion(id, RegionNavigation{Kind: "fit-" + args[2]})
+	case "scroll", "seek", "position", "page", "pages", "view", "zoom", "zoomstep", "pan":
 		if len(args) != 3 {
 			return fmt.Errorf("region navigation requires one value")
 		}
@@ -288,10 +306,24 @@ func (t *Term) dslRegion(args []string) error {
 				i++
 			case "continuous":
 				req.Continuous = true
+			case "viewer":
+				req.Viewer = true
 			case "fit-contain", "fit-width", "fit-height", "native":
+				req.ViewerZoom = 0
 				req.Options.FitContain = args[i] == "fit-contain"
 				req.Options.FitWidth = args[i] == "fit-width"
 				req.Options.FitHeight = args[i] == "fit-height"
+			case "zoom":
+				if i+1 >= len(args) {
+					return fmt.Errorf("region open zoom requires a percentage")
+				}
+				n, err := strconv.Atoi(args[i+1])
+				if err != nil || n < 1 || n > RegionViewerZoomMaximum {
+					return fmt.Errorf("region viewer zoom must be 1..%d percent", RegionViewerZoomMaximum)
+				}
+				req.ViewerZoom = n
+				req.Options.FitContain, req.Options.FitWidth, req.Options.FitHeight = false, false, false
+				i++
 			case "page":
 				if i+1 >= len(args) {
 					return fmt.Errorf("region open page requires a positive page number")
@@ -314,6 +346,12 @@ func (t *Term) dslRegion(args []string) error {
 		}
 		if req.Background != 0 && !req.Continuous {
 			return fmt.Errorf("region background requires a continuous PDF view")
+		}
+		if req.Continuous && req.Viewer {
+			return fmt.Errorf("region open cannot be both a continuous PDF and an image viewer")
+		}
+		if req.ViewerZoom != 0 && !req.Viewer {
+			return fmt.Errorf("region open zoom requires an image viewer")
 		}
 		return hooks.OpenRegion(id, req)
 	default:

@@ -89,11 +89,12 @@ wildcard `all`. `FILE`, `NAME`, `BROWSER_DIR`, and `ST_GO_BACKEND` are exported
 to `bash -c`, supporting functions and command sequences without interpolating
 filenames into shell code.
 
-By default, both browsers open `.pdf` with [zat](../zat/README.md), and text,
-source, and configuration files with [govim](../govim/README.md), when the tool
-is in `PATH`. This includes `.sh`, `.txt`, syntax-highlighted formats, dotfiles,
-and extensionless scripts; extensions are case-insensitive. With supported,
-enabled st-go tabs, the **Go browser** requests a new focused tab:
+By default, the Go browser opens images with [goiv](../goiv/README.md). Both
+browsers open `.pdf` with [zat](../zat/README.md), and text, source, and
+configuration files with [govim](../govim/README.md), when the tool is in
+`PATH`. This includes `.sh`, `.txt`, syntax-highlighted formats, dotfiles, and
+extensionless scripts; extensions are case-insensitive. With supported, enabled
+st-go tabs, the **Go browser** requests a new focused tab:
 the first successful open lazily initializes tabs, retains the browser in tab 1,
 and appends the new PTY last, selecting it only after a successful launch. The
 browser keeps its PTY, directory, selection, and preview in its own tab. Switch

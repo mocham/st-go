@@ -70,9 +70,17 @@ func (t *Terminal) eventCallbacks() api.Callbacks {
 		Expose: t.expose, ExposeSurface: t.exposeRegion, KeyPress: t.keyPress, Text: t.textInput,
 		PointerPress: t.pointerPress, PointerRelease: t.pointerRelease, PointerMotion: t.pointerMotion,
 		Resize: t.resize, Focus: t.focus, Close: t.Close,
-		Paste:       func(text string) { t.pasteToTTY(replaceNewlines(text)) },
-		PaintDirty:  func() { t.termCore.PaintDirty() },
-		CancelInput: func() { t.buttons, t.regionButtons = 0, 0; t.msel = mouseSel{}; t.suppressRestoreButton = false },
+		Paste:      func(text string) { t.pasteToTTY(replaceNewlines(text)) },
+		PaintDirty: func() { t.termCore.PaintDirty() },
+		CancelInput: func() {
+			t.buttons, t.regionButtons = 0, 0
+			t.msel, t.suppressRestoreButton = mouseSel{}, false
+			t.displayRegions.mu.Lock()
+			if s := t.displayRegions.secondary; s != nil {
+				s.dragging = false
+			}
+			t.displayRegions.mu.Unlock()
+		},
 	}
 }
 

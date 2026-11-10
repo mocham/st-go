@@ -65,6 +65,12 @@ func TestKmapExact(t *testing.T) {
 		{0xFF51, ShiftMask | ControlMask, "\x1b[1;6D"}, // Ctrl+Shift+Left
 		{0xFF53, 0, "\x1b[C"},                          // Right
 		{0xFF08, 0, "\x7f"},                            // BackSpace no-mod
+		{'+', ControlMask, "\x1b[43;5u"},               // Ctrl+Plus
+		{'+', ShiftMask | ControlMask, "\x1b[43;5u"},   // Ctrl+Shift+Plus
+		{'=', ControlMask, "\x1b[61;5u"},               // Ctrl+Equals
+		{'-', ControlMask, "\x1b[45;5u"},               // Ctrl+Minus
+		{XKKPAdd, ControlMask, "\x1b[43;5u"},           // Ctrl+keypad Plus
+		{XKKPSubtract, ControlMask, "\x1b[45;5u"},      // Ctrl+keypad Minus
 	}
 	for _, c := range cases {
 		s, m := trm.kmap(c.ksym, c.state)

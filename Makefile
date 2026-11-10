@@ -40,11 +40,11 @@ STB_URL     = https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
-BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat govim govim-pinyind
+BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat goiv govim govim-pinyind
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
-DEMO_MODULES = demo-go demo-go/file-browser demo-go/gols demo-go/govim demo-go/pinyind demo-go/vimtex demo-go/zat
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gols demo-go/govim demo-go/pinyind demo-go/vimtex demo-go/zat
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
 MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
 CFG         = functionalities/config/config.json
@@ -78,6 +78,7 @@ GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go demo-go/vimtex/*.vim functionalities/ptyutil/*.go functionalities/limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go functionalities/limits/*.go functionalities/pdfmeta/*.go) \
 	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
+GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
 GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 
 # Google Pinyin decoder only: no SCIM, GTK, X11 or installed IM framework.
@@ -488,6 +489,10 @@ $(OUTPUT_DIR)/vimtex: $(VIMTEX_GO_SRC)
 # PDF viewer; Poppler and the pixel cache live in the terminal, not this TUI.
 $(OUTPUT_DIR)/zat: $(ZAT_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/zat build -trimpath -o $(abspath $@) .
+
+# Raster image viewer; decoding and retained pixels live in the terminal.
+$(OUTPUT_DIR)/goiv: $(GOIV_GO_SRC)
+	CGO_ENABLED=0 go -C demo-go/goiv build -trimpath -o $(abspath $@) .
 
 # Native Go TUI editor, with terminal clipboard protocol and recovery journal.
 $(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC) $(wildcard functionalities/tui/pinyin/*.go) $(OUTPUT_DIR)/govim-pinyind

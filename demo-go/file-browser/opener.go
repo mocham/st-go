@@ -17,6 +17,8 @@ func terminalDocumentTool(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".pdf":
 		name = "zat"
+	case ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".ico":
+		name = "goiv"
 	default:
 		if !editorTextFile(path) {
 			return ""

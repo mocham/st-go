@@ -66,7 +66,7 @@ func TestNoDisplayBackendDependencies(t *testing.T) {
 }
 
 func TestApplicationModulesDoNotDependOnGraphicalHost(t *testing.T) {
-	for _, name := range []string{"file-browser", "gols", "govim", "pinyind", "vimtex", "zat"} {
+	for _, name := range []string{"file-browser", "goiv", "gols", "govim", "pinyind", "vimtex", "zat"} {
 		t.Run(name, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join(name, "go.mod"))
 			if err != nil || !strings.HasPrefix(string(data), "module st-go/demo-go/"+name+"\n") {

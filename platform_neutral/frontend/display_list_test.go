@@ -50,14 +50,14 @@ func TestRetainedListSmoothScrollHitTestingAndPreviewRestore(t *testing.T) {
 		}
 	}
 	r := trm.secondaryPixels()
-	trm.regionMousePress(5, r.Min.X+2, r.Min.Y+2)
+	trm.regionMousePress(5, 0, r.Min.X+2, r.Min.Y+2)
 	if active.scrollY <= 0 || active.scrollY >= active.targetY {
 		t.Fatalf("wheel did not ease: %v -> %v", active.scrollY, active.targetY)
 	}
 	var replies bytes.Buffer
 	trm.termCore.SetWriter(func(data []byte) { replies.Write(data) })
 	y := r.Min.Y + active.list.headerHeight() + active.list.rowHeight()/2
-	trm.regionMousePress(1, r.Min.X+2, y)
+	trm.regionMousePress(1, 0, r.Min.X+2, y)
 	want := "region secondary event activate 17 1"
 	if !bytes.Contains(replies.Bytes(), []byte(want)) {
 		t.Fatalf("click used uncommitted/target scroll position: %q want %q", replies.String(), want)
@@ -68,7 +68,7 @@ func TestRetainedListSmoothScrollHitTestingAndPreviewRestore(t *testing.T) {
 	active.targetY, active.dirty = active.scrollY, true
 	trm.paintSecondary()
 	replies.Reset()
-	trm.regionMousePress(1, r.Min.X+2, r.Min.Y+active.list.headerHeight())
+	trm.regionMousePress(1, 0, r.Min.X+2, r.Min.Y+active.list.headerHeight())
 	if !bytes.Contains(replies.Bytes(), []byte("region secondary event activate 17 2")) {
 		t.Fatalf("fractional row-boundary click selected wrong item: %q", replies.String())
 	}

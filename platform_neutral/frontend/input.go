@@ -58,6 +58,15 @@ type keyDef struct {
 // defaultKeymap mirrors config.h's key[] array.
 func defaultKeymap() []keyDef {
 	keys := []keyDef{
+		// Printable Ctrl combinations that XLookupString otherwise drops. CSI-u
+		// keeps the modifier explicit for full-screen applications such as goiv.
+		{'+', ControlMask, "\x1b[43;5u", 0, 0},
+		{'+', ShiftMask | ControlMask, "\x1b[43;5u", 0, 0},
+		{'=', ControlMask, "\x1b[61;5u", 0, 0},
+		{'-', ControlMask, "\x1b[45;5u", 0, 0},
+		{'-', ShiftMask | ControlMask, "\x1b[45;5u", 0, 0},
+		{XKKPAdd, ControlMask, "\x1b[43;5u", 0, 0},
+		{XKKPSubtract, ControlMask, "\x1b[45;5u", 0, 0},
 		{XKKPHome, ShiftMask, "\x1b[2J", 0, -1},
 		{XKKPHome, ShiftMask, "\x1b[1;2H", 0, +1},
 		{XKKPHome, XKAnyMod, "\x1b[H", 0, -1},

@@ -65,7 +65,7 @@ exit "${TOOL_EXIT:-0}"
 func TestDocumentToolsUseSameTerminalAndReturn(t *testing.T) {
 	for implementation, program := range documentBrowserCommands(t) {
 		t.Run(implementation, func(t *testing.T) {
-			for _, test := range []struct{ name, tool, activate, result string }{
+			tests := []struct{ name, tool, activate, result string }{
 				{"a ';$literal.pdf", "zat", "\r", "zat finished"},
 				{"a document.tex", "govim", "o", "govim finished"},
 				{"a document.md", "govim", "double", "govim finished"},
@@ -82,7 +82,14 @@ func TestDocumentToolsUseSameTerminalAndReturn(t *testing.T) {
 				{".bashrc", "govim", "\r", "govim finished"},
 				{"plain.extensionless-custom", "govim", "\r", "govim finished"},
 				{"path document.pdf", "zat", "path", "zat finished"},
-			} {
+			}
+			if implementation == "go" {
+				tests = append(tests,
+					struct{ name, tool, activate, result string }{"a image.png", "goiv", "\r", "goiv finished"},
+					struct{ name, tool, activate, result string }{"a image.WEBP", "goiv", "o", "goiv finished"},
+				)
+			}
+			for _, test := range tests {
 				t.Run(filepath.Ext(test.name), func(t *testing.T) {
 					dir, tools := t.TempDir(), documentToolTestPath(t)
 					writeFiles(t, dir, test.name)
@@ -149,7 +156,7 @@ func TestDocumentToolsUseSameTerminalAndReturn(t *testing.T) {
 func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 	for implementation, program := range documentBrowserCommands(t) {
 		t.Run(implementation, func(t *testing.T) {
-			for _, mode := range []string{"missing-pdf", "missing-tex", "missing-md", "missing-txt", "missing-sh", "custom-flag", "custom-env", "disabled", "unrelated"} {
+			for _, mode := range []string{"missing-pdf", "missing-image", "missing-tex", "missing-md", "missing-txt", "missing-sh", "custom-flag", "custom-env", "disabled"} {
 				t.Run(mode, func(t *testing.T) {
 					dir, tools := t.TempDir(), documentToolTestPath(t)
 					name := "document.pdf"
@@ -165,7 +172,7 @@ func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 					if mode == "missing-sh" {
 						name = "document.sh"
 					}
-					if mode == "unrelated" {
+					if mode == "missing-image" {
 						name = "image.png"
 					}
 					writeFiles(t, dir, name)
@@ -177,13 +184,16 @@ func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 					// govim is missing. Keep the established external fallback instead.
 					writeDocumentTool(t, tools, "vimtex", `printf 'wrong legacy tool' > "$MARKER"`)
 					if !strings.HasPrefix(mode, "missing-") {
-						for _, tool := range []string{"zat", "govim"} {
+						for _, tool := range []string{"zat", "goiv", "govim"} {
 							writeDocumentTool(t, tools, tool, `printf 'wrong tool' > "$MARKER"`)
 						}
 					} else {
 						tool, other := "zat", "govim"
-						if mode != "missing-pdf" {
-							tool, other = other, tool
+						switch mode {
+						case "missing-image":
+							tool, other = "goiv", "zat"
+						case "missing-tex", "missing-md", "missing-txt", "missing-sh":
+							tool, other = "govim", "zat"
 						}
 						writeDocumentTool(t, tools, other, `printf 'wrong tool' > "$MARKER"`)
 						// An existing but non-executable file is not an available tool.
@@ -213,7 +223,7 @@ func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 					}
 					file := filepath.Join(dir, name)
 					want := file
-					if implementation == "go" && (mode == "missing-pdf" || mode == "unrelated") {
+					if implementation == "go" && (mode == "missing-pdf" || mode == "missing-image") {
 						want = "external|" + file
 					}
 					if mode == "missing-tex" || mode == "missing-md" || mode == "missing-txt" || mode == "missing-sh" {

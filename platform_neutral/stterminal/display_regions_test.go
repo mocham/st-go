@@ -10,11 +10,12 @@ import (
 
 type regionTestHooks struct {
 	mockHooks
-	regions  []DisplayRegion
-	images   []RegionImage
-	targets  []RegionID
-	cleared  RegionID
-	metadata []RegionDocumentQuery
+	regions    []DisplayRegion
+	images     []RegionImage
+	targets    []RegionID
+	cleared    RegionID
+	metadata   []RegionDocumentQuery
+	navigation []RegionNavigation
 }
 
 func (h *regionTestHooks) SetRegions(regions []DisplayRegion) error {
@@ -31,6 +32,12 @@ func (h *regionTestHooks) ClearRegion(id RegionID) error { h.cleared = id; retur
 func (h *regionTestHooks) QueryRegionDocument(id RegionID, query RegionDocumentQuery) error {
 	h.targets = append(h.targets, id)
 	h.metadata = append(h.metadata, query)
+	return nil
+}
+func (h *regionTestHooks) SetRegionScrollReporting(RegionID, bool) error { return nil }
+func (h *regionTestHooks) NavigateRegion(id RegionID, event RegionNavigation) error {
+	h.targets = append(h.targets, id)
+	h.navigation = append(h.navigation, event)
 	return nil
 }
 
@@ -82,6 +89,18 @@ func TestDisplayRegionProtocol(t *testing.T) {
 	if len(h.images) != 3 || !h.images[2].Continuous || !h.images[2].Options.FitWidth || h.images[2].Background != 0xfff7f5ef {
 		t.Fatal("continuous fit-width view was not passed to the frontend")
 	}
+	core.Twrite([]byte("\x1bPregion secondary open '/tmp/image.png' viewer fit-width; region secondary fit height; region secondary fit original; region secondary zoomstep -1\x1b\\"), false)
+	if len(h.images) != 4 || !h.images[3].Viewer || !h.images[3].Options.FitWidth {
+		t.Fatal("raster viewer request was not passed to the frontend")
+	}
+	core.Twrite([]byte("\x1bPregion secondary open '/tmp/image.png' viewer zoom 175\x1b\\"), false)
+	if len(h.images) != 5 || !h.images[4].Viewer || h.images[4].ViewerZoom != 175 || h.images[4].Options.FitContain || h.images[4].Options.FitWidth || h.images[4].Options.FitHeight {
+		t.Fatal("direct raster viewer zoom was not passed to the frontend")
+	}
+	wantNavigation := []RegionNavigation{{Kind: "fit-height"}, {Kind: "fit-original"}, {Kind: "zoomstep", Value: -1}}
+	if !reflect.DeepEqual(h.navigation, wantNavigation) {
+		t.Fatalf("viewer navigation = %#v", h.navigation)
+	}
 	core.Twrite([]byte("\x1bPregion secondary clear; region reset\x1b\\"), false)
 	if h.cleared != SecondaryRegion || h.regions != nil {
 		t.Fatal("clear/reset was not dispatched")
@@ -98,6 +117,8 @@ func TestDisplayRegionParserRejectsMalformedCommands(t *testing.T) {
 		"secondary open a.webp anim", "secondary open a.png unknown", "secondary clear extra", "reset extra",
 		"secondary open a.pdf continuous background", "secondary open a.pdf continuous background '#xyz123'",
 		"secondary open a.pdf continuous background '#fff'", "secondary open a.pdf background '#ffffff'",
+		"secondary open a.png viewer continuous", "secondary open a.png zoom", "secondary open a.png zoom 0", "secondary open a.png zoom 100", "secondary open a.png viewer zoom 6401",
+		"secondary fit", "secondary fit contain", "secondary zoomstep nope",
 	} {
 		before := append([]DisplayRegion(nil), h.regions...)
 		if err := core.dslRegion(dslTokenize(command)); err == nil {

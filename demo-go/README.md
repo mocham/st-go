@@ -15,6 +15,7 @@ host. Generated executables live in `BINARIES/`; see the
 go -C demo-go/govim build -o ../../BINARIES/govim .
 go -C demo-go/govim test ./...
 GOWORK=off go -C demo-go/zat test ./...   # standalone, without workspace help
+GOWORK=off go -C demo-go/goiv test ./...  # retained raster image viewer
 make test-tui                           # all demo/shared client modules
 ```
 
@@ -29,6 +30,7 @@ The sibling `demo-go` module contains architecture/dependency guards only.
 | Native Go modal editor, recovery journals, retained document preview, and lazy CJK input | [govim](govim/README.md), [roadmap](govim/ROADMAP.md), [Pinyin helper](pinyind/README.md) |
 | Real Vim with a saved-document LaTeX preview | [vimtex](vimtex/README.md) |
 | Native, smoothly scrolling PDF viewer | [zat](zat/README.md), [performance notes](zat/PERFORMANCE.md) |
+| Retained raster image viewer with fit, zoom, drag, and sibling navigation | [goiv](goiv/README.md) |
 | Filesystem/archive browser, document previews, and backend-aware openers | [file-browser](file-browser/README.md) |
 | Immutable SQLite corpus browser and document search | [gols](gols/README.md) |
 

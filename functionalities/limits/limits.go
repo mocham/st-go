@@ -25,7 +25,7 @@ const (
 	ClipboardBytes       = MaxBytes / 8
 	GlyphCacheBytes      = MaxBytes / 2
 	GlyphCacheEntries    = MaxBytes / 4096
-	PreviewCacheBytes    = MaxBytes * 4 // 256 MiB per continuous-PDF strip
+	PreviewCacheBytes    = MaxBytes * 4 // 256 MiB per retained PDF/image strip
 	PreviewScreens       = 5
 	PreviewFrameInterval = 16 * time.Millisecond
 	PreviewPages         = MaxBytes / 4096

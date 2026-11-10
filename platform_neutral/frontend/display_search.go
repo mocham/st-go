@@ -68,7 +68,7 @@ func (t *Terminal) revealSearchMatch() {
 	s := t.displayRegions.secondary
 	s.searchAnchored = true
 	r := t.displayRegions.viewport
-	width := s.renderWidth(r.Dx())
+	width := s.renderWidth(r.Dx(), r.Dy())
 	// The previous bitmap may still be at the old zoom while resize decodes.
 	tops := make([]int, len(s.bitmap.pageTops))
 	for i, top := range s.bitmap.pageTops {
@@ -90,7 +90,7 @@ func paintSearchMatches(surface regionSurface, viewport image.Rectangle, pixels 
 	if m == nil || len(b.pageTops) < 2 || b.contentHeight == 0 {
 		return
 	}
-	width := surface.renderWidth(viewport.Dx())
+	width := surface.renderWidth(viewport.Dx(), viewport.Dy())
 	scale := float64(width) / float64(max(1, b.width))
 	x0 := viewport.Min.X - surface.pan + max(0, (viewport.Dx()-width)/2)
 	for i, hit := range m.hits {
