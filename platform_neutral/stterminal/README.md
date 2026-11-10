@@ -77,6 +77,33 @@ These requests obey `allowgeometryops`, enabled in the default configuration.
 Broader OSC window operations use `allowwindowops`, disabled by default.
 Web/framebuffer do not implement desktop window placement or collapse/restore.
 
+### Shared clipboard
+
+Clipboard synchronization is opt-in and starts disabled for every native
+window. Framebuffer and web users toggle it from their backend-owned system
+bars. X11 deliberately exposes no public shortcut: it exports a fresh
+`ST_GO_CLIPBOARD_SYNC_TOKEN` to each PTY and accepts only the authenticated DCS:
+
+```text
+DCS clipboard-sync auth TOKEN on ST
+DCS clipboard-sync auth TOKEN off ST
+DCS clipboard-sync auth TOKEN status ST
+```
+
+For a trusted program already running in the X11 PTY, `TOKEN` is the value of
+`ST_GO_CLIPBOARD_SYNC_TOKEN`; it should write the DCS frame directly rather than
+invoking another st-go process.
+
+The reply is `DCS clipboard-sync on|off|starting|unavailable ST`. A token is
+exported only by the X11 backend; unauthenticated and malformed commands are
+ignored. The switch applies to the top-level native window and all of its tabs.
+Clipboard contents still use OSC 52's independent read/write authorization.
+
+Enabled st-go processes exchange bounded `CLIPBOARD` and `PRIMARY` snapshots
+through the secured SQLite cache configured by `webp_cache_path`. SQLite commit
+order determines the latest value. Rows are boot-scoped and bounded; the enable
+state is never stored. There is no listener, master process, or clipboard daemon.
+
 ### Terminal tab spawn
 
 Supported/enabled hosts export `ST_GO_TABS=1` and a per-PTY `ST_GO_TAB_TOKEN`.

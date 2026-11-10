@@ -154,6 +154,9 @@ func (m *terminalTabs) createTab(origin *Terminal, request api.TabSpawnRequest) 
 	cfg.GeometryToken = newGeometryToken()
 	cfg.NativeAudioToken = newGeometryToken()
 	cfg.TabSpawnToken = newGeometryToken()
+	if cfg.ClipboardSyncToken != "" {
+		cfg.ClipboardSyncToken = newGeometryToken()
+	}
 	if cfg.TabSpawnToken == "" {
 		widget.Close()
 		return fail(fmt.Errorf("tab capability generation failed"))

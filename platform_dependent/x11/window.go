@@ -10,12 +10,14 @@ import (
 	"unsafe"
 
 	"github.com/BurntSushi/xgb"
+	"github.com/BurntSushi/xgb/xfixes"
 	"github.com/BurntSushi/xgb/xproto"
 	"github.com/BurntSushi/xgbutil"
 
 	"st-go/config"
 	"st-go/limits"
 	"st-go/platform_neutral/api"
+	"st-go/platform_neutral/sharedclipboard"
 )
 
 type XGeometryMask = api.XGeometryMask
@@ -64,6 +66,15 @@ type Driver struct {
 	primarySet         bool
 	clipboardQuery     *clipboardQuery
 	clipboardTransfers map[clipboardTransferID]*clipboardTransfer
+	clipboardSync      *sharedclipboard.Sync
+	sharedClipboard    map[byte]sharedclipboard.Entry
+	clipboardOwners    map[byte]xproto.Window
+	externalPending    map[byte]xproto.Window
+	externalImport     map[byte]xproto.Window
+	clipboardManager   xproto.Atom
+	clipboardBridge    bool
+	xfixesAvailable    bool
+	displayID          string
 	callbacks          api.Callbacks
 	surfaces           map[xproto.Window]*Surface
 	surfaceMu          sync.RWMutex
@@ -85,13 +96,13 @@ func (t *Driver) closed() bool {
 // existing framebuffer before calling Show, preserving startup ordering.
 func Open(o api.WindowOptions) (api.Host, error) {
 	cfg := &config.Config{Cols: uint(o.Cols), Rows: uint(o.Rows), GlyphWidth: uint(o.CellWidth), GlyphHeight: uint(o.CellHeight), Borderpx: o.Border, Termname: o.Class}
-	return newDriver(cfg, 1, o.X, o.Y, XGeometryMask(o.GeometryMask), o.Title, o.Instance, o.Class, o.Fixed)
+	return newDriver(cfg, 1, o.X, o.Y, XGeometryMask(o.GeometryMask), o.Title, o.Instance, o.Class, o.Fixed, o.CachePath)
 }
 
 // NewTerminalOpts creates a terminal with the given ratio, window position
 // (x, y and geometry mask for negative offsets), title, instance/class names
 // (st: -n res_name / -c res_class), and fixed-size flag (st: -i).
-func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMask, title, instance, className string, isFixed bool) (*Driver, error) {
+func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMask, title, instance, className string, isFixed bool, cachePath string) (*Driver, error) {
 	if ratio <= 0 {
 		ratio = 1.0
 	}
@@ -140,12 +151,20 @@ func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMa
 		title:     title,
 		iconTitle: title,
 		instance:  instance, className: className,
-		x:        x,
-		y:        y,
-		geomMask: geomMask,
-		isFixed:  isFixed,
-		atoms:    make(map[string]xproto.Atom),
-		surfaces: make(map[xproto.Window]*Surface),
+		x:               x,
+		y:               y,
+		geomMask:        geomMask,
+		isFixed:         isFixed,
+		atoms:           make(map[string]xproto.Atom),
+		surfaces:        make(map[xproto.Window]*Surface),
+		sharedClipboard: make(map[byte]sharedclipboard.Entry), clipboardOwners: make(map[byte]xproto.Window),
+		externalPending: make(map[byte]xproto.Window), externalImport: make(map[byte]xproto.Window),
+		displayID: os.Getenv("DISPLAY"),
+	}
+	if xfixes.Init(xc) == nil {
+		if _, versionErr := xfixes.QueryVersion(xc, 5, 0).Reply(); versionErr == nil {
+			t.xfixesAvailable = true
+		}
 	}
 
 	for _, name := range []string{"WM_NAME", "WM_ICON_NAME", "WM_PROTOCOLS",
@@ -154,6 +173,10 @@ func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMa
 		"_NET_WM_NAME", "_NET_WM_ICON_NAME", "_NET_WM_PID", "CARDINAL",
 		"WM_NORMAL_HINTS", "WM_SIZE_HINTS", "BAR_DATA"} {
 		t.intern(name)
+	}
+	managerName := "_ST_GO_CLIPBOARD_SYNC_MANAGER"
+	if manager, managerErr := xproto.InternAtom(xc, false, uint16(len(managerName)), managerName).Reply(); managerErr == nil {
+		t.clipboardManager = manager.Atom
 	}
 
 	// window id
@@ -261,6 +284,7 @@ func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMa
 		return nil, err
 	}
 	t.gc = gc
+	t.clipboardSync = sharedclipboard.New(cachePath, sharedclipboard.Hooks{Changed: t.sharedClipboardChanged})
 
 	return t, nil
 }
@@ -437,6 +461,9 @@ func uint32Bytes(v uint32) []byte {
 func (t *Driver) Close() {
 	if !atomic.CompareAndSwapInt32(&t.isClosed, 0, 1) {
 		return
+	}
+	if t.clipboardSync != nil {
+		t.clipboardSync.Close()
 	}
 	if t.pixmap != 0 {
 		xproto.FreePixmap(t.conn, t.pixmap)

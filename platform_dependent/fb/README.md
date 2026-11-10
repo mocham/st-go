@@ -164,8 +164,13 @@ shortcuts are not implemented. Devices need legacy axes or protocol-B slots;
 protocol-A devices without legacy pointer emulation are unsupported. No new system library,
 input daemon, or package is required.
 
-Clipboard/PRIMARY text is local to this process; terminal authorization and
-bracketed paste remain unchanged. There is no desktop clipboard service.
+Clipboard/PRIMARY text is local to this process by default. The `S` control in
+the system bar opts the whole native window (including its tabs) into shared
+clipboard synchronization through the existing private SQLite cache. A checked
+marker is enabled, an empty marker is disabled, and `?` means the configured
+cache is unavailable. Every process starts disabled; there is no clipboard
+daemon, socket, or persisted enable switch. Terminal authorization and bracketed
+paste remain unchanged.
 Titles, icon titles, `BAR_DATA` and desktop geometry/collapse requests are no-ops.
 
 ## VT ownership and shutdown

@@ -215,6 +215,9 @@ func main() {
 		log.Fatalf("display: %v", err)
 	}
 	defer t.Close()
+	if identity, ok := t.host.(api.BackendIdentity); ok && identity.BackendName() == "x11" {
+		cfg.ClipboardSyncToken = newGeometryToken()
+	}
 	cfg.NativeAudioToken = newGeometryToken()
 	if _, ok := t.host.(api.NativeVideoHost); ok {
 		cfg.NativeVideoToken = newGeometryToken()

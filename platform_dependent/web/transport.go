@@ -7,18 +7,22 @@ import (
 
 	"golang.org/x/net/websocket"
 	"st-go/limits"
+	"st-go/platform_neutral/sharedclipboard"
 )
 
 type serverMessage struct {
-	Type       string `json:"type"`
-	Width      int    `json:"width,omitempty"`
-	Height     int    `json:"height,omitempty"`
-	CellWidth  int    `json:"cellWidth,omitempty"`
-	CellHeight int    `json:"cellHeight,omitempty"`
-	Border     int    `json:"border,omitempty"`
-	Selection  string `json:"selection,omitempty"`
-	Text       string `json:"text,omitempty"`
-	ID         uint64 `json:"id,omitempty"`
+	Type          string `json:"type"`
+	Width         int    `json:"width,omitempty"`
+	Height        int    `json:"height,omitempty"`
+	CellWidth     int    `json:"cellWidth,omitempty"`
+	CellHeight    int    `json:"cellHeight,omitempty"`
+	Border        int    `json:"border,omitempty"`
+	Selection     string `json:"selection,omitempty"`
+	Text          string `json:"text,omitempty"`
+	ID            uint64 `json:"id,omitempty"`
+	SyncEnabled   bool   `json:"syncEnabled,omitempty"`
+	SyncReady     bool   `json:"syncReady,omitempty"`
+	SyncAvailable bool   `json:"syncAvailable,omitempty"`
 }
 type client struct {
 	conn     *websocket.Conn
@@ -46,8 +50,13 @@ func (d *Driver) serveSocket(conn *websocket.Conn) {
 	default:
 	}
 	d.client = c
+	if d.clipboardSync != nil {
+		d.clipboardSync.SetWatching(true)
+	}
 	d.damage(image.Rect(0, 0, d.width, d.height))
-	hello := serverMessage{Type: "hello", Width: d.width, Height: d.height, CellWidth: d.window.CellWidth, CellHeight: d.window.CellHeight, Border: d.window.Border}
+	state := d.ClipboardSyncState()
+	hello := serverMessage{Type: "hello", Width: d.width, Height: d.height, CellWidth: d.window.CellWidth, CellHeight: d.window.CellHeight, Border: d.window.Border,
+		SyncEnabled: state.Enabled, SyncReady: state.Ready, SyncAvailable: state.Available}
 	d.mu.Unlock()
 	writerDone := make(chan struct{})
 	go func() { defer close(writerDone); defer conn.Close(); d.writeSocket(c, hello) }()
@@ -58,6 +67,9 @@ func (d *Driver) serveSocket(conn *websocket.Conn) {
 		d.mu.Lock()
 		if d.client == c {
 			d.client = nil
+			if d.clipboardSync != nil {
+				d.clipboardSync.SetWatching(false)
+			}
 		}
 		var queryID uint64
 		if d.query != nil && d.query.client == c {
@@ -102,6 +114,7 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 		return
 	}
 	var clipboardVersion uint64
+	var syncVersion uint64
 	var lastFrame time.Time
 	// Repaint immediately on attachment, then coalesce bursts at frame cadence.
 	ticker := time.NewTicker(limits.PreviewFrameInterval)
@@ -122,7 +135,14 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 		}
 		d.mu.Lock()
 		version, message := d.clipboardVersion, d.clipboardUpdate
+		statusVersion, statusMessage := d.syncVersion, d.syncUpdate
 		d.mu.Unlock()
+		if statusVersion != syncVersion {
+			if sendJSON(c, statusMessage) != nil {
+				return
+			}
+			syncVersion = statusVersion
+		}
 		if version != clipboardVersion {
 			if sendJSON(c, message) != nil {
 				return
@@ -162,12 +182,28 @@ func (d *Driver) SetClipboard(selection byte, text string) {
 	d.clipboardVersion++
 	d.clipboardUpdate = serverMessage{Type: "clipboard", Selection: string(selection), Text: text}
 	d.mu.Unlock()
+	if d.clipboardSync != nil {
+		d.clipboardSync.Publish(selection, text, sharedclipboard.SourceLocal, "")
+	}
 	d.notify()
 }
 
 func (d *Driver) QueryClipboard(selection byte, reply func(string, bool)) {
 	if selection != 'c' && selection != 'p' {
 		reply("", false)
+		return
+	}
+	if d.clipboardSync != nil && d.clipboardSync.State().Enabled {
+		d.clipboardSync.Query(selection, func(text string, ok bool) {
+			if ok {
+				reply(text, true)
+				return
+			}
+			d.mu.Lock()
+			text, ok = d.clipboard[selection]
+			d.mu.Unlock()
+			reply(text, ok)
+		})
 		return
 	}
 	d.mu.Lock()

@@ -62,6 +62,19 @@ func (h *Host) BackendName() string {
 	}
 	return "unknown"
 }
+func (h *Host) ClipboardSyncState() api.ClipboardSyncState {
+	if native, ok := h.window.native.(api.ClipboardSyncControl); ok {
+		return native.ClipboardSyncState()
+	}
+	return api.ClipboardSyncState{}
+}
+func (h *Host) SetClipboardSync(enabled bool) bool {
+	native, ok := h.window.native.(api.ClipboardSyncControl)
+	if !ok || !native.ClipboardSyncState().Available {
+		return false
+	}
+	return h.window.post(func() { native.SetClipboardSync(enabled) })
+}
 func (h *Host) SupportsWindowGeometry() bool {
 	if native, ok := h.window.native.(api.GeometrySupport); ok {
 		return native.SupportsWindowGeometry()

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,53 @@ func testDriver(t *testing.T) *Driver {
 		Resize: func(int, int) {}, Focus: func(bool) {}, Close: d.Close, PaintDirty: func() {}, Paste: func(string) {}})
 	t.Cleanup(d.Close)
 	return d
+}
+
+func TestSharedClipboardIsOptInAcrossWebSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache.sqlite3")
+	newPeer := func() *Driver {
+		d, err := New(api.WindowOptions{Cols: 8, Rows: 4, CellWidth: 2, CellHeight: 2, CachePath: path}, Options{Port: 0})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(d.Close)
+		return d
+	}
+	first, second := newPeer(), newPeer()
+	first.SetClipboard('c', "private")
+	second.QueryClipboard('c', func(_ string, ok bool) {
+		if ok {
+			t.Error("disabled web sessions shared clipboard state")
+		}
+	})
+	if !first.SetClipboardSync(true) || !second.SetClipboardSync(true) {
+		t.Fatal("could not enable shared clipboard")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for (!first.ClipboardSyncState().Ready || !second.ClipboardSyncState().Ready) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	first.SetClipboard('c', "shared 世界")
+	for {
+		reply := make(chan struct {
+			text string
+			ok   bool
+		}, 1)
+		second.QueryClipboard('c', func(text string, ok bool) {
+			reply <- struct {
+				text string
+				ok   bool
+			}{text, ok}
+		})
+		result := <-reply
+		if result.ok && result.text == "shared 世界" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("enabled web sessions did not converge", result)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func runDriver(t *testing.T, d *Driver) {

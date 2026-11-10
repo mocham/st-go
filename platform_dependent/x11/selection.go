@@ -3,6 +3,7 @@ package x11
 import (
 	"github.com/BurntSushi/xgb/xproto"
 	"st-go/limits"
+	"st-go/platform_neutral/sharedclipboard"
 )
 
 // setSelection claims PRIMARY ownership with the given text.
@@ -14,6 +15,10 @@ func (t *Driver) setSelection(text string) {
 	sel := t.atoms["PRIMARY"]
 	t.selectionText = text
 	t.primarySet = true
+	if t.clipboardSync != nil && t.clipboardSync.State().Enabled {
+		t.clipboardSync.Publish('p', text, sharedclipboard.SourceLocal, t.displayID)
+		return
+	}
 	xproto.SetSelectionOwner(t.conn, win, sel, xproto.TimeCurrentTime)
 }
 
@@ -29,6 +34,10 @@ func (t *Driver) SetClipboard(selection byte, text string) {
 		return
 	}
 	t.clipboardText, t.clipboardSet = text, true
+	if t.clipboardSync != nil && t.clipboardSync.State().Enabled {
+		t.clipboardSync.Publish('c', text, sharedclipboard.SourceLocal, t.displayID)
+		return
+	}
 	xproto.SetSelectionOwner(t.conn, t.win, t.atoms["CLIPBOARD"], xproto.TimeCurrentTime)
 }
 

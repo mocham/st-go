@@ -19,6 +19,7 @@ import (
 	"st-go/audio"
 	"st-go/limits"
 	"st-go/platform_neutral/api"
+	"st-go/platform_neutral/sharedclipboard"
 )
 
 type Options struct {
@@ -68,6 +69,7 @@ type Driver struct {
 	textCursor              api.TextCursor
 	surfaces                []*surface
 	clipboard               map[byte]string
+	clipboardSync           *sharedclipboard.Sync
 	pointer                 image.Point
 	pointerVisible          bool
 	systemBar               *systemBar
@@ -106,6 +108,7 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 		return nil, fmt.Errorf("fb %s: %w", o.Device, err)
 	}
 	d := &Driver{window: window, screen: f, pointer: image.Pt(f.layout.width/2, f.layout.height/2), systemBar: &systemBar{powerSupplyPath: "/sys/class/power_supply", audioOutput: audio.SelectedOutput, setAudioOutput: audio.SetOutput, setAudioVolume: audio.SetVolume, volumeLevel: window.InitialAudioVolume, brightness: systemBrightness, changeBrightness: setSystemBrightness}, done: make(chan struct{}), signals: make(chan os.Signal, 16), clipboard: make(map[byte]string), mousePaths: o.Mouse, grabMouse: o.GrabMouse}
+	d.clipboardSync = sharedclipboard.New(window.CachePath, sharedclipboard.Hooks{Changed: d.sharedClipboardChanged, Status: d.sharedClipboardStatus})
 	defer func() {
 		if err != nil {
 			d.cleanup()
@@ -180,17 +183,75 @@ func (d *Driver) SetClipboard(selection byte, text string) {
 		return
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if !d.closed {
 		d.clipboard[selection] = text
 	}
+	sync := d.clipboardSync
+	d.mu.Unlock()
+	if sync != nil {
+		sync.Publish(selection, text, sharedclipboard.SourceLocal, "")
+	}
 }
 func (d *Driver) QueryClipboard(selection byte, reply func(string, bool)) {
+	if d.clipboardSync != nil && d.clipboardSync.State().Enabled {
+		d.clipboardSync.Query(selection, func(text string, ok bool) {
+			if ok {
+				reply(text, true)
+				return
+			}
+			d.mu.Lock()
+			text, ok = d.clipboard[selection]
+			closed := d.closed
+			d.mu.Unlock()
+			reply(text, ok && !closed)
+		})
+		return
+	}
 	d.mu.Lock()
 	text, ok := d.clipboard[selection]
 	closed := d.closed
 	d.mu.Unlock()
 	reply(text, ok && !closed)
+}
+
+func (d *Driver) ClipboardSyncState() api.ClipboardSyncState {
+	if d.clipboardSync == nil {
+		return api.ClipboardSyncState{}
+	}
+	state := d.clipboardSync.State()
+	return api.ClipboardSyncState{Enabled: state.Enabled, Ready: state.Ready, Available: state.Available}
+}
+
+func (d *Driver) SetClipboardSync(enabled bool) bool {
+	if d.clipboardSync == nil {
+		return false
+	}
+	d.mu.Lock()
+	seed := make(map[byte]string, len(d.clipboard))
+	for selection, text := range d.clipboard {
+		seed[selection] = text
+	}
+	d.mu.Unlock()
+	return d.clipboardSync.SetEnabled(enabled, seed)
+}
+
+func (d *Driver) sharedClipboardChanged(entry sharedclipboard.Entry) {
+	d.mu.Lock()
+	if !d.closed {
+		d.clipboard[entry.Selection] = entry.Text
+		if d.systemBar != nil {
+			d.systemBar.nextRefresh = time.Time{}
+		}
+	}
+	d.mu.Unlock()
+}
+
+func (d *Driver) sharedClipboardStatus(sharedclipboard.State) {
+	d.mu.Lock()
+	if d.systemBar != nil {
+		d.systemBar.nextRefresh = time.Time{}
+	}
+	d.mu.Unlock()
 }
 func (d *Driver) RequestPaste() {
 	d.QueryClipboard('c', func(text string, ok bool) {
@@ -220,6 +281,9 @@ func (d *Driver) Close() {
 }
 
 func (d *Driver) cleanup() {
+	if d.clipboardSync != nil {
+		d.clipboardSync.Close()
+	}
 	for _, m := range d.mice {
 		m.close()
 	}

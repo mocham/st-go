@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/BurntSushi/xgb"
+	"github.com/BurntSushi/xgb/xfixes"
 	"github.com/BurntSushi/xgb/xproto"
 	"st-go/platform_neutral/api"
 )
@@ -85,7 +86,35 @@ func (t *Driver) Dispatch(ev xgb.Event) {
 		t.SelectionRequest(e)
 	case xproto.SelectionNotifyEvent:
 		t.SelectionNotify(e)
+	case xproto.SelectionClearEvent:
+		t.SelectionClear(e)
 	case xproto.PropertyNotifyEvent:
 		t.PropertyNotify(e)
+	case xfixes.SelectionNotifyEvent:
+		t.XFixesSelectionNotify(e)
+	}
+}
+
+func (t *Driver) SelectionClear(event xproto.SelectionClearEvent) {
+	if event.Selection == t.clipboardManager {
+		t.setClipboardBridge(false)
+		return
+	}
+	selection, ok := t.clipboardByte(event.Selection)
+	if !ok {
+		return
+	}
+	if selection == 'c' {
+		t.clipboardSet = false
+	} else {
+		t.primarySet = false
+	}
+	if !t.xfixesAvailable && t.clipboardBridge {
+		if owner, err := xproto.GetSelectionOwner(t.conn, event.Selection).Reply(); err == nil {
+			t.clipboardOwners[selection] = owner.Owner
+			if owner.Owner != 0 && owner.Owner != t.win {
+				t.queueExternalClipboard(selection, owner.Owner)
+			}
+		}
 	}
 }

@@ -66,7 +66,7 @@ func stChildEnv(cfg *config.Config) []string {
 	}
 
 	env := os.Environ()
-	drop := []string{"COLUMNS", "LINES", "TERMCAP", "ST_GO_EXECUTABLE", "ST_GO_GEOMETRY_TOKEN", "ST_GO_BACKEND", "ST_GO_NATIVE_VIDEO", "ST_GO_NATIVE_VIDEO_TOKEN", "ST_GO_NATIVE_AUDIO", "ST_GO_NATIVE_AUDIO_TOKEN", "ST_GO_TABS", "ST_GO_TAB_TOKEN"}
+	drop := []string{"COLUMNS", "LINES", "TERMCAP", "ST_GO_EXECUTABLE", "ST_GO_GEOMETRY_TOKEN", "ST_GO_BACKEND", "ST_GO_NATIVE_VIDEO", "ST_GO_NATIVE_VIDEO_TOKEN", "ST_GO_NATIVE_AUDIO", "ST_GO_NATIVE_AUDIO_TOKEN", "ST_GO_TABS", "ST_GO_TAB_TOKEN", "ST_GO_CLIPBOARD_SYNC_TOKEN"}
 	for _, icon := range iconEnv {
 		drop = append(drop, icon.name)
 	}
@@ -86,6 +86,9 @@ func stChildEnv(cfg *config.Config) []string {
 		"ST_GO_NATIVE_VIDEO_TOKEN="+cfg.NativeVideoToken,
 		"ST_GO_NATIVE_AUDIO_TOKEN="+cfg.NativeAudioToken,
 	)
+	if cfg.ClipboardSyncToken != "" {
+		env = append(env, "ST_GO_CLIPBOARD_SYNC_TOKEN="+cfg.ClipboardSyncToken)
+	}
 	if cfg.NativeAudioToken != "" {
 		env = append(env, "ST_GO_NATIVE_AUDIO=1")
 	}

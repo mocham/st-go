@@ -67,6 +67,8 @@ type systemBar struct {
 	brightnessOptimistic  bool
 	brightnessDownLeft    int
 	brightnessUpLeft      int
+	clipboardLeft         int
+	clipboardRight        int
 }
 
 // AttachWidgets gives the passive bar the same identity, local buffer, and
@@ -119,6 +121,20 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	}
 
 	text := systemBarText(now, root)
+	clipboardLeft, clipboardRight := -1, -1
+	if d.clipboardSync != nil {
+		state := d.ClipboardSyncState()
+		text += "  "
+		clipboardLeft = len(text)
+		icon := systemBarUncheckedIcon
+		if !state.Available {
+			icon = systemBarUnknownIcon
+		} else if state.Enabled {
+			icon = systemBarCheckedIcon
+		}
+		text += "S " + string([]byte{icon})
+		clipboardRight = len(text)
+	}
 	volumeDownLeft, volumeUpLeft := -1, -1
 	if setVolume != nil {
 		text += "  "
@@ -180,6 +196,8 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	b.volumeUpLeft = -1
 	b.brightnessDownLeft = -1
 	b.brightnessUpLeft = -1
+	b.clipboardLeft = -1
+	b.clipboardRight = -1
 	if audioLeft >= 0 {
 		b.audioLeft = b.textLeft + audioLeft*systemBarFontCellWidth
 	}
@@ -190,6 +208,10 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	if brightnessDownLeft >= 0 {
 		b.brightnessDownLeft = b.textLeft + brightnessDownLeft*systemBarFontCellWidth
 		b.brightnessUpLeft = b.textLeft + brightnessUpLeft*systemBarFontCellWidth
+	}
+	if clipboardLeft >= 0 {
+		b.clipboardLeft = b.textLeft + clipboardLeft*systemBarFontCellWidth
+		b.clipboardRight = b.textLeft + clipboardRight*systemBarFontCellWidth
 	}
 	b.pixels = make([]uint32, b.bounds.Dx()*b.bounds.Dy())
 	for y := b.bounds.Min.Y; y < b.bounds.Max.Y; y++ {
@@ -273,6 +295,16 @@ func (d *Driver) systemBarClick(x, y int) {
 			d.mu.Unlock()
 		}
 		return
+	}
+	clipboard := b.clipboardLeft >= 0 && point.X >= b.clipboardLeft && point.X < b.clipboardRight
+	if clipboard && d.clipboardSync != nil {
+		state := d.ClipboardSyncState()
+		if state.Available {
+			b.nextRefresh = time.Time{}
+			d.mu.Unlock()
+			d.SetClipboardSync(!state.Enabled)
+			return
+		}
 	}
 	if b.audioOutput == nil || b.audioLeft < 0 {
 		d.mu.Unlock()

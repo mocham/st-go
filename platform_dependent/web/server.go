@@ -26,6 +26,7 @@ import (
 	"golang.org/x/net/websocket"
 	"st-go/limits"
 	"st-go/platform_neutral/api"
+	"st-go/platform_neutral/sharedclipboard"
 )
 
 //go:embed assets/*
@@ -66,6 +67,9 @@ type Driver struct {
 	clipboardUpdate  serverMessage
 	query            *clipboardQuery
 	nextQuery        uint64
+	clipboardSync    *sharedclipboard.Sync
+	syncVersion      uint64
+	syncUpdate       serverMessage
 }
 
 var _ api.Host = (*Driver)(nil)
@@ -101,6 +105,7 @@ func New(window api.WindowOptions, o Options) (*Driver, error) {
 	}
 	d := &Driver{window: window, width: w, height: h, pixels: make([]uint32, w*h), wake: make(chan struct{}, 1), done: make(chan struct{}),
 		listener: listener, token: hex.EncodeToString(secret[:]), host: o.Listen, port: listener.Addr().(*net.TCPAddr).Port, clipboard: make(map[byte]string)}
+	d.clipboardSync = sharedclipboard.New(window.CachePath, sharedclipboard.Hooks{Changed: d.sharedClipboardChanged, Status: d.sharedClipboardStatus})
 	d.server = &http.Server{Handler: d, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
 	return d, nil
 }
@@ -155,6 +160,9 @@ func (d *Driver) Run() {
 
 func (d *Driver) Close() {
 	d.once.Do(func() {
+		if d.clipboardSync != nil {
+			d.clipboardSync.Close()
+		}
 		close(d.done)
 		d.mu.Lock()
 		client := d.client

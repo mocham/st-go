@@ -1,5 +1,7 @@
 package frontend
 
+import "st-go/platform_neutral/api"
+
 func (t *Terminal) clipcopy() {
 	if sel := t.termCore.GetSel(); sel != "" {
 		t.SetClipboard('c', sel)
@@ -22,6 +24,24 @@ func (t *Terminal) QueryClipboard(selection byte, reply func(string, bool)) {
 		return
 	}
 	t.host.QueryClipboard(selection, reply)
+}
+func (t *Terminal) SetClipboardSync(enabled bool) bool {
+	identity, ok := t.host.(api.BackendIdentity)
+	if !ok || identity.BackendName() != "x11" {
+		return false
+	}
+	control, ok := t.host.(api.ClipboardSyncControl)
+	return ok && control.SetClipboardSync(enabled)
+}
+func (t *Terminal) ClipboardSyncState() api.ClipboardSyncState {
+	identity, ok := t.host.(api.BackendIdentity)
+	if !ok || identity.BackendName() != "x11" {
+		return api.ClipboardSyncState{}
+	}
+	if control, ok := t.host.(api.ClipboardSyncControl); ok {
+		return control.ClipboardSyncState()
+	}
+	return api.ClipboardSyncState{}
 }
 func (t *Terminal) SetSel(text string)   { t.setSelection(text) }
 func (t *Terminal) SetTitle(text string) { t.setTitle(text) }

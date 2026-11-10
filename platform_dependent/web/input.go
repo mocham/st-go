@@ -22,6 +22,7 @@ type inputMessage struct {
 	Focused   bool   `json:"focused"`
 	ID        uint64 `json:"id"`
 	OK        bool   `json:"ok"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // These stable key IDs match the terminal's existing configuration vocabulary;
@@ -79,7 +80,12 @@ func (d *Driver) dispatch(c *client, m inputMessage) error {
 		if len(m.Text) > limits.ClipboardBytes || !utf8.ValidString(m.Text) {
 			return fmt.Errorf("invalid paste")
 		}
+		if d.ClipboardSyncState().Enabled {
+			d.SetClipboard('c', m.Text)
+		}
 		cb.Paste(m.Text)
+	case "clipboard_sync":
+		d.SetClipboardSync(m.Enabled)
 	case "focus":
 		cb.Focus(m.Focused)
 	case "resize":

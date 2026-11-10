@@ -19,10 +19,11 @@ var defaultConfigJSON []byte
 
 // Config mirrors config.h of the C st, loaded from a .json file.
 type Config struct {
-	GeometryToken    string `json:"-"`
-	NativeVideoToken string `json:"-"`
-	NativeAudioToken string `json:"-"`
-	TabSpawnToken    string `json:"-"`
+	GeometryToken      string `json:"-"`
+	NativeVideoToken   string `json:"-"`
+	NativeAudioToken   string `json:"-"`
+	TabSpawnToken      string `json:"-"`
+	ClipboardSyncToken string `json:"-"`
 
 	Font                string   `json:"font"`
 	Borderpx            int      `json:"borderpx"`

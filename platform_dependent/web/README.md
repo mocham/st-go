@@ -58,6 +58,13 @@ bracketed-paste handling). Authorized OSC 52 reads ask the browser and fail
 after 1.5 seconds or on denial/disconnect. Browsers may require an explicit
 gesture or permission; native Ctrl-Shift-V remains the fallback.
 
+The **Sync off/on** toolbar control opts this server into the cache-backed shared
+clipboard used by other enabled st-go fb/web/X11 windows. It starts off on every
+launch and is not persisted. Disabled sessions perform no shared-clipboard SQL
+or polling. While enabled, the server polls revisions only while a browser is
+attached; browser security still requires the user to press **Copy** before the
+shared text can replace the browser/OS clipboard. No separate service exists.
+
 Select with the mouse (Shift overrides application mouse reporting), then use
 **Copy** or Ctrl-Shift-C. Use native Ctrl-Shift-V or the **Paste** button to paste.
 Clipboard APIs depend on browser permissions and a secure context; loopback HTTP

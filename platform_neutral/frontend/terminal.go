@@ -112,7 +112,7 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 	}
 	host, err := openWindow(api.WindowOptions{Cols: t.cols, Rows: t.rows, CellWidth: t.cw, CellHeight: t.ch, Border: t.borderpx,
 		X: x, Y: y, GeometryMask: int(geomMask), Title: title, Instance: instance, Class: className, Fixed: fixed,
-		InitialAudioVolume: cfg.SystemBar.InitialVolume})
+		InitialAudioVolume: cfg.SystemBar.InitialVolume, CachePath: resolvedCachePath(cfg.WebPCachePath)})
 	if err != nil {
 		return nil, err
 	}
@@ -174,8 +174,7 @@ func (t *Terminal) bindWidget(widget api.Widget) error {
 	t.loadColors(t.cfg)
 	t.clearFramebuffer()
 	if t.cfg.WebPCachePath != "" {
-		cachePath := strings.ReplaceAll(t.cfg.WebPCachePath, "{uid}", fmt.Sprint(os.Getuid()))
-		cache, err := openWebPCache(expandHome(cachePath))
+		cache, err := openWebPCache(resolvedCachePath(t.cfg.WebPCachePath))
 		if err != nil {
 			log.Printf("webp cache: %v", err)
 		} else {
@@ -276,4 +275,11 @@ func expandHome(p string) string {
 		return home + p[1:]
 	}
 	return p
+}
+
+func resolvedCachePath(path string) string {
+	if path == "" {
+		return ""
+	}
+	return expandHome(strings.ReplaceAll(path, "{uid}", fmt.Sprint(os.Getuid())))
 }

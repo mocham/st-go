@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	"st-go/platform_neutral/api"
+	"st-go/platform_neutral/sharedclipboard"
 )
 
 func writePowerSupply(t *testing.T, root, name string, values map[string]string) string {
@@ -496,6 +497,38 @@ func TestSystemBarAudioClickTogglesSelectedMode(t *testing.T) {
 	d.systemBarClick(0, b.bounds.Dy()/2)
 	if mode != 1 || setCalls != 2 {
 		t.Fatal("status-bar click did not toggle ALSA mode", mode, setCalls)
+	}
+}
+
+func TestSystemBarClipboardSyncStartsOffAndToggles(t *testing.T) {
+	d := memoryDriver(t, 900, 200)
+	d.systemBar = &systemBar{powerSupplyPath: t.TempDir()}
+	path := filepath.Join(t.TempDir(), "cache.sqlite3")
+	d.clipboardSync = sharedclipboard.New(path, sharedclipboard.Hooks{Changed: d.sharedClipboardChanged, Status: d.sharedClipboardStatus})
+	d.refreshSystemBar(time.Now())
+	b := d.systemBar
+	if b.clipboardLeft < 0 || !bytes.Contains([]byte(b.text), []byte{'S', ' ', systemBarUncheckedIcon}) || d.ClipboardSyncState().Enabled {
+		t.Fatal("clipboard synchronization did not start visibly disabled", []byte(b.text))
+	}
+	d.systemBarClick(b.clipboardLeft-b.bounds.Min.X+1, b.bounds.Dy()/2)
+	deadline := time.Now().Add(2 * time.Second)
+	for !d.ClipboardSyncState().Ready && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if state := d.ClipboardSyncState(); !state.Enabled || !state.Ready {
+		t.Fatal("system bar did not enable clipboard synchronization", state)
+	}
+	d.refreshSystemBar(time.Now())
+	if !bytes.Contains([]byte(b.text), []byte{'S', ' ', systemBarCheckedIcon}) {
+		t.Fatal("enabled clipboard state is not shown", []byte(b.text))
+	}
+	d.systemBarClick(b.clipboardLeft-b.bounds.Min.X+1, b.bounds.Dy()/2)
+	deadline = time.Now().Add(2 * time.Second)
+	for d.ClipboardSyncState().Ready && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if d.ClipboardSyncState().Enabled {
+		t.Fatal("system bar did not disable clipboard synchronization")
 	}
 }
 

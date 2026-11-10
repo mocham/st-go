@@ -120,9 +120,13 @@ try {
   await call("Browser.grantPermissions", { origin: new URL(address).origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
   await type(`printf '\\033]52;c;Q09QWS1NRQ==\\007'`);
   await wait(() => evaluate('!document.getElementById("copy").disabled'), "OSC 52 copy availability");
+  // The synchronous gesture fallback must work even when the modern API is
+  // denied, as it commonly is on non-secure HTTP origins.
+  await evaluate('window.nativeClipboardWrite = navigator.clipboard.writeText.bind(navigator.clipboard); navigator.clipboard.writeText = () => Promise.reject(new DOMException("Denied", "NotAllowedError")); true');
   await command("Runtime.evaluate", { expression: 'document.getElementById("copy").click()', userGesture: true });
   const browserClipboard = async () => (await command("Runtime.evaluate", { expression: "navigator.clipboard.readText()", awaitPromise: true, returnByValue: true, userGesture: true })).result.value;
   await wait(async () => await browserClipboard() === "COPY-ME", "browser clipboard copy");
+  await evaluate('navigator.clipboard.writeText = window.nativeClipboardWrite; delete window.nativeClipboardWrite; true');
   await command("Runtime.evaluate", { expression: `navigator.clipboard.writeText("printf '%s' pasted > browser.paste")`, awaitPromise: true, userGesture: true });
   await command("Input.dispatchKeyEvent", { type: "keyDown", key: "V", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 10 });
   await command("Input.dispatchKeyEvent", { type: "keyUp", key: "V", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 10 });

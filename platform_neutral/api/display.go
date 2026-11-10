@@ -9,6 +9,7 @@ type WindowOptions struct {
 	Cols, Rows, CellWidth, CellHeight, Border int
 	X, Y, GeometryMask                        int
 	Title, Instance, Class                    string
+	CachePath                                 string
 	Fixed                                     bool
 	InitialAudioVolume                        int
 }
@@ -92,6 +93,18 @@ type OpenHost func(WindowOptions) (Host, error)
 // BackendIdentity supplies launch metadata, not native resources or operations.
 // Unknown hosts must not implicitly inherit an enclosing terminal's backend.
 type BackendIdentity interface{ BackendName() string }
+
+// ClipboardSyncControl is an optional host-level policy. It is deliberately
+// outside EventHost: terminals start with synchronization disabled, and only a
+// backend-owned trusted control may opt the native window into the shared cache.
+type ClipboardSyncState struct {
+	Enabled, Ready, Available bool
+}
+
+type ClipboardSyncControl interface {
+	SetClipboardSync(bool) bool
+	ClipboardSyncState() ClipboardSyncState
+}
 
 // GeometrySupport lets hosts without desktop window placement ignore geometry
 // requests without arming the terminal's click-to-restore interception.

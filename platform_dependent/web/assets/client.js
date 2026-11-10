@@ -5,11 +5,17 @@
   const input = document.getElementById("input");
   const status = document.getElementById("status");
   const copy = document.getElementById("copy");
+  const sync = document.getElementById("sync");
   const ctx = screen.getContext("2d", { alpha: false });
-  let socket, metrics, composing = false, clipboard = "", reconnect, screenRatio = 0;
+  let socket, metrics, composing = false, clipboard = "", reconnect, screenRatio = 0, syncEnabled = false;
   let paintQueue = Promise.resolve(), resizeTimer, requestedWidth = 0, requestedHeight = 0, wheel = 0;
   const utf8 = new TextEncoder();
   const message = text => { status.textContent = text; };
+  const syncState = data => {
+    syncEnabled = !!data.syncEnabled;
+    sync.disabled = !data.syncAvailable;
+    sync.textContent = !data.syncAvailable ? "Sync unavailable" : syncEnabled ? (data.syncReady ? "Sync on" : "Sync starting") : "Sync off";
+  };
   const send = value => {
     if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value));
   };
@@ -20,10 +26,29 @@
     send({ type: "paste", text });
     focus();
   };
-  const copyClipboard = async () => {
-    try { await navigator.clipboard.writeText(clipboard); message("Copied"); }
-    catch (_) { message("Clipboard write denied by browser"); }
-    focus();
+  const copyFromGesture = text => {
+    const transfer = document.createElement("textarea");
+    transfer.value = text;
+    transfer.readOnly = true;
+    transfer.setAttribute("aria-hidden", "true");
+    transfer.style.cssText = "position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0";
+    document.body.appendChild(transfer);
+    transfer.select();
+    transfer.setSelectionRange(0, transfer.value.length);
+    try { return document.execCommand("copy"); }
+    catch (_) { return false; }
+    finally { transfer.remove(); }
+  };
+  const copyClipboard = () => {
+    // execCommand is deprecated but remains the only broadly supported copy
+    // path on plain HTTP and runs synchronously inside this click/key gesture.
+    if (copyFromGesture(clipboard)) { message("Copied"); focus(); return; }
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      message("Clipboard write denied by browser"); focus(); return;
+    }
+    navigator.clipboard.writeText(clipboard)
+      .then(() => message("Copied"), () => message("Clipboard write denied by browser"))
+      .finally(focus);
   };
   const sizeScreen = (width, height) => {
     if (!width || !height) return;
@@ -89,10 +114,11 @@
       const data = JSON.parse(event.data);
       if (data.type === "hello") {
         metrics = data; requestedWidth = data.width; requestedHeight = data.height;
-        message("Connected"); resize();
+        message("Connected"); syncState(data); resize();
         if (requestedWidth === data.width && requestedHeight === data.height) sizeScreen(data.width, data.height);
         focus(); send({ type: "focus", focused: true });
       }
+      else if (data.type === "clipboard_sync") syncState(data);
       else if (data.type === "clipboard") { clipboard = data.text || ""; copy.disabled = false; message("Selection ready to copy"); }
       else if (data.type === "clipboard_read") {
         const replySocket = socket;
@@ -154,6 +180,7 @@
   }, { passive: false });
 
   copy.addEventListener("click", copyClipboard);
+  sync.addEventListener("click", () => { send({ type: "clipboard_sync", enabled: !syncEnabled }); focus(); });
   document.getElementById("paste").addEventListener("click", async () => { try { paste(await navigator.clipboard.readText()); } catch (_) { message("Use Ctrl+Shift+V or the browser paste menu"); } });
   document.getElementById("escape").addEventListener("click", () => { send({ type: "key", key: "Escape" }); focus(); });
   document.getElementById("tab").addEventListener("click", () => { send({ type: "key", key: "Tab" }); focus(); });

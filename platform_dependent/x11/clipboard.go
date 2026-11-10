@@ -38,6 +38,10 @@ func (t *Driver) SelectionRequest(e xproto.SelectionRequestEvent) {
 				Property:  0,
 			}.Bytes()))
 	}
+	if e.Selection != t.atoms["CLIPBOARD"] && e.Selection != t.atoms["PRIMARY"] {
+		fail()
+		return
+	}
 
 	switch target {
 	case t.atoms["TARGETS"]:
@@ -111,6 +115,14 @@ func (t *Driver) SelectionRequest(e xproto.SelectionRequestEvent) {
 
 // clippaste requests the CLIPBOARD content.
 func (t *Driver) RequestPaste() {
+	if t.clipboardSync != nil && t.clipboardSync.State().Enabled {
+		t.QueryClipboard('c', func(text string, ok bool) {
+			if ok {
+				t.callbacks.Paste(text)
+			}
+		})
+		return
+	}
 	t.incrActive, t.incrDiscard, t.incrData = false, false, nil
 	t.pasteTarget = t.atoms["CLIPBOARD"]
 	xproto.ConvertSelection(t.conn, t.win, t.atoms["CLIPBOARD"],
@@ -228,22 +240,47 @@ type clipboardQuery struct {
 // QueryClipboard keeps desktop retrieval in the terminal frontend. The TUI
 // receives only an OSC response through its normal input stream.
 func (t *Driver) QueryClipboard(selection byte, reply func(string, bool)) {
-	if t.conn == nil || t.closed() || t.clipboardQuery != nil {
+	if selection != 'c' && selection != 'p' {
 		reply("", false)
 		return
+	}
+	if t.clipboardSync != nil && t.clipboardSync.State().Enabled {
+		t.clipboardSync.Query(selection, func(text string, ok bool) {
+			if t.callbacks.Lock == nil {
+				reply(text, ok)
+				return
+			}
+			t.callbacks.Lock()
+			defer t.callbacks.Unlock()
+			if t.closed() || t.callbacks.Closed != nil && t.callbacks.Closed() {
+				reply("", false)
+				return
+			}
+			if ok {
+				reply(text, true)
+			} else if !t.queryNativeClipboard(selection, reply) {
+				reply("", false)
+			}
+		})
+		return
+	}
+	if !t.queryNativeClipboard(selection, reply) {
+		reply("", false)
+	}
+}
+
+func (t *Driver) queryNativeClipboard(selection byte, reply func(string, bool)) bool {
+	if t.conn == nil || t.closed() || t.clipboardQuery != nil {
+		return false
 	}
 	name := "CLIPBOARD"
 	if selection == 'p' {
 		name = "PRIMARY"
-	} else if selection != 'c' {
-		reply("", false)
-		return
 	}
 	atomName := "ST_GO_OSC52"
 	property, err := xproto.InternAtom(t.conn, false, uint16(len(atomName)), atomName).Reply()
 	if err != nil {
-		reply("", false)
-		return
+		return false
 	}
 	query := &clipboardQuery{selection: t.atoms[name], property: property.Atom, target: t.atoms["UTF8_STRING"], reply: reply}
 	t.clipboardQuery = query
@@ -255,6 +292,7 @@ func (t *Driver) QueryClipboard(selection byte, reply func(string, bool)) {
 		}
 	})
 	xproto.ConvertSelection(t.conn, t.win, query.selection, query.target, query.property, xproto.TimeCurrentTime)
+	return true
 }
 func (t *Driver) finishClipboardQuery(text string, ok bool) {
 	query := t.clipboardQuery
@@ -266,6 +304,7 @@ func (t *Driver) finishClipboardQuery(text string, ok bool) {
 		query.timer.Stop()
 	}
 	query.reply(text, ok)
+	t.tryExternalClipboard()
 }
 func (t *Driver) clipboardQueryNotify(event xproto.SelectionNotifyEvent) {
 	query := t.clipboardQuery
