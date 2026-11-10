@@ -50,7 +50,7 @@ func TestTeXPreviewFontMatchesGovimAcrossSidebarModes(t *testing.T) {
 			t.Fatalf("large-screen browser font scale = %g, want larger than previous 1.7", scale)
 		}
 		actual := scale * float64(pane) * browser.cellPixelW / width
-		expected := 0.8 * 0.8 * float64(browser.cols*60/100) * browser.cellPixelW / 140
+		expected := 0.64 * 1.07 * float64(browser.cols*60/100) * browser.cellPixelW / 140
 		if difference := actual - expected; difference < -1e-9 || difference > 1e-9 {
 			t.Fatalf("browser's displayed font density = %g, want %g", actual, expected)
 		}
@@ -64,7 +64,7 @@ func TestDocumentPreviewCacheDistinguishesFontSizes(t *testing.T) {
 		t.Fatal(err)
 	}
 	renderer := newPreviewDocumentRenderer(dir)
-	first, err := renderer.renderScaled(path, 140, 200, 0.64)
+	first, err := renderer.renderScaled(path, 140, 200, preview.FontScale)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestDocumentPreviewCacheDistinguishesFontSizes(t *testing.T) {
 	if first.PDFPath == second.PDFPath {
 		t.Fatal("font-size change reused a stale PDF")
 	}
-	cached, err := renderer.renderScaled(path, 140, 200, 0.64)
+	cached, err := renderer.renderScaled(path, 140, 200, preview.FontScale)
 	if err != nil || cached != first {
 		t.Fatalf("same font-size preview was not cached: %v", err)
 	}

@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestPreviewBodyFontIs80PercentOfPreviousGovim(t *testing.T) {
+func TestPreviewBodyFontIs7PercentLarger(t *testing.T) {
 	snapshot, err := Load(filepath.Join(t.TempDir(), "font.tex"), fixtureReader(map[string]string{
 		"font.tex": `\begin{document}Ordinary body text.\end{document}`,
 	}))
@@ -35,12 +35,12 @@ func TestPreviewBodyFontIs80PercentOfPreviousGovim(t *testing.T) {
 		}
 		for _, font := range fontPattern.FindAllSubmatch(content, -1) {
 			size, _ := strconv.ParseFloat(string(font[1]), 64)
-			if math.Abs(size-11.2*0.8*0.8) < 0.005 {
+			if math.Abs(size-11.2*0.64*1.07) < 0.005 {
 				return
 			}
 		}
 	}
-	t.Fatal("rendered PDF does not contain the body font at 80% of the previous govim size")
+	t.Fatal("rendered PDF does not contain the body font at 107% of the previous shared preview size")
 }
 
 func TestPaneFontScaleMatchesGovimScreenSize(t *testing.T) {
@@ -55,7 +55,7 @@ func TestPaneFontScaleMatchesGovimScreenSize(t *testing.T) {
 		{60, 12, 80}, // minimum-sized page enlarged to leave room for margins.
 	} {
 		got := FontScaleForPane(layout.widthMM, layout.pane, layout.terminal) * float64(layout.pane) / layout.widthMM
-		want := (0.8 * 0.8) * float64(layout.terminal*60/100) / 140
+		want := (0.64 * 1.07) * float64(layout.terminal*60/100) / 140
 		if math.Abs(got-want) > 1e-9 {
 			t.Fatalf("layout %+v: displayed font density = %g, want %g", layout, got, want)
 		}

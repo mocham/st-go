@@ -11,7 +11,7 @@ import (
 
 const (
 	PageWidthMM         = 140.0
-	FontScale           = 0.64 // 80% of govim's previous 0.8 scale.
+	FontScale           = 0.6848 // 7% larger than the shared 0.64 scale.
 	DefaultWidthPercent = 60
 )
 

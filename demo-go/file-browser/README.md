@@ -212,9 +212,9 @@ are omitted. Encrypted/older Word files and RTF/HTML renamed to `.doc` are not
 supported. No `antiword`, `catdoc`, or Office installation is required.
 
 LaTeX/Markdown previews match govim's default 60%-width preview's on-screen text
-size: both are **80% of govim's previous size**. The browser compensates for its
+size: both are **7% larger than the shared 0.64× setting**. The browser compensates for its
 pane-sized PDF pages, keeping text size unchanged when its sidebar is pinned or
-hidden. Govim uses a **0.64×** scale on a 140 mm fit-width page. GoLS (**3.23×**)
+hidden. Govim uses a **0.6848×** scale on a 140 mm fit-width page. GoLS (**3.23×**)
 and Vimtex (**0.8×**) are unchanged.
 
 Generated previews are session-temporary. A changed source digest deletes all
