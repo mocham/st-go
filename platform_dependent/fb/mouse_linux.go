@@ -337,7 +337,7 @@ func (m *mouse) event(d *Driver, kind, code uint16, value int32) error {
 		}
 	case evKey:
 		if m.touchpad != nil {
-			m.touchpad.key(code, value)
+			m.touchpad.key(m, code, value)
 		}
 		if button := mouseButton(code); button != 0 && (value == 0 || value == 1) {
 			if len(m.changes) >= 64 {

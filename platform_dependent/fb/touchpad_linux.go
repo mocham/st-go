@@ -21,6 +21,9 @@ const (
 	btnToolTriple = 0x14e
 	btnToolQuad   = 0x14f
 	btnToolQuint  = 0x148
+	tapTimeout    = 200 * time.Millisecond
+	doubleTapTime = 300 * time.Millisecond
+	tapMoveLimit  = 20
 )
 
 // input_absinfo is six signed 32-bit fields on every Linux ABI.
@@ -50,6 +53,8 @@ type touchpad struct {
 	tapStart                       time.Time
 	tapX, tapY                     int64
 	tapCanceled                    bool
+	lastTap                        time.Time
+	tapDrag, tapDragMoved          bool
 	now                            func() time.Time
 	queryContact                   func() (bool, error)
 	queryPositions                 func() error
@@ -152,9 +157,11 @@ func (p *touchpad) reset() {
 	p.moveX, p.moveY, p.scrollX, p.scrollY = 0, 0, 0, 0
 	p.tapStart = time.Time{}
 	p.tapCanceled = true
+	p.lastTap = time.Time{}
+	p.tapDrag, p.tapDragMoved = false, false
 }
 
-func (p *touchpad) key(code uint16, value int32) {
+func (p *touchpad) key(m *mouse, code uint16, value int32) {
 	if value != 0 && value != 1 {
 		return
 	}
@@ -178,6 +185,15 @@ func (p *touchpad) key(code uint16, value int32) {
 	default:
 		if mouseButton(code) != 0 && down {
 			p.tapCanceled = true
+			p.lastTap = time.Time{}
+			if p.tapDrag {
+				// Hand ownership to the physical button cleanly. This release is
+				// queued before mouse.event queues the physical press.
+				if len(m.changes) < 64 {
+					m.changes = append(m.changes, buttonChange{1, false})
+				}
+				p.tapDrag, p.tapDragMoved = false, false
+			}
 		}
 	}
 }
@@ -252,23 +268,67 @@ func touchScale(delta int64, axis absoluteAxis, numerator, millimeters int64, re
 	return value / denominator
 }
 
+func (p *touchpad) movedPastTap(x0, y0, x, y int64) bool {
+	var remainder int64
+	mx := touchScale(x-x0, p.xAxis, 10, 1, &remainder)
+	remainder = 0
+	my := touchScale(y-y0, p.yAxis, 10, 1, &remainder)
+	return mx < -tapMoveLimit || mx > tapMoveLimit || my < -tapMoveLimit || my > tapMoveLimit
+}
+
+func (p *touchpad) finishTapDrag(m *mouse, now time.Time, rememberClick bool) {
+	if !p.tapDrag {
+		return
+	}
+	if len(m.changes) < 64 {
+		m.changes = append(m.changes, buttonChange{1, false})
+	}
+	if rememberClick && !p.tapDragMoved {
+		p.lastTap = now
+	} else {
+		p.lastTap = time.Time{}
+	}
+	p.tapDrag, p.tapDragMoved = false, false
+}
+
 func (p *touchpad) flush(m *mouse) {
 	count, x, y, identity, valid := p.contacts()
 	now := p.now()
 	if count == 0 || !valid {
-		if count == 0 && !p.suppressed && !p.tapCanceled && p.previousCount == 1 && !p.tapStart.IsZero() && now.Sub(p.tapStart) <= 200*time.Millisecond && !m.buttons[1] && len(m.changes) <= 62 {
+		if p.tapDrag {
+			p.finishTapDrag(m, now, count == 0 && !p.suppressed)
+		} else if count == 0 && !p.suppressed && !p.tapCanceled && p.previousCount == 1 && !p.tapStart.IsZero() && now.Sub(p.tapStart) <= tapTimeout && !m.buttons[1] && len(m.changes) <= 62 {
 			m.changes = append(m.changes, buttonChange{1, true}, buttonChange{1, false})
+			p.lastTap = now
+		} else if p.previousCount != 0 || p.suppressed || (!p.lastTap.IsZero() && now.Sub(p.lastTap) > doubleTapTime) {
+			p.lastTap = time.Time{}
 		}
 		p.previousCount = 0
 		p.tapCanceled = true
 		return
 	}
 	if p.previousCount != count || p.previousID != identity {
+		if p.tapDrag {
+			p.finishTapDrag(m, now, false)
+		}
 		if p.previousCount == 0 && count == 1 {
 			p.tapStart, p.tapX, p.tapY = now, x, y
 			p.tapCanceled = m.buttons[1] || len(m.changes) != 0
+			elapsed := now.Sub(p.lastTap)
+			if !p.tapCanceled && !p.lastTap.IsZero() && elapsed >= 0 && elapsed <= doubleTapTime && len(m.changes) < 64 {
+				// Press on the second landing. A stationary lift completes a
+				// double-click; motion becomes a normal held-button drag.
+				m.changes = append(m.changes, buttonChange{1, true})
+				p.tapDrag = true
+				p.tapDragMoved = false
+				p.tapCanceled = true
+				p.lastTap = time.Time{}
+			} else if p.lastTap.IsZero() || elapsed < 0 || elapsed > doubleTapTime {
+				p.lastTap = time.Time{}
+			}
 		} else {
 			p.tapCanceled = true
+			p.lastTap = time.Time{}
 		}
 		p.previousCount, p.previousID, p.previousX, p.previousY = count, identity, x, y
 		p.moveX, p.moveY, p.scrollX, p.scrollY = 0, 0, 0, 0
@@ -279,12 +339,12 @@ func (p *touchpad) flush(m *mouse) {
 	if count == 1 {
 		m.dx = max(-65535, min(65535, m.dx+touchScale(dx, p.xAxis, 10, 1, &p.moveX)))
 		m.dy = max(-65535, min(65535, m.dy+touchScale(dy, p.yAxis, 10, 1, &p.moveY)))
-		var remainder int64
-		mx := touchScale(x-p.tapX, p.xAxis, 10, 1, &remainder)
-		remainder = 0
-		my := touchScale(y-p.tapY, p.yAxis, 10, 1, &remainder)
-		if mx < -20 || mx > 20 || my < -20 || my > 20 {
-			p.tapCanceled = true
+		if p.movedPastTap(p.tapX, p.tapY, x, y) {
+			if p.tapDrag {
+				p.tapDragMoved = true
+			} else {
+				p.tapCanceled = true
+			}
 		}
 	} else if count == 2 {
 		p.tapCanceled = true

@@ -148,7 +148,10 @@ are not treated as touchpads.
 - One finger moves the pointer relatively; landing/lifting/replacing fingers
   establishes a new baseline rather than jumping to an absolute screen location.
 - Physical buttons support clicking and dragging. A short single-finger tap
-  produces a left click; physical clicks and larger movements suppress the tap.
+  produces a left click. A second immediate tap within the multi-tap interval
+  presses on landing: lifting completes the second click, while moving holds
+  button 1 for selection and tap-and-drag until the finger lifts. Physical
+  clicks and larger first-tap movements cancel the gesture.
 - Two-finger motion scrolls vertically/horizontally without moving the pointer.
 - Physical axis resolution controls sensitivity, with a range-based fallback;
   fractional motion/wheel deltas accumulate across input packets.
@@ -156,9 +159,9 @@ are not treated as touchpads.
   native-video handoff and device removal clear gesture/button state.
 
 This is basic touchpad handling, not libinput feature parity. Acceleration,
-tap-and-drag, palm rejection, inertia, pinch/rotate, and multi-finger shortcuts
-are not implemented. Devices need legacy axes or protocol-B slots; protocol-A
-devices without legacy pointer emulation are unsupported. No new system library,
+drag lock after lifting, palm rejection, inertia, pinch/rotate, and multi-finger
+shortcuts are not implemented. Devices need legacy axes or protocol-B slots;
+protocol-A devices without legacy pointer emulation are unsupported. No new system library,
 input daemon, or package is required.
 
 Clipboard/PRIMARY text is local to this process; terminal authorization and

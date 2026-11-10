@@ -183,6 +183,123 @@ func TestTouchpadTapPhysicalDragAndTwoFingerScroll(t *testing.T) {
 	}
 }
 
+func TestTouchpadDoubleTapAndTapDrag(t *testing.T) {
+	for _, multi := range []bool{false, true} {
+		t.Run(fmt.Sprint(multi), func(t *testing.T) {
+			d := memoryDriver(t, 300, 200)
+			d.pointer = image.Pt(100, 100)
+			var events []string
+			mouseCallbacks(d, &events)
+			m, _ := testTouchpad(t, multi)
+			now := time.Unix(100, 0)
+			m.touchpad.now = func() time.Time { return now }
+			feed := func(e ...[3]int32) { touchEvents(t, m, d, append(e, [3]int32{evSyn, synReport, 0})...) }
+			tracking := int32(10)
+			land := func(x, y int32) {
+				events := [][3]int32{{evKey, btnTouch, 1}, {evKey, btnToolFinger, 1}}
+				if multi {
+					events = append(events, [3]int32{evAbsolute, absMTSlot, 0}, [3]int32{evAbsolute, absMTTracking, tracking}, [3]int32{evAbsolute, absMTX, x}, [3]int32{evAbsolute, absMTY, y})
+					tracking++
+				} else {
+					events = append(events, [3]int32{evAbsolute, absX, x}, [3]int32{evAbsolute, absY, y})
+				}
+				feed(events...)
+			}
+			move := func(x, y int32) {
+				if multi {
+					feed([3]int32{evAbsolute, absMTSlot, 0}, [3]int32{evAbsolute, absMTX, x}, [3]int32{evAbsolute, absMTY, y})
+				} else {
+					feed([3]int32{evAbsolute, absX, x}, [3]int32{evAbsolute, absY, y})
+				}
+			}
+			lift := func() {
+				events := make([][3]int32, 0, 3)
+				if multi {
+					events = append(events, [3]int32{evAbsolute, absMTSlot, 0}, [3]int32{evAbsolute, absMTTracking, -1})
+				}
+				events = append(events, [3]int32{evKey, btnTouch, 0}, [3]int32{evKey, btnToolFinger, 0})
+				feed(events...)
+			}
+
+			// The second immediate tap presses on landing and releases on lift,
+			// producing the second click rather than another delayed tap.
+			land(200, 300)
+			now = now.Add(100 * time.Millisecond)
+			lift()
+			// Real devices can emit an idle SYN packet between contacts. It must
+			// not erase the completed tap, and the next landing need not be at
+			// the same absolute pad coordinate.
+			now = now.Add(50 * time.Millisecond)
+			feed()
+			now = now.Add(50 * time.Millisecond)
+			land(800, 700)
+			if !m.buttons[1] || fmt.Sprint(events) != "[press 1 100 100 0 release 1 100 100 0 press 1 100 100 0]" {
+				t.Fatal("second tap did not press on landing", events, m.buttons[1])
+			}
+			now = now.Add(100 * time.Millisecond)
+			lift()
+			if m.buttons[1] || fmt.Sprint(events) != "[press 1 100 100 0 release 1 100 100 0 press 1 100 100 0 release 1 100 100 0]" {
+				t.Fatal("double tap did not produce two clicks", events, m.buttons[1])
+			}
+
+			// A later tap followed by an immediate second landing holds button 1
+			// throughout pointer motion, enabling selection and drag gestures.
+			events = nil
+			now = now.Add(time.Second)
+			land(300, 300)
+			now = now.Add(100 * time.Millisecond)
+			lift()
+			now = now.Add(50 * time.Millisecond)
+			feed()
+			now = now.Add(50 * time.Millisecond)
+			land(700, 500)
+			move(730, 500)
+			if !m.buttons[1] || fmt.Sprint(events) != "[press 1 100 100 0 release 1 100 100 0 press 1 100 100 0 move 130 100 0]" {
+				t.Fatal("tap-and-drag did not hold button through motion", events, m.buttons[1])
+			}
+			now = now.Add(100 * time.Millisecond)
+			lift()
+			if m.buttons[1] || fmt.Sprint(events) != "[press 1 100 100 0 release 1 100 100 0 press 1 100 100 0 move 130 100 0 release 1 130 100 0]" {
+				t.Fatal("tap-and-drag did not release on lift", events, m.buttons[1])
+			}
+		})
+	}
+}
+
+func TestTouchpadDroppedPacketReleasesTapDrag(t *testing.T) {
+	d := memoryDriver(t, 200, 200)
+	var events []string
+	mouseCallbacks(d, &events)
+	m, touching := testTouchpad(t, false)
+	now := time.Unix(100, 0)
+	m.touchpad.now = func() time.Time { return now }
+	feed := func(e ...[3]int32) { touchEvents(t, m, d, append(e, [3]int32{evSyn, synReport, 0})...) }
+	land := func() {
+		feed([3]int32{evKey, btnTouch, 1}, [3]int32{evKey, btnToolFinger, 1}, [3]int32{evAbsolute, absX, 200}, [3]int32{evAbsolute, absY, 300})
+	}
+	lift := func() { feed([3]int32{evKey, btnTouch, 0}, [3]int32{evKey, btnToolFinger, 0}) }
+	land()
+	now = now.Add(100 * time.Millisecond)
+	lift()
+	now = now.Add(100 * time.Millisecond)
+	land()
+	if !m.buttons[1] {
+		t.Fatal("tap drag did not hold button before dropped packet")
+	}
+	events = nil
+	*touching = true
+	touchEvents(t, m, d, [3]int32{evSyn, synDropped, 0}, [3]int32{evSyn, synReport, 0})
+	if m.buttons[1] || fmt.Sprint(events) != "[release 1 0 0 0]" {
+		t.Fatal("dropped packet left tap drag held", events, m.buttons[1])
+	}
+	events = nil
+	*touching = false
+	lift()
+	if len(events) != 0 {
+		t.Fatal("resynchronized finger lift generated a phantom click", events)
+	}
+}
+
 func TestMultitouchSlotsCentroidContactChangesAndNoDoubleCounting(t *testing.T) {
 	d := memoryDriver(t, 200, 200)
 	d.pointer = image.Pt(100, 100)
