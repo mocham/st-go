@@ -132,8 +132,8 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 		if time.Since(lastFrame) < limits.PreviewFrameInterval {
 			continue
 		}
-		// Snapshot only at a terminal transaction boundary, so a multi-span
-		// synchronized paint cannot reach the browser half committed.
+		// Snapshot only at a terminal transaction boundary, so a resize or a
+		// multi-span synchronized paint cannot reach the browser half committed.
 		d.callbacks.Lock()
 		frames := d.frames()
 		d.callbacks.Unlock()

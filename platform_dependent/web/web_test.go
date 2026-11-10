@@ -185,6 +185,7 @@ func TestSocketInputClipboardReconnectAndShutdown(t *testing.T) {
 			events <- "shift-tab"
 		}
 	}
+	d.callbacks.Resize = func(w, h int) { events <- "resize" }
 	runDriver(t, d)
 	conn := dial(t, d)
 	u, _ := url.Parse(d.URL())
@@ -202,12 +203,12 @@ func TestSocketInputClipboardReconnectAndShutdown(t *testing.T) {
 	if err := websocket.Message.Receive(conn, &frame); err != nil || len(frame) < 28 || string(frame[:4]) != "STW1" {
 		t.Fatalf("initial pixels: %v", err)
 	}
-	for _, m := range []inputMessage{{Type: "text", Text: "café 世界"}, {Type: "key", Key: "Tab", Modifiers: 1}} {
+	for _, m := range []inputMessage{{Type: "text", Text: "café 世界"}, {Type: "key", Key: "Tab", Modifiers: 1}, {Type: "resize", Width: 32, Height: 16}} {
 		if err := websocket.JSON.Send(conn, m); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, want := range []string{"café 世界", "shift-tab"} {
+	for _, want := range []string{"café 世界", "shift-tab", "resize"} {
 		select {
 		case got := <-events:
 			if got != want {
@@ -266,8 +267,8 @@ func TestSocketInputClipboardReconnectAndShutdown(t *testing.T) {
 	if err := websocket.Message.Receive(second, &frame); err != nil {
 		t.Fatal(err)
 	}
-	if binary.LittleEndian.Uint32(frame[4:8]) != 16 {
-		t.Fatal("reconnect changed the configured canvas width")
+	if binary.LittleEndian.Uint32(frame[4:8]) != 32 {
+		t.Fatal("reconnect lost viewport state")
 	}
 	d.Close()
 	second.SetReadDeadline(time.Now().Add(time.Second))
@@ -315,7 +316,7 @@ func TestClipboardFailureFinishesOnceWithoutBlockingInput(t *testing.T) {
 func TestInvalidGeometryAndInputAreRejected(t *testing.T) {
 	d := testDriver(t)
 	c := &client{pressed: make(map[byte]inputMessage)}
-	for _, m := range []inputMessage{{Type: "resize"}, {Type: "press", Button: 0}, {Type: "key", Key: "not a key"}, {Type: "text", Text: string([]byte{0xff})}, {Type: "text", Text: strings.Repeat("x", 32769)}} {
+	for _, m := range []inputMessage{{Type: "resize", Width: 1 << 30, Height: 1 << 30}, {Type: "press", Button: 0}, {Type: "key", Key: "not a key"}, {Type: "text", Text: string([]byte{0xff})}, {Type: "text", Text: strings.Repeat("x", 32769)}} {
 		if err := d.dispatch(c, m); err == nil {
 			t.Fatalf("accepted %+v", m)
 		}
@@ -331,7 +332,7 @@ func TestInvalidGeometryAndInputAreRejected(t *testing.T) {
 	}
 }
 
-func TestBrowserAssetsKeepCanvasAtOriginalPixelSize(t *testing.T) {
+func TestBrowserAssetsUseDevicePixelViewportWithoutRasterScaling(t *testing.T) {
 	client, err := assets.ReadFile("assets/client.js")
 	if err != nil {
 		t.Fatal(err)
@@ -340,8 +341,8 @@ func TestBrowserAssetsKeepCanvasAtOriginalPixelSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(client, []byte("ResizeObserver")) || bytes.Contains(client, []byte(`type: "resize"`)) || bytes.Contains(client, []byte("viewport.clientWidth")) {
-		t.Fatal("browser client still fits the rasterized terminal to the viewport")
+	if !bytes.Contains(client, []byte("ResizeObserver")) || !bytes.Contains(client, []byte(`type: "resize"`)) || !bytes.Contains(client, []byte("viewport.clientWidth * ratio")) || !bytes.Contains(client, []byte("viewport.clientHeight * ratio")) {
+		t.Fatal("browser client does not size its backing buffer to viewport device pixels")
 	}
 	if !bytes.Contains(client, []byte(`screen.style.width = width / ratio + "px"`)) || !bytes.Contains(client, []byte(`screen.style.height = height / ratio + "px"`)) || !bytes.Contains(client, []byte("window.devicePixelRatio")) {
 		t.Fatal("canvas does not map source pixels to browser device pixels")

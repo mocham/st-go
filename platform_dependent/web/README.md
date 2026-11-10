@@ -20,10 +20,11 @@ Terminal flags must precede `-e`.
 One server runs one terminal session with one attached browser at a time.
 Closing/reloading the browser leaves the PTY running; reconnecting receives its
 current pixels. Shell exit stops the server; Ctrl-C in the server's launching
-terminal stops it too. The configured terminal geometry remains fixed when the
-browser window changes: canvas presentation compensates for `devicePixelRatio`
-so each server-rendered glyph/image pixel maps to one browser device pixel. A
-smaller viewport scrolls instead of fitting or rerasterizing the terminal.
+terminal stops it too. The terminal backing buffer follows the browser viewport
+in **device pixels** (`CSS size × devicePixelRatio`), while canvas presentation
+divides by the same ratio. This fills the viewport while keeping each
+server-rendered glyph/image pixel mapped to one browser device pixel—additional
+space creates more terminal rows/columns instead of stretching raster content.
 Keyboard/IME, mouse reporting, selections, bracketed paste,
 images/PDFs, and retained previews use the same terminal engine and
 [text protocols](../../platform_neutral/stterminal/README.md).
@@ -46,9 +47,9 @@ images/PDFs, and retained previews use the same terminal engine and
 * One browser controls the one server session. Disconnecting leaves its PTY
   alive; reconnecting gets a full snapshot. Idle heartbeats expire vanished
   attachments after 90 seconds. Slow writes time out after five seconds.
-* Titles/icon titles and `BAR_DATA` are ignored. Browser viewport resizing does
-  not resize the terminal; desktop placement/collapse/restore is deliberately
-  unsupported.
+* Titles/icon titles and `BAR_DATA` are ignored. Browser viewport resizing
+  updates terminal pixel/grid dimensions; desktop placement/collapse/restore is
+  deliberately unsupported.
 
 Clipboard text stays terminal-owned. Selection/OSC 52 writes make the toolbar's
 Copy action available, rather than attempting unsolicited browser clipboard

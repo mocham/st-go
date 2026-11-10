@@ -6,8 +6,8 @@
   const status = document.getElementById("status");
   const copy = document.getElementById("copy");
   const ctx = screen.getContext("2d", { alpha: false });
-  let socket, composing = false, clipboard = "", reconnect, screenRatio = 0;
-  let paintQueue = Promise.resolve(), wheel = 0;
+  let socket, metrics, composing = false, clipboard = "", reconnect, screenRatio = 0;
+  let paintQueue = Promise.resolve(), resizeTimer, requestedWidth = 0, requestedHeight = 0, wheel = 0;
   const utf8 = new TextEncoder();
   const message = text => { status.textContent = text; };
   const send = value => {
@@ -37,10 +37,21 @@
     screen.style.width = width / ratio + "px"; screen.style.height = height / ratio + "px";
     screenRatio = ratio;
   };
-  window.addEventListener("resize", () => sizeScreen(screen.width, screen.height), { passive: true });
+  const resize = () => {
+    if (!metrics) return;
+    const ratio = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+    const width = Math.max(2 * metrics.border + metrics.cellWidth, Math.floor(viewport.clientWidth * ratio));
+    const height = Math.max(2 * metrics.border + metrics.cellHeight, Math.floor(viewport.clientHeight * ratio));
+    if (width === requestedWidth && height === requestedHeight) return;
+    if (width * height * 4 > 64 * 1024 * 1024) { message("Viewport exceeds pixel budget"); return; }
+    requestedWidth = width; requestedHeight = height;
+    send({ type: "resize", width, height });
+  };
+  new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 60); }).observe(viewport);
+  window.addEventListener("resize", resize, { passive: true });
   setInterval(() => {
     const ratio = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
-    if (ratio !== screenRatio) sizeScreen(screen.width, screen.height);
+    if (ratio !== screenRatio) { screenRatio = ratio; resize(); }
   }, 250);
 
   async function paint(data) {
@@ -50,6 +61,10 @@
     const values = Array.from({ length: 6 }, (_, i) => header.getUint32(4 + i * 4, true));
     const [width, height, x, y, w, h] = values;
     if (!w || !h || !width || !height || width * height > 16777216 || x + w > width || y + h > height) throw new Error("Invalid frame dimensions");
+    // A viewport/DPI resize can overtake already queued damage. Never present
+    // an obsolete canvas size, which would briefly add scrollbars and feed a
+    // smaller viewport back into the resize calculation.
+    if (requestedWidth && (width !== requestedWidth || height !== requestedHeight)) return;
     const bitmap = await createImageBitmap(new Blob([data.slice(28)], { type: "image/png" }));
     try {
       if (bitmap.width !== w || bitmap.height !== h) throw new Error("Pixel dimensions differ");
@@ -72,7 +87,12 @@
         return;
       }
       const data = JSON.parse(event.data);
-      if (data.type === "hello") { sizeScreen(data.width, data.height); message("Connected"); focus(); send({ type: "focus", focused: true }); }
+      if (data.type === "hello") {
+        metrics = data; requestedWidth = data.width; requestedHeight = data.height;
+        message("Connected"); resize();
+        if (requestedWidth === data.width && requestedHeight === data.height) sizeScreen(data.width, data.height);
+        focus(); send({ type: "focus", focused: true });
+      }
       else if (data.type === "clipboard") { clipboard = data.text || ""; copy.disabled = false; message("Selection ready to copy"); }
       else if (data.type === "clipboard_read") {
         const replySocket = socket;

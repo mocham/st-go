@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"image"
 	"strconv"
 	"unicode/utf8"
 
@@ -15,6 +16,8 @@ type inputMessage struct {
 	Button    byte   `json:"button"`
 	X         int    `json:"x"`
 	Y         int    `json:"y"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
 	Text      string `json:"text"`
 	Focused   bool   `json:"focused"`
 	ID        uint64 `json:"id"`
@@ -79,6 +82,25 @@ func (d *Driver) dispatch(c *client, m inputMessage) error {
 		cb.Paste(m.Text)
 	case "focus":
 		cb.Focus(m.Focused)
+	case "resize":
+		if m.Width > 65535 || m.Height > 65535 || m.Width < 2*d.window.Border+d.window.CellWidth || m.Height < 2*d.window.Border+d.window.CellHeight {
+			return fmt.Errorf("invalid resize")
+		}
+		if _, ok := limits.RGBA("web resize", m.Width, m.Height); !ok {
+			return fmt.Errorf("resize exceeds pixel budget")
+		}
+		if !limits.Grid((m.Width-2*d.window.Border)/d.window.CellWidth, (m.Height-2*d.window.Border)/d.window.CellHeight) {
+			return fmt.Errorf("resize exceeds grid budget")
+		}
+		d.mu.Lock()
+		if m.Width != d.width || m.Height != d.height {
+			d.width, d.height = m.Width, m.Height
+			d.pixels = make([]uint32, d.width*d.height)
+			d.dirty = nil
+			d.damage(image.Rect(0, 0, d.width, d.height))
+		}
+		d.mu.Unlock()
+		cb.Resize(m.Width, m.Height)
 	case "press", "release", "motion":
 		if m.X < -65535 || m.X > 65535 || m.Y < -65535 || m.Y > 65535 {
 			return fmt.Errorf("invalid pointer coordinates")
