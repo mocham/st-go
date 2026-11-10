@@ -11,8 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"st-go/config"
 	"st-go/platform_neutral/api"
 	term "st-go/platform_neutral/stterminal"
@@ -245,22 +243,6 @@ func main() {
 	core.Redraw()
 	t.mu.Unlock()
 
-	// pty
-	master, slave, err := ptyutil.Open()
-	if err != nil {
-		t.Close()
-		log.Fatalf("pty: %v", err)
-	}
-	defer master.Close()
-
-	// st sizes the pty to the actual mapped window (run() waits for MapNotify
-	// then cresize(w,h) -> ttyresize) so the child's TIOCGWINSZ matches the
-	// real window (post-WM-tiling) rather than a stale config default.
-	rows, cols := t.actualRowsCols()
-	if err := ptyutil.SetWinSizePixels(master, rows, cols, cols*t.cw, rows*t.ch); err != nil {
-		log.Printf("pty: set size: %v", err)
-	}
-
 	// spawn: -e cmd args... runs that command; else resolve the shell
 	var cmdline []string
 	var env []string
@@ -281,103 +263,10 @@ func main() {
 	if childDir != "" {
 		env = append(envWithout(env, "PWD"), "PWD="+childDir)
 	}
-	child, err := ptyutil.StartDir(slave, cmdline, env, childDir)
-	if err != nil {
+	if err := t.StartSession(SessionOptions{Command: cmdline, Env: env, Directory: childDir}); err != nil {
 		t.Close()
 		log.Fatalf("spawn: %v", err)
 	}
-	defer func() {
-		if child.Process != nil {
-			child.Process.Kill()
-		}
-	}()
-	core.SetWriter(func(b []byte) {
-		master.Write(b)
-	})
-	t.ttyResize = func(rows, cols int) {
-		ptyutil.SetWinSizePixels(master, rows, cols, cols*t.cw, rows*t.ch)
-	}
-	go func() {
-		child.Wait()
-		t.closeSession()
-	}()
-
-	// The PTY reader owns terminal-output paint scheduling. Interactive bursts
-	// settle for MinLatency, continuous output paints by MaxLatency, and DEC
-	// synchronized output (2026) suppresses both until its reset commits.
-	go func() {
-		buf := make([]byte, 8192)
-		var pending []byte
-		fd := int(master.Fd())
-		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-		minLatency := durationMilliseconds(cfg.MinLatency)
-		maxLatency := durationMilliseconds(cfg.MaxLatency)
-		if maxLatency < minLatency {
-			maxLatency = minLatency
-		}
-		for {
-			// os.File.Read retries EINTR (including runtime/signal interruptions).
-			// A raw read error used to close the window even with a live shell.
-			n, err := master.Read(buf)
-			if err != nil || n == 0 {
-				t.closeSession()
-				return
-			}
-			pending = append(pending, buf[:n]...)
-			written := t.writeTerminalOutput(core, pending)
-			pending = pending[written:]
-			firstOutput := time.Now()
-			lastOutput := firstOutput
-			for {
-				t.mu.Lock()
-				paused := core.IsPaintPaused()
-				hasDamage := core.HasPendingPaint()
-				t.mu.Unlock()
-				if !hasDamage {
-					break
-				}
-				timeout := 30 * time.Millisecond
-				if !paused {
-					softDeadline := lastOutput.Add(minLatency)
-					hardDeadline := firstOutput.Add(maxLatency)
-					deadline := softDeadline
-					if hardDeadline.Before(deadline) {
-						deadline = hardDeadline
-					}
-					if !time.Now().Before(deadline) {
-						t.paintTerminalOutput(core)
-						break
-					}
-					timeout = time.Until(deadline)
-				}
-				np, perr := unix.Poll(fds, pollMilliseconds(timeout))
-				if perr == unix.EINTR {
-					continue
-				}
-				if perr != nil {
-					break
-				}
-				if np == 0 {
-					if !paused {
-						t.paintTerminalOutput(core)
-					}
-					break
-				}
-				// POLLHUP may accompany unread output; let Read drain it and
-				// detect EOF/EIO rather than treating the poll flag as an error.
-				m, rerr := master.Read(buf)
-				if rerr != nil || m == 0 {
-					t.closeSession()
-					return
-				}
-				pending = append(pending, buf[:m]...)
-				written := t.writeTerminalOutput(core, pending)
-				pending = pending[written:]
-				lastOutput = time.Now()
-			}
-		}
-	}()
-
 	t.run()
 }
 

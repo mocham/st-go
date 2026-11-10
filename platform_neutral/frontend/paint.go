@@ -18,6 +18,11 @@ func (t *Terminal) attachTerm(core *term.Term) {
 		}
 		t.paint()
 	})
+	// Mapping/physical sizing can precede core attachment. A later unchanged
+	// ConfigureNotify must not leave the new core at the stale configured grid.
+	if t.cols > 0 && t.rows > 0 && (core.Cols() != t.cols || core.Rows() != t.rows) {
+		core.Tresize(t.cols, t.rows)
+	}
 }
 
 func (t *Terminal) writeTerminalOutput(core *term.Term, data []byte) int {
@@ -75,7 +80,7 @@ func (t *Terminal) paint() {
 	secondary := t.paintSecondary()
 	if full {
 		t.displayRegions.fullDirty = false
-		t.putFramebufferRegion(0, 0, fbW, fbH)
+		t.putFramebufferRegion(0, 0, t.fbW, t.fbH)
 		return
 	}
 	for _, region := range regions {
@@ -98,13 +103,13 @@ func (t *Terminal) pixelRegion(r term.Region) (px, py, w, h int) {
 	if py < 0 {
 		py = 0
 	}
-	if px+w > fbW {
-		w = fbW - px
+	if px+w > t.fbW {
+		w = t.fbW - px
 	}
-	if py+h > fbH {
-		h = fbH - py
+	if py+h > t.fbH {
+		h = t.fbH - py
 	}
-	if w < 1 || h < 1 || fbW < 1 || fbH < 1 {
+	if w < 1 || h < 1 || t.fbW < 1 || t.fbH < 1 {
 		return 0, 0, 0, 0
 	}
 	return px, py, w, h
@@ -114,8 +119,8 @@ func (t *Terminal) pixelRegion(r term.Region) (px, py, w, h int) {
 // chunks. XGB copies each request before returning, so no retained snapshot is
 // needed while terminal mutation remains serialized by t.mu.
 func (t *Terminal) putFramebufferRegion(px, py, w, h int) {
-	if w < 1 || h < 1 || len(framebuf) == 0 || t.host == nil {
+	if w < 1 || h < 1 || len(t.framebuf) == 0 || t.host == nil {
 		return
 	}
-	t.host.Upload(framebuf, fbW, px, py, w, h)
+	t.host.Upload(t.framebuf, t.fbW, px, py, w, h)
 }

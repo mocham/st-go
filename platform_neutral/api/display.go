@@ -32,6 +32,7 @@ type Callbacks struct {
 	Close                        func()
 	PaintDirty                   func()
 	Paste                        func(string)
+	CancelInput                  func() // widget deactivation discards an unfinished pointer gesture
 }
 
 // EventHost is the uniform terminal-to-native callback API. Native event loops

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"st-go/platform_neutral/api"
 )
 
 const (
@@ -29,6 +31,29 @@ type systemBar struct {
 	bounds          image.Rectangle
 	textLeft        int
 	pixels          []uint32
+	widget          api.Widget
+}
+
+// AttachWidgets gives the passive bar the same identity, local buffer, and
+// lifetime boundary as a terminal without changing its legacy overlay layout.
+func (d *Driver) AttachWidgets(container api.WidgetContainer) {
+	d.mu.Lock()
+	b := d.systemBar
+	if b == nil || b.bounds.Empty() {
+		d.mu.Unlock()
+		return
+	}
+	bounds := b.bounds
+	pixels := append([]uint32(nil), b.pixels...)
+	d.mu.Unlock()
+	widget, err := container.NewWidget(api.WidgetOptions{Kind: api.BarWidget, Bounds: bounds, PointerTransparent: true})
+	if err != nil {
+		return
+	}
+	d.mu.Lock()
+	b.widget = widget
+	d.mu.Unlock()
+	widget.Upload(pixels, bounds.Dx(), 0, 0, bounds.Dx(), bounds.Dy())
 }
 
 // Called by New and the input loop, not by a separate timer/goroutine. Sysfs
@@ -45,12 +70,13 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 
 	text := systemBarText(now, root)
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if d.closed {
+		d.mu.Unlock()
 		return
 	}
 	b.nextRefresh = now.Add(systemBarInterval)
 	if b.text == text {
+		d.mu.Unlock()
 		return
 	}
 	old := b.bounds
@@ -70,6 +96,16 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	// area from retained application pixels. Inactive VTs retain damage without
 	// presenting; acquire composes the most recently cached bar on return.
 	d.invalidate(old.Union(b.bounds))
+	widget := b.widget
+	bounds := b.bounds
+	pixels := b.pixels
+	d.mu.Unlock()
+	if widget != nil {
+		d.BeginPaint()
+		widget.SetBounds(bounds)
+		widget.Upload(pixels, bounds.Dx(), 0, 0, bounds.Dx(), bounds.Dy())
+		d.EndPaint()
+	}
 }
 
 func systemBarText(now time.Time, powerSupplyPath string) string {

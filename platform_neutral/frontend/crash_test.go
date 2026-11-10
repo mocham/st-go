@@ -30,7 +30,7 @@ func TestTallImageDecode(t *testing.T) {
 			if !ok || cols < 1 || rows < 1 || len(glyphs) != cols*rows {
 				t.Fatalf("decode = %dx%d, %d glyphs, ok=%v", cols, rows, len(glyphs), ok)
 			}
-			if rows > trm.rows || len(imageAtlas) > trm.cols*trm.rows*trm.cw*trm.ch*imageCacheScreens {
+			if rows > trm.rows || len(trm.imageAtlas) > trm.cols*trm.rows*trm.cw*trm.ch*imageCacheScreens {
 				t.Fatal("image exceeded screen/atlas bounds")
 			}
 		})
@@ -40,7 +40,7 @@ func TestTallImageDecode(t *testing.T) {
 func TestGlyphCacheBounded(t *testing.T) {
 	for _, size := range []int{2, 32} {
 		trm := &Terminal{cw: size, ch: size}
-		ensureFramebuffer(size, size)
+		trm.ensureFramebuffer(size, size)
 		for i := 0; i <= maxGlyphCacheEntries; i++ {
 			trm.drawGlyphAt(0, uint32(i), 0, 0, 0, false)
 		}
@@ -60,9 +60,9 @@ func TestGlyphCacheBounded(t *testing.T) {
 func TestGlyphCacheDifferentCellSizes(t *testing.T) {
 	for _, size := range []int{2, 4} {
 		trm := &Terminal{cw: size, ch: size}
-		ensureFramebuffer(size, size)
+		trm.ensureFramebuffer(size, size)
 		trm.drawGlyphAt(0, 0, 0xff112233, 0, 0, false)
-		for _, pixel := range framebuf {
+		for _, pixel := range trm.framebuf {
 			if pixel != 0xff112233 {
 				t.Fatalf("wrong cached glyph at size %d: %#x", size, pixel)
 			}

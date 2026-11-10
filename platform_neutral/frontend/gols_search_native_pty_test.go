@@ -59,7 +59,7 @@ INSERT INTO documents VALUES(1,'AA/document.tex','AA','document.tex','.tex','Syn
 		t.Fatal(err)
 	}
 	trm := regionTestTerminal(t)
-	ensureFramebuffer(402, 226)
+	trm.ensureFramebuffer(402, 226)
 	trm.applyDisplayLayout(100, 28)
 	trm.termCore.SetWriter(func(data []byte) { master.Write(data) })
 	child, err := ptyutil.Start(slave, []string{binaryPath, file}, append(os.Environ(), "HOME="+dir))
@@ -154,7 +154,7 @@ INSERT INTO documents VALUES(1,'AA/document.tex','AA','document.tex','.tex','Syn
 					continue
 				}
 				offset := int(glyph.Fg)
-				for _, pixel := range imageAtlas[offset : offset+trm.cw*trm.ch] {
+				for _, pixel := range trm.imageAtlas[offset : offset+trm.cw*trm.ch] {
 					binary.LittleEndian.PutUint32(encoded[:], pixel)
 					hash.Write(encoded[:])
 					r, g, b := (pixel>>16)&255, (pixel>>8)&255, pixel&255

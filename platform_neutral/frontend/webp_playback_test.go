@@ -66,7 +66,7 @@ func TestWebPAnimationPlaybackAcrossCacheStates(t *testing.T) {
 
 			frontend := testImageTerminal(20, 10, 8, 16)
 			frontend.webpCache = cache
-			if !ensureFramebuffer(frontend.cols*frontend.cw, frontend.rows*frontend.ch) {
+			if !frontend.ensureFramebuffer(frontend.cols*frontend.cw, frontend.rows*frontend.ch) {
 				t.Fatal("could not allocate playback framebuffer")
 			}
 			frontend.clearFramebuffer()
@@ -81,7 +81,7 @@ func TestWebPAnimationPlaybackAcrossCacheStates(t *testing.T) {
 			if !core.HasAnim() {
 				t.Fatal("animation stopped while drawing frame 0")
 			}
-			previous := append([]uint32(nil), framebuf...)
+			previous := append([]uint32(nil), frontend.framebuf...)
 			start := time.Now()
 			elapsed := 0
 			for index := 1; index < min(3, len(decodedDurations)); index++ {
@@ -89,10 +89,10 @@ func TestWebPAnimationPlaybackAcrossCacheStates(t *testing.T) {
 				if !core.TickAnim(start.Add(time.Duration(elapsed+1) * time.Millisecond)) {
 					t.Fatalf("animation stopped before frame %d", index)
 				}
-				if slices.Equal(previous, framebuf) {
+				if slices.Equal(previous, frontend.framebuf) {
 					t.Fatalf("frame %d advanced without changing framebuffer pixels", index)
 				}
-				previous = append(previous[:0], framebuf...)
+				previous = append(previous[:0], frontend.framebuf...)
 			}
 		})
 	}

@@ -8,29 +8,25 @@ import (
 	term "st-go/platform_neutral/stterminal"
 )
 
-// framebuffer sized to the window
-var (
-	fbW, fbH int
-	framebuf []uint32
-)
-
-func ensureFramebuffer(w, h int) bool {
+// The working raster belongs to this terminal; its host retains committed
+// pixels separately so synchronized output cannot expose half-painted state.
+func (t *Terminal) ensureFramebuffer(w, h int) bool {
 	size, valid := limits.RGBA("framebuffer", w, h)
 	if !valid {
 		return false
 	}
-	if len(framebuf) >= w*h && fbW == w && fbH == h {
+	if len(t.framebuf) >= w*h && t.fbW == w && t.fbH == h {
 		return true
 	}
-	framebuf = make([]uint32, size/4)
-	fbW, fbH = w, h
+	t.framebuf = make([]uint32, size/4)
+	t.fbW, t.fbH = w, h
 	return true
 }
 
 func (t *Terminal) clearFramebuffer() {
 	bg := t.colorAt(ColDefaultBg)
-	for i := range framebuf {
-		framebuf[i] = bg
+	for i := range t.framebuf {
+		t.framebuf[i] = bg
 	}
 }
 
@@ -48,6 +44,7 @@ func itoa(n int) string {
 
 // Include raster dimensions so a cached cell cannot be reused at another size.
 type glyphKey struct {
+	font           uint64 // primary/fallback bundle and native render size
 	u              rune
 	fg, bg         uint32
 	w, h, baseline int
@@ -66,7 +63,7 @@ var (
 
 // drawGlyphAt renders rune u with fg/bg colors into the framebuffer at cell (x,y).
 func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
-	if fbW < 1 || fbH < 1 {
+	if t.fbW < 1 || t.fbH < 1 {
 		return
 	}
 	w, img := t.glyphPixels(u, fg, bg, wide)
@@ -76,16 +73,20 @@ func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
 }
 
 func (t *Terminal) glyphPixels(u rune, fg, bg uint32, wide bool) (int, []uint32) {
+	// FreeType owns mutable face slots. Serialize lookup identity and native
+	// rasterization against font reloads and other terminal widgets.
+	fontMu.Lock()
+	defer fontMu.Unlock()
 	w := t.cw
 	if wide {
 		w *= 2
 	}
-	key := glyphKey{u: u, fg: fg, bg: bg, w: w, h: t.ch, baseline: t.baseline}
+	key := glyphKey{font: ft.generation, u: u, fg: fg, bg: bg, w: w, h: t.ch, baseline: t.baseline}
 	glyphMu.RLock()
 	img, ok := glyphCache[key]
 	glyphMu.RUnlock()
 	if !ok {
-		_, img = makeGlyph(u, fg, bg, w, t.ch, t.baseline)
+		_, img = makeGlyphLocked(u, fg, bg, w, t.ch, t.baseline)
 		if len(img) == 0 {
 			return 0, nil
 		}
@@ -111,13 +112,13 @@ func (t *Terminal) blitTerminalPixels(px, py, w, h int, pixels []uint32) {
 	r := image.Rect(px, py, px+w, py+h).Intersect(t.terminalClip())
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		src := (y-py)*w + r.Min.X - px
-		copy(framebuf[y*fbW+r.Min.X:y*fbW+r.Max.X], pixels[src:src+r.Dx()])
+		copy(t.framebuf[y*t.fbW+r.Min.X:y*t.fbW+r.Max.X], pixels[src:src+r.Dx()])
 	}
 }
 
 // fillRect fills a region of the framebuffer with argb color.
 func (t *Terminal) fillRect(argb uint32, px, py, w, h int) {
-	if fbW < 1 || fbH < 1 {
+	if t.fbW < 1 || t.fbH < 1 {
 		return
 	}
 	if w <= 0 || h <= 0 {
@@ -125,7 +126,7 @@ func (t *Terminal) fillRect(argb uint32, px, py, w, h int) {
 	}
 	r := image.Rect(px, py, px+w, py+h).Intersect(t.terminalClip())
 	for yy := r.Min.Y; yy < r.Max.Y; yy++ {
-		dst := framebuf[yy*fbW+r.Min.X : yy*fbW+r.Max.X]
+		dst := t.framebuf[yy*t.fbW+r.Min.X : yy*t.fbW+r.Max.X]
 		for i := range dst {
 			dst[i] = argb
 		}

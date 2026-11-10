@@ -16,6 +16,7 @@ so ordinary Go commands work with **`GOWORK=off`**, not just in the workspace.
 | `config/` | `st-go/config` | Terminal configuration and embedded defaults |
 | `terminfo/` | `st-go/terminfo` | Embedded terminal-description installation |
 | `audio/` | `st-go/audio` | Terminal-owned Go MP3 decoding and native ALSA output |
+| [`widgets/`](widgets/README.md) | `st-go/widgets` | Widget-local buffers, bounds, visibility, focus, event routing and retained surfaces; no tabs/layout policy |
 
 The terminal engine and neutral protocol contracts remain under
 [`platform_neutral/`](../platform_neutral/README.md), with their own modules.

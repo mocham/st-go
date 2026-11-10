@@ -169,7 +169,7 @@ func TestContinuousPageNavigationZoomAndStatus(t *testing.T) {
 		t.Fatalf("best-fit: zoom=%d width=%d", s.zoomPercent(), s.bitmap.width)
 	}
 	r := trm.secondaryPixels()
-	if framebuf[r.Min.Y*fbW+r.Min.X] != 0xfff7f5ef {
+	if trm.framebuf[r.Min.Y*trm.fbW+r.Min.X] != 0xfff7f5ef {
 		t.Fatal("zoomed-out page was not centered on matching paper")
 	}
 	_ = trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "zoom", Value: 200})
@@ -245,8 +245,7 @@ func TestContinuousPDFCropBoxKeepsContentAndJoinsPages(t *testing.T) {
 func TestContinuousRegionImmediateScrollAndDivider(t *testing.T) {
 	trm := regionTestTerminal(t)
 	splitRegionTest(t, trm)
-	buttons = 0
-	t.Cleanup(func() { buttons = 0 })
+	trm.buttons = 0
 	trm.displayRegions.jobs = make(chan regionJob, 1)
 	s := trm.displayRegions.secondary
 	r := trm.secondaryPixels()
@@ -260,13 +259,13 @@ func TestContinuousRegionImmediateScrollAndDivider(t *testing.T) {
 	s.dirty = true
 	trm.requestRegionPaint()
 	trm.paint()
-	before, generation := framebuf[r.Min.Y*fbW+r.Min.X], trm.displayRegions.generation
+	before, generation := trm.framebuf[r.Min.Y*trm.fbW+r.Min.X], trm.displayRegions.generation
 	var input bytes.Buffer
 	trm.termCore.SetWriter(func(b []byte) { input.Write(b) })
 	trm.bpress(xproto.ButtonPressEvent{Detail: 5, EventX: int16(r.Min.X + 1), EventY: 2})
 	trm.brelease(xproto.ButtonReleaseEvent{Detail: 5, EventX: int16(r.Min.X + 1), EventY: 2})
 	trm.paint()
-	if s.scrollY <= 0 || s.scrollY >= s.targetY || framebuf[r.Min.Y*fbW+r.Min.X] == before {
+	if s.scrollY <= 0 || s.scrollY >= s.targetY || trm.framebuf[r.Min.Y*trm.fbW+r.Min.X] == before {
 		t.Fatal("wheel did not immediately paint the first interpolated scroll frame")
 	}
 	if input.Len() != 0 || trm.displayRegions.generation != generation || len(trm.displayRegions.jobs) != 0 {
@@ -285,7 +284,7 @@ func TestContinuousRegionImmediateScrollAndDivider(t *testing.T) {
 	}
 	for y := pane.Min.Y; y < pane.Max.Y; y++ {
 		for x := pane.Min.X; x < r.Min.X; x++ {
-			if framebuf[y*fbW+x] != 0xff777777 {
+			if trm.framebuf[y*trm.fbW+x] != 0xff777777 {
 				t.Fatal("splitter was overwritten")
 			}
 		}
@@ -349,11 +348,11 @@ func TestContinuousRegionWorkerCachesDocumentAndPreservesPosition(t *testing.T) 
 	})
 	trm.mu.Lock()
 	r := trm.secondaryPixels()
-	if pixel := framebuf[(r.Max.Y-2)*fbW+r.Min.X+r.Dx()/2]; pixel != 0xff0000ff {
+	if pixel := trm.framebuf[(r.Max.Y-2)*trm.fbW+r.Min.X+r.Dx()/2]; pixel != 0xff0000ff {
 		trm.mu.Unlock()
 		t.Fatalf("scroll-to-end did not paint second page: %#x", pixel)
 	}
-	if framebuf[(r.Max.Y-2)*fbW+r.Min.X] != 0xfff7f5ef {
+	if trm.framebuf[(r.Max.Y-2)*trm.fbW+r.Min.X] != 0xfff7f5ef {
 		t.Error("scroll prefetch lost the paper color")
 	}
 	trm.displayRegions.mu.Lock()
@@ -393,7 +392,7 @@ func TestContinuousRegionWorkerCachesDocumentAndPreservesPosition(t *testing.T) 
 	await(func(s *regionSurface) bool { return !s.loading && s.bitmap.width == 1 })
 	trm.mu.Lock()
 	r = trm.secondaryPixels()
-	if framebuf[(r.Max.Y-1)*fbW+r.Min.X] != 0xfff7f5ef {
+	if trm.framebuf[(r.Max.Y-1)*trm.fbW+r.Min.X] != 0xfff7f5ef {
 		t.Error("canvas below the document lost the paper color")
 	}
 	_ = trm.ClearRegion(term.SecondaryRegion)

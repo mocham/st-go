@@ -70,14 +70,15 @@ func (t *Terminal) eventCallbacks() api.Callbacks {
 		Expose: t.expose, ExposeSurface: t.exposeRegion, KeyPress: t.keyPress, Text: t.textInput,
 		PointerPress: t.pointerPress, PointerRelease: t.pointerRelease, PointerMotion: t.pointerMotion,
 		Resize: t.resize, Focus: t.focus, Close: t.Close,
-		Paste:      func(text string) { t.pasteToTTY(replaceNewlines(text)) },
-		PaintDirty: func() { t.termCore.PaintDirty() },
+		Paste:       func(text string) { t.pasteToTTY(replaceNewlines(text)) },
+		PaintDirty:  func() { t.termCore.PaintDirty() },
+		CancelInput: func() { t.buttons, t.regionButtons = 0, 0; t.msel = mouseSel{}; t.suppressRestoreButton = false },
 	}
 }
 
 func (t *Terminal) expose() {
 	if t.termCore.IsPaintPaused() {
-		t.putFramebufferRegion(0, 0, fbW, fbH)
+		t.putFramebufferRegion(0, 0, t.fbW, t.fbH)
 	} else {
 		t.displayRegions.fullDirty = true
 		t.termCore.Redraw()
@@ -106,10 +107,10 @@ func (t *Terminal) resize(w, h int) {
 	if newRows < 1 {
 		newRows = 1
 	}
-	if newCols == t.physicalCols() && newRows == t.physicalRows() && w == fbW && h == fbH {
+	if newCols == t.physicalCols() && newRows == t.physicalRows() && w == t.fbW && h == t.fbH {
 		return
 	}
-	if !limits.Grid(newCols, newRows) || !ensureFramebuffer(w, h) {
+	if !limits.Grid(newCols, newRows) || !t.ensureFramebuffer(w, h) {
 		return
 	}
 	t.applyDisplayLayout(newCols, newRows)

@@ -56,7 +56,7 @@ func TestLargeJPEGPreviewWithinDecodedImageLimit(t *testing.T) {
 	}
 	for _, glyph := range glyphs {
 		offset := int(glyph.Fg)
-		if glyph.U == term.ImageRune && offset < len(imageAtlas) && imageAtlas[offset]&0xffffff != 0 {
+		if glyph.U == term.ImageRune && offset < len(trm.imageAtlas) && trm.imageAtlas[offset]&0xffffff != 0 {
 			return
 		}
 	}
@@ -64,12 +64,13 @@ func TestLargeJPEGPreviewWithinDecodedImageLimit(t *testing.T) {
 }
 
 func TestFramebufferResourceLimit(t *testing.T) {
-	ensureFramebuffer(8, 8)
-	framebuf[0] = 123
-	if ensureFramebuffer(1<<30, 1<<30) {
+	trm := &Terminal{}
+	trm.ensureFramebuffer(8, 8)
+	trm.framebuf[0] = 123
+	if trm.ensureFramebuffer(1<<30, 1<<30) {
 		t.Fatal("accepted oversized framebuffer")
 	}
-	if fbW != 8 || fbH != 8 || framebuf[0] != 123 {
+	if trm.fbW != 8 || trm.fbH != 8 || trm.framebuf[0] != 123 {
 		t.Fatal("rejected resize replaced the framebuffer")
 	}
 }

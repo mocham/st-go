@@ -585,7 +585,7 @@ func (t *Terminal) requestRegionPaint() {
 }
 
 func (t *Terminal) terminalClip() image.Rectangle {
-	r := image.Rect(0, 0, fbW, fbH)
+	r := image.Rect(0, 0, t.fbW, t.fbH)
 	if t.displayRegions.secondary != nil {
 		r = r.Intersect(image.Rect(t.borderpx, t.borderpx, t.borderpx+t.cols*t.cw, t.borderpx+t.rows*t.ch))
 	}
@@ -602,9 +602,9 @@ func (t *Terminal) secondaryPixels() image.Rectangle {
 
 func (t *Terminal) secondaryPanePixels() image.Rectangle {
 	if t.displayRegions.mainRows > 0 {
-		return image.Rect(t.borderpx, t.borderpx+t.rows*t.ch, t.borderpx+t.cols*t.cw, t.borderpx+t.physicalRows()*t.ch).Intersect(image.Rect(0, 0, fbW, fbH))
+		return image.Rect(t.borderpx, t.borderpx+t.rows*t.ch, t.borderpx+t.cols*t.cw, t.borderpx+t.physicalRows()*t.ch).Intersect(image.Rect(0, 0, t.fbW, t.fbH))
 	}
-	return image.Rect(t.borderpx+t.cols*t.cw, t.borderpx, t.borderpx+t.physicalCols()*t.cw, t.borderpx+t.rows*t.ch).Intersect(image.Rect(0, 0, fbW, fbH))
+	return image.Rect(t.borderpx+t.cols*t.cw, t.borderpx, t.borderpx+t.physicalCols()*t.cw, t.borderpx+t.rows*t.ch).Intersect(image.Rect(0, 0, t.fbW, t.fbH))
 }
 
 func (t *Terminal) overSecondary(px, py int) bool {
@@ -612,7 +612,7 @@ func (t *Terminal) overSecondary(px, py int) bool {
 }
 
 func (t *Terminal) regionMousePress(button byte, px, py int) bool {
-	if buttons != 0 || !t.overSecondary(px, py) {
+	if t.buttons != 0 || !t.overSecondary(px, py) {
 		return false // a main-region drag keeps ownership through its release
 	}
 	t.regionButtons |= buttonmask(button)
@@ -936,7 +936,7 @@ func (t *Terminal) paintSecondary() image.Rectangle {
 	if !ok {
 		return image.Rectangle{}
 	}
-	renderRegionPixels(frame.surface, frame.viewport, frame.pane, frame.background, framebuf, fbW)
+	renderRegionPixels(frame.surface, frame.viewport, frame.pane, frame.background, t.framebuf, t.fbW)
 	t.noteRegionListFrame(frame)
 	return frame.pane
 }

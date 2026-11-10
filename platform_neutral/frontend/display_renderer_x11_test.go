@@ -29,7 +29,7 @@ func TestPreviewX11RetainedScrollResizeAndMouse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = xproto.CreateWindowChecked(conn, 24, window, screen.Root, 0, 0, uint16(fbW), uint16(fbH), 0, xproto.WindowClassInputOutput, screen.RootVisual,
+	if err = xproto.CreateWindowChecked(conn, 24, window, screen.Root, 0, 0, uint16(trm.fbW), uint16(trm.fbH), 0, xproto.WindowClassInputOutput, screen.RootVisual,
 		xproto.CwEventMask, []uint32{xproto.EventMaskButtonPress | xproto.EventMaskButtonRelease}).Check(); err != nil {
 		t.Fatal(err)
 	}

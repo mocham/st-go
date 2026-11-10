@@ -54,17 +54,23 @@ func (d *Driver) damage(r image.Rectangle) {
 }
 
 func (d *Driver) Upload(pixels []uint32, stride, x, y, w, h int) {
-	if w <= 0 || h <= 0 || stride <= 0 {
+	d.UploadAt(pixels, stride, image.Rect(x, y, x+w, y+h), image.Pt(x, y))
+}
+func (d *Driver) UploadAt(pixels []uint32, stride int, source image.Rectangle, destination image.Point) {
+	if source.Empty() || stride <= 0 {
 		return
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	r := image.Rect(x, y, x+w, y+h).Intersect(image.Rect(0, 0, d.width, d.height))
-	if r.Empty() || stride < r.Max.X || r.Max.Y > len(pixels)/max(1, stride) {
+	delta := destination.Sub(source.Min)
+	source = source.Intersect(image.Rect(0, 0, stride, len(pixels)/stride))
+	r := source.Add(delta).Intersect(image.Rect(0, 0, d.width, d.height))
+	if r.Empty() {
 		return
 	}
 	for row := r.Min.Y; row < r.Max.Y; row++ {
-		copy(d.pixels[row*d.width+r.Min.X:row*d.width+r.Max.X], pixels[row*stride+r.Min.X:row*stride+r.Max.X])
+		at := (row-delta.Y)*stride + r.Min.X - delta.X
+		copy(d.pixels[row*d.width+r.Min.X:row*d.width+r.Max.X], pixels[at:at+r.Dx()])
 	}
 	d.damage(r)
 }
@@ -91,18 +97,29 @@ type surface struct {
 	bounds image.Rectangle
 	pixels []uint32
 	closed bool
+	hidden bool
+	kind   api.WidgetKind
 }
 
 func (d *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surface, error) {
+	return d.NewWidgetSurface(api.TerminalWidget, bounds, background)
+}
+func (d *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, background uint32) (api.Surface, error) {
 	if _, ok := limits.RGBA("web surface", bounds.Dx(), bounds.Dy()); !ok {
 		return nil, fmt.Errorf("invalid surface dimensions")
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if len(d.surfaces) >= 8 {
+	previews := 0
+	for _, surface := range d.surfaces {
+		if surface.kind == api.TerminalWidget {
+			previews++
+		}
+	}
+	if kind == api.TerminalWidget && previews >= 8 {
 		return nil, fmt.Errorf("web surface limit reached")
 	}
-	s := &surface{driver: d, bounds: bounds}
+	s := &surface{driver: d, bounds: bounds, kind: kind}
 	s.fill(background)
 	d.surfaces = append(d.surfaces, s)
 	d.damage(bounds)
@@ -113,6 +130,15 @@ func (s *surface) fill(background uint32) {
 	s.pixels = make([]uint32, s.bounds.Dx()*s.bounds.Dy())
 	for i := range s.pixels {
 		s.pixels[i] = background
+	}
+}
+func (s *surface) SetVisible(visible bool) {
+	d := s.driver
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !s.closed && s.hidden == visible {
+		s.hidden = !visible
+		d.damage(s.bounds)
 	}
 }
 func (s *surface) Configure(bounds image.Rectangle, background uint32) {
@@ -127,7 +153,9 @@ func (s *surface) Configure(bounds image.Rectangle, background uint32) {
 	}
 	old := s.bounds
 	s.bounds = bounds
-	s.fill(background)
+	if old.Size() != bounds.Size() {
+		s.fill(background)
+	}
 	d.damage(old)
 	d.damage(bounds)
 }
@@ -187,6 +215,9 @@ func (d *Driver) frames() []frame {
 			copy(f.pixels[(y-r.Min.Y)*r.Dx():], d.pixels[y*d.width+r.Min.X:y*d.width+r.Max.X])
 		}
 		for _, s := range d.surfaces {
+			if s.hidden || s.kind == api.BarWidget {
+				continue
+			}
 			clip := s.bounds.Intersect(r)
 			for y := clip.Min.Y; y < clip.Max.Y; y++ {
 				at := (y-r.Min.Y)*r.Dx() + clip.Min.X - r.Min.X
@@ -200,6 +231,17 @@ func (d *Driver) frames() []frame {
 			at := (y-r.Min.Y)*r.Dx() + clip.Min.X - r.Min.X
 			from := (y-cursor.Bounds.Min.Y)*cursor.Bounds.Dx() + clip.Min.X - cursor.Bounds.Min.X
 			copy(f.pixels[at:at+clip.Dx()], cursor.Pixels[from:from+clip.Dx()])
+		}
+		for _, s := range d.surfaces {
+			if s.hidden || s.kind != api.BarWidget {
+				continue
+			}
+			clip := s.bounds.Intersect(r)
+			for y := clip.Min.Y; y < clip.Max.Y; y++ {
+				at := (y-r.Min.Y)*r.Dx() + clip.Min.X - r.Min.X
+				from := (y-s.bounds.Min.Y)*s.bounds.Dx() + clip.Min.X - s.bounds.Min.X
+				copy(f.pixels[at:at+clip.Dx()], s.pixels[from:from+clip.Dx()])
+			}
 		}
 		frames = append(frames, f)
 	}

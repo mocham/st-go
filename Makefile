@@ -42,7 +42,7 @@ OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat govim govim-pinyind
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
-FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config latexpdf limits pdfmeta ptyutil semhtml terminfo tui)
+FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 DEMO_MODULES = demo-go demo-go/file-browser demo-go/gols demo-go/govim demo-go/pinyind demo-go/vimtex demo-go/zat
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
@@ -405,7 +405,7 @@ WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:lib
 GC_EXTRA   = -Wl,--gc-sections
 
 PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go platform_dependent/web/assets/*)
-GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard functionalities/config/*.go functionalities/audio/*.go) $(PLATFORM_SRC) \
+GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard functionalities/config/*.go functionalities/audio/*.go functionalities/widgets/*.go) $(PLATFORM_SRC) \
 	  go.mod go.sum Monaco_Linux.ttf \
 	  $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go) \
           $(wildcard functionalities/config/*.json functionalities/ptyutil/*.go functionalities/terminfo/*.go) \

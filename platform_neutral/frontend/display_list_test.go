@@ -39,12 +39,12 @@ func TestRetainedListSmoothScrollHitTestingAndPreviewRestore(t *testing.T) {
 	if trm.displayRegions.secondary != active || active.list == nil {
 		t.Fatal("old decoder result replaced the list")
 	}
-	before := append([]uint32(nil), framebuf...)
+	before := append([]uint32(nil), trm.framebuf...)
 	trm.paintSecondary()
 	main := image.Rect(trm.borderpx, trm.borderpx, trm.borderpx+cols*trm.cw, trm.borderpx+rows*trm.ch)
 	for y := main.Min.Y; y < main.Max.Y; y++ {
 		for x := main.Min.X; x < main.Max.X; x++ {
-			if framebuf[y*fbW+x] != before[y*fbW+x] {
+			if trm.framebuf[y*trm.fbW+x] != before[y*trm.fbW+x] {
 				t.Fatal("list paint touched main editor pixels")
 			}
 		}

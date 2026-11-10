@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 	"st-go/limits"
+	"st-go/platform_neutral/api"
 	term "st-go/platform_neutral/stterminal"
 )
 
@@ -148,6 +149,12 @@ func (t *Terminal) listMousePress(button byte, px, py int) {
 }
 
 func (t *Terminal) noteRegionListFrame(frame regionFrame) {
+	if host, ok := t.host.(api.WidgetPresentation); ok {
+		generation, visible := host.PresentationState()
+		if !visible || generation != frame.presentation {
+			return
+		}
+	}
 	if frame.surface.list == nil {
 		return
 	}

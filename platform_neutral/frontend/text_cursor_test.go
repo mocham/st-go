@@ -66,23 +66,23 @@ func TestTextCursorMovementAndFocusDoNotRepaintGlyphs(t *testing.T) {
 	trm.winMode |= term.ModeFocused
 	trm.writeTerminalOutput(trm.termCore, []byte("abc"))
 	trm.paint()
-	before := slices.Clone(framebuf)
+	before := slices.Clone(trm.framebuf)
 	host.uploads = nil
 	trm.writeTerminalOutput(trm.termCore, []byte("\x1b[4;5H"))
 	trm.paint()
-	if !slices.Equal(before, framebuf) || len(host.uploads) != 0 {
+	if !slices.Equal(before, trm.framebuf) || len(host.uploads) != 0 {
 		t.Fatal("cursor-only movement changed/uploaded glyph content", host.uploads)
 	}
 	if want := image.Rect(trm.borderpx+4*trm.cw, trm.borderpx+3*trm.ch, trm.borderpx+5*trm.cw, trm.borderpx+4*trm.ch); host.cursor.Bounds != want || !host.cursor.Valid() {
 		t.Fatal("caret did not move independently", host.cursor.Bounds)
 	}
 	trm.focus(false)
-	if len(host.uploads) != 0 || !slices.Equal(before, framebuf) {
+	if len(host.uploads) != 0 || !slices.Equal(before, trm.framebuf) {
 		t.Fatal("caret focus change repainted glyphs")
 	}
 	trm.writeTerminalOutput(trm.termCore, []byte("\x1b[?25l"))
 	trm.paint()
-	if !host.cursor.Bounds.Empty() || len(host.uploads) != 0 || !slices.Equal(before, framebuf) {
+	if !host.cursor.Bounds.Empty() || len(host.uploads) != 0 || !slices.Equal(before, trm.framebuf) {
 		t.Fatal("hiding caret repainted glyphs")
 	}
 }
@@ -90,7 +90,7 @@ func TestTextCursorMovementAndFocusDoNotRepaintGlyphs(t *testing.T) {
 func TestTextCursorShapesKeepContentPristineAndClipWideCells(t *testing.T) {
 	trm := regionTestTerminal(t)
 	trm.cursorThick = 2
-	before := slices.Clone(framebuf)
+	before := slices.Clone(trm.framebuf)
 	for shape := 0; shape <= 7; shape++ {
 		for _, focused := range []bool{false, true} {
 			trm.cursorShape = shape
@@ -100,7 +100,7 @@ func TestTextCursorShapesKeepContentPristineAndClipWideCells(t *testing.T) {
 				trm.winMode &^= term.ModeFocused
 			}
 			trm.DrawCursor(trm.cols-1, 0, term.Glyph{U: ' ', Mode: term.ATTRWide}, 0, 0, term.Glyph{})
-			if !trm.textCursor.Valid() || !trm.textCursor.Bounds.In(trm.terminalClip()) || !slices.Equal(before, framebuf) {
+			if !trm.textCursor.Valid() || !trm.textCursor.Bounds.In(trm.terminalClip()) || !slices.Equal(before, trm.framebuf) {
 				t.Fatal("caret changed content or escaped terminal bounds", shape, focused)
 			}
 		}

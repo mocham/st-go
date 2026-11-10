@@ -23,7 +23,7 @@ terminal text rather than native display connections.
   with its screen model, ANSI/VT parser, DCS dispatch, selection, animation and
   damage tracking. `Hooks` and optional capability interfaces are neutral contracts.
 * **`api/`**: uniform terminal-to-event-host callbacks, painting/surface
-  contracts, startup values, and the existing geometry-string parser. No X
+   contracts, scoped widget identity/lifecycle, startup values, and the existing geometry-string parser. No X
   handles or native event types cross these contracts.
 * **[`frontend/`](frontend/README.md)**: the former root terminal host: PTY
   scheduling, terminal key and mouse encoding, software glyph/image painting,
@@ -35,7 +35,7 @@ terminal text rather than native display connections.
   format, dirty uploads and preview backing-pixmap strategy as before.
 * **[`../functionalities/`](../functionalities/README.md)**: independent reusable
   Go modules for TUI helpers, PDF generation, PTYs, configuration, limits, metadata,
-  terminfo, and terminal-owned audio. Their original import paths are preserved.
+   terminfo, terminal-owned audio, and [widget hosts](../functionalities/widgets/README.md). Their original import paths are preserved.
 * **`../main.go`**: executable wiring, including the original embedded font.
   `backend_x11.go` selects X11 by default; `backend_web.go` selects web with
   `backend_web`; `backend_fb.go` selects fbdev with `backend_fb`. No backend is
@@ -63,8 +63,13 @@ dispatches semantic calls back into the host. The terminal engine never imports
 a display backend. The architecture test rejects backend imports in neutral
 production code; explicitly native integration tests may import XGB.
 
-The separation preserves the existing locks, global raster/cache state, timers,
-terminal protocols, configuration/key bindings, and feature boundaries, without
+The widget adapter routes native callbacks to each client's own lock. Terminal
+rasters, mouse state, image/PDF atlases and PTY lifecycle are instance-owned;
+only the process font bundle/glyph cache is shared and serialized. The default
+layout remains one terminal plus the framebuffer's existing passive system bar.
+No terminal-level tabs or new layout controls are implemented.
+
+The separation preserves timers, terminal protocols, configuration/key bindings, and feature boundaries, without
 introducing a universal native event model. The web host accepts committed UTF-8
 input alongside key/paste callbacks and advertises unsupported desktop geometry,
 so click-to-restore interception is not armed in a browser. The framebuffer host

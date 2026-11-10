@@ -24,7 +24,7 @@ func regionTestTerminal(t *testing.T) *Terminal {
 	cfg.Cols, cfg.Rows = 20, 5
 	trm := &Terminal{cfg: cfg, cols: 20, rows: 5, cw: 4, ch: 8, baseline: 6, borderpx: 1, done: make(chan struct{})}
 	trm.loadColors(cfg)
-	ensureFramebuffer(trm.cols*trm.cw+2, trm.rows*trm.ch+2)
+	trm.ensureFramebuffer(trm.cols*trm.cw+2, trm.rows*trm.ch+2)
 	trm.attachTerm(term.NewTerm(cfg, trm))
 	trm.termCore.Redraw()
 	t.Cleanup(func() {
@@ -63,7 +63,7 @@ func assertRegionPixels(t *testing.T, trm *Terminal, pixel uint32) {
 	r := trm.secondaryPixels()
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
-			if got := framebuf[y*fbW+x]; got != pixel {
+			if got := trm.framebuf[y*trm.fbW+x]; got != pixel {
 				t.Fatalf("preview pixel (%d,%d) = %#x, want %#x", x, y, got, pixel)
 			}
 		}
@@ -89,8 +89,8 @@ func TestDisplayRegionSurvivesTerminalOperations(t *testing.T) {
 	// Exercise the final clipping layer even with deliberately out-of-grid
 	// draws, including wide cells and source-stride preservation.
 	trm.drawGlyphAt(0, 0, 0xff00ff00, trm.cols-1, 0, true)
-	trm.fillRect(0xff00ff00, -100, -100, fbW+200, fbH+200)
-	imageAtlas = make([]uint32, trm.cw*trm.ch)
+	trm.fillRect(0xff00ff00, -100, -100, trm.fbW+200, trm.fbH+200)
+	trm.imageAtlas = make([]uint32, trm.cw*trm.ch)
 	trm.drawImageCell(term.Glyph{U: term.ImageRune}, trm.cols, 0)
 	assertRegionPixels(t, trm, pixel)
 	trm.handleEvent(xproto.ExposeEvent{})
@@ -144,15 +144,14 @@ func TestStackedRegionClippingResizeAndMouse(t *testing.T) {
 	}
 	setRegionTestPixels(trm, 0xff913b57)
 	trm.writeTerminalOutput(trm.termCore, []byte("\x1b[2J\x1b[Hstatus\r\nmore\x1b[K"))
-	trm.fillRect(0xff123456, -100, -100, fbW+200, fbH+200)
+	trm.fillRect(0xff123456, -100, -100, trm.fbW+200, trm.fbH+200)
 	assertRegionPixels(t, trm, 0xff913b57)
 	trm.resize(30*trm.cw+2, 8*trm.ch+2)
 	if trm.rows != 1 || trm.cols != 30 || trm.Regions()[1].Bounds.Height != 7 {
 		t.Fatalf("resized stack: %#v", trm.Regions())
 	}
 	assertRegionPixels(t, trm, 0xff913b57)
-	buttons = 0
-	t.Cleanup(func() { buttons = 0 })
+	trm.buttons = 0
 	var input bytes.Buffer
 	trm.termCore.SetWriter(func(b []byte) { input.Write(b) })
 	trm.termCore.Twrite([]byte("\x1b[?1000h\x1b[?1006h"), false)
@@ -197,8 +196,7 @@ func TestDisplayRegionSynchronizedOutput(t *testing.T) {
 func TestDisplayRegionMouseOwnership(t *testing.T) {
 	trm := regionTestTerminal(t)
 	splitRegionTest(t, trm)
-	buttons, msel = 0, mouseSel{}
-	t.Cleanup(func() { buttons, msel = 0, mouseSel{} })
+	trm.buttons, trm.msel = 0, mouseSel{}
 	var input bytes.Buffer
 	trm.termCore.SetWriter(func(b []byte) { input.Write(b) })
 	trm.termCore.Twrite([]byte("\x1b[?1000h\x1b[?1006h"), false)
@@ -206,12 +204,12 @@ func TestDisplayRegionMouseOwnership(t *testing.T) {
 	trm.bpress(xproto.ButtonPressEvent{Detail: 1, EventX: right, EventY: 2})
 	trm.bmotion(xproto.MotionNotifyEvent{EventX: 2, EventY: 2})
 	trm.brelease(xproto.ButtonReleaseEvent{Detail: 1, EventX: 2, EventY: 2})
-	if input.Len() != 0 || buttons != 0 || trm.regionButtons != 0 {
+	if input.Len() != 0 || trm.buttons != 0 || trm.regionButtons != 0 {
 		t.Fatal("secondary click leaked into Vim input")
 	}
 	trm.bpress(xproto.ButtonPressEvent{Detail: 1, EventX: 2, EventY: 2})
 	trm.brelease(xproto.ButtonReleaseEvent{Detail: 1, EventX: right, EventY: 2})
-	if !strings.Contains(input.String(), "M") || !strings.Contains(input.String(), "m") || buttons != 0 {
+	if !strings.Contains(input.String(), "M") || !strings.Contains(input.String(), "m") || trm.buttons != 0 {
 		t.Fatalf("main drag lost its matching release: %q", input.String())
 	}
 }
@@ -311,8 +309,7 @@ func TestDisplayRegionRefreshKeepsPage(t *testing.T) {
 func TestDisplayRegionNavigationReporting(t *testing.T) {
 	trm := regionTestTerminal(t)
 	splitRegionTest(t, trm)
-	buttons = 0
-	t.Cleanup(func() { buttons = 0 })
+	trm.buttons = 0
 	var input bytes.Buffer
 	trm.termCore.SetWriter(func(b []byte) { input.Write(b) })
 	trm.writeTerminalOutput(trm.termCore, []byte("\x1bPregion secondary scroll report; region secondary seek 42\x1b\\"))

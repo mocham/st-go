@@ -12,21 +12,21 @@ func TestTerminalPaintLeavesInterveningRowsUntouched(t *testing.T) {
 	lastY := trm.borderpx + 4*trm.ch
 	for y := firstY; y < lastY; y++ {
 		for x := trm.borderpx; x < trm.borderpx+trm.cols*trm.cw; x++ {
-			framebuf[y*fbW+x] = sentinel
+			trm.framebuf[y*trm.fbW+x] = sentinel
 		}
 	}
 	trm.writeTerminalOutput(trm.termCore, []byte("\x1b[?2026h\x1b[1;2H\x1b[48;2;17;34;51m \x1b[5;2H \x1b[1;2H\x1b[?2026l"))
 	trm.paintTerminalOutput(trm.termCore)
 	for y := firstY; y < lastY; y++ {
 		for x := trm.borderpx; x < trm.borderpx+trm.cols*trm.cw; x++ {
-			if got := framebuf[y*fbW+x]; got != sentinel {
+			if got := trm.framebuf[y*trm.fbW+x]; got != sentinel {
 				t.Fatalf("clean row %d repainted at pixel (%d,%d): %#x", (y-trm.borderpx)/trm.ch+1, x, y, got)
 			}
 		}
 	}
 	// The status update really was painted; this is not a no-op frontend test.
 	x, y := trm.borderpx+trm.cw, trm.borderpx+4*trm.ch
-	if got := framebuf[y*fbW+x]; got != 0xff112233 {
+	if got := trm.framebuf[y*trm.fbW+x]; got != 0xff112233 {
 		t.Fatalf("changed status cell was not painted: %#x", got)
 	}
 }

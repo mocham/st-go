@@ -77,7 +77,7 @@ func TestUniformPainterKeepsSeparatedDirtyRows(t *testing.T) {
 	if len(host.uploads) == 0 {
 		t.Fatal("painter received no damage")
 	}
-	clean := image.Rect(0, trm.borderpx+trm.ch, fbW, trm.borderpx+4*trm.ch)
+	clean := image.Rect(0, trm.borderpx+trm.ch, trm.fbW, trm.borderpx+4*trm.ch)
 	for _, damage := range host.uploads {
 		if !damage.Intersect(clean).Empty() {
 			t.Fatalf("upload bridges clean rows: %v", damage)

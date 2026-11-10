@@ -11,6 +11,7 @@ import "C"
 
 import (
 	"log"
+	"sync"
 	"unsafe"
 
 	"st-go/limits"
@@ -20,22 +21,26 @@ import (
 var embeddedFont []byte
 
 type ft2 struct {
-	loaded bool
+	loaded     bool
+	generation uint64
 }
 
 var ft ft2
+var fontMu sync.Mutex
 
 // loadFonts initializes FreeType. When fontName is empty the embedded
 // Monaco_Linux.ttf (go:embed) is loaded from memory; otherwise the named
 // font file is used (the -f command-line override). Fallback slots are
 // resolved by the C plugin as before.
 func loadFonts(fontName string, pixsize int) bool {
+	fontMu.Lock()
+	defer fontMu.Unlock()
 	if _, valid := limits.RGBA("font size", pixsize, pixsize); !valid {
 		return false
 	}
 	if fontName == "" {
 		// The primary embedded font must outlive the library.
-		ptr := unsafe.Pointer(&embeddedFont[0])
+		ptr := unsafe.Pointer(unsafe.SliceData(embeddedFont))
 		C.ff2_set_memory_font(0, (*C.uchar)(ptr), C.size_t(len(embeddedFont)))
 		C.ff2_set_memory_font(C.FF2_MAXFONTS-1, nil, 0)
 	} else {
@@ -45,10 +50,11 @@ func loadFonts(fontName string, pixsize int) bool {
 		C.ff2_set_font(0, cname)
 		// Keep readable text even if a configured file is missing, corrupt or
 		// only contains icons. This memory slot follows the primary file.
-		C.ff2_set_memory_font(C.FF2_MAXFONTS-1, (*C.uchar)(unsafe.Pointer(&embeddedFont[0])), C.size_t(len(embeddedFont)))
+		C.ff2_set_memory_font(C.FF2_MAXFONTS-1, (*C.uchar)(unsafe.Pointer(unsafe.SliceData(embeddedFont))), C.size_t(len(embeddedFont)))
 	}
 	ok := C.ff2_load_fonts(C.int(pixsize))
 	ft.loaded = ok != 0
+	ft.generation++
 	glyphMu.Lock()
 	clear(glyphCache)
 	glyphCacheBytes = 0
@@ -62,6 +68,12 @@ func loadFonts(fontName string, pixsize int) bool {
 // makeGlyph renders one rune blended over bg into dst (ARGB cells).
 // Returns the number of columns used (GlyphWidth or 2*GlyphWidth).
 func makeGlyph(r rune, fg, bg uint32, outW, outH, baseline int) (int, []uint32) {
+	fontMu.Lock()
+	defer fontMu.Unlock()
+	return makeGlyphLocked(r, fg, bg, outW, outH, baseline)
+}
+
+func makeGlyphLocked(r rune, fg, bg uint32, outW, outH, baseline int) (int, []uint32) {
 	if outW < 1 || outH < 1 {
 		return outW, nil
 	}

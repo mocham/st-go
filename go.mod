@@ -26,6 +26,7 @@ require (
 	st-go/ptyutil v0.0.0
 	st-go/term v0.0.0
 	st-go/terminfo v0.0.0
+	st-go/widgets v0.0.0
 )
 
 require github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
@@ -43,4 +44,5 @@ replace (
 	st-go/term => ./term
 	st-go/terminfo => ./functionalities/terminfo
 	st-go/tui => ./functionalities/tui
+	st-go/widgets => ./functionalities/widgets
 )

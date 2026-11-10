@@ -262,7 +262,7 @@ func TestBase64Decode(t *testing.T) {
 	trm.termCore = core
 	trm.cw, trm.ch = int(cfg.GlyphWidth), int(cfg.GlyphHeight)
 	trm.cols, trm.rows = int(cfg.Cols), int(cfg.Rows)
-	ensureFramebuffer(40*trm.cw, 10*trm.ch)
+	trm.ensureFramebuffer(40*trm.cw, 10*trm.ch)
 
 	// write PNG to a temp file and open via the DSL
 	dir, err := os.MkdirTemp("", "stgotest")
@@ -275,7 +275,7 @@ func TestBase64Decode(t *testing.T) {
 		t.Fatal(err)
 	}
 	core.Twrite([]byte("\x1bPopen '"+path+"';\x1b\\"), false)
-	if len(imageAtlas) == 0 {
+	if len(trm.imageAtlas) == 0 {
 		t.Fatal("image DSL did not populate the atlas")
 	}
 	g := core.LineAt(0, 0)
@@ -1018,7 +1018,7 @@ func TestImageDecodePDF(t *testing.T) {
 	if !ok || len(glyphs) == 0 {
 		t.Fatalf("pdf decode failed (cols=%d rows=%d glyphs=%d ok=%v)", cols, rows, len(glyphs), ok)
 	}
-	if len(imageAtlas) == 0 {
+	if len(trm.imageAtlas) == 0 {
 		t.Fatalf("pdf atlas empty")
 	}
 }
@@ -1070,7 +1070,7 @@ func TestPDFModuloWrap(t *testing.T) {
 		for _, gl := range g {
 			o := int(gl.Fg)
 			for i := 0; i < trm.cw*trm.ch; i++ {
-				h ^= uint64(imageAtlas[o+i])
+				h ^= uint64(trm.imageAtlas[o+i])
 				h *= 1099511628211
 			}
 		}
@@ -1964,10 +1964,10 @@ func TestImageAtlasBounded(t *testing.T) {
 			t.Fatalf("decode %d failed", i)
 		}
 	}
-	if got := len(imageAtlas); got > maxEntries {
+	if got := len(trm.imageAtlas); got > maxEntries {
 		t.Fatalf("atlas grew to %d entries, bound %d", got, maxEntries)
 	}
-	if got := len(imageSlots); got > imageCacheScreens+1 {
+	if got := len(trm.imageSlots); got > imageCacheScreens+1 {
 		t.Fatalf("slots = %d, bound %d", got, imageCacheScreens)
 	}
 }
@@ -1990,8 +1990,8 @@ func TestImageAtlasRecycleReusesSlot(t *testing.T) {
 	if g2[0].Fg != g1[0].Fg {
 		t.Fatalf("second decode did not reuse the dated bitmap: %d vs %d", g2[0].Fg, g1[0].Fg)
 	}
-	if len(imageAtlas) > (10*6+1)*trm.cw*trm.ch {
-		t.Fatalf("atlas not bounded after reuse: %d entries", len(imageAtlas))
+	if len(trm.imageAtlas) > (10*6+1)*trm.cw*trm.ch {
+		t.Fatalf("atlas not bounded after reuse: %d entries", len(trm.imageAtlas))
 	}
 }
 
@@ -2002,12 +2002,12 @@ func TestImageAtlasRecycleFirstFit(t *testing.T) {
 	trm := testImageTerminal(30, 10, 8, 8)
 	// craft a pool: old 4-cell, old 100-cell, newer 4-cell
 	cell := trm.cw * trm.ch
-	imageSlots = []*imageSlot{
+	trm.imageSlots = []*imageSlot{
 		{offset: 0, capacity: 4, used: 4, stamp: 1},
 		{offset: 4 * cell, capacity: 100, used: 100, stamp: 2},
 		{offset: (4 + 100) * cell, capacity: 4, used: 4, stamp: 3},
 	}
-	imageAtlas = make([]uint32, (4+100+4)*cell)
+	trm.imageAtlas = make([]uint32, (4+100+4)*cell)
 	// need 60 cells: the 4-cell slots are too small (discarded), the 100-cell
 	// slot is the first that fits.
 	off := trm.allocImageCells(60)
@@ -2015,7 +2015,7 @@ func TestImageAtlasRecycleFirstFit(t *testing.T) {
 		t.Fatalf("recycled offset %d, want the 100-cell slot at %d", off, 4*cell)
 	}
 	// the dated too-small slot was freed
-	if imageSlots[0].used != 0 {
+	if trm.imageSlots[0].used != 0 {
 		t.Fatalf("dated too-small slot was not discarded")
 	}
 }

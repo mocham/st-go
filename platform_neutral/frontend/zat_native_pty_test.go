@@ -50,7 +50,7 @@ func TestZatNativePageTextPTY(t *testing.T) {
 		t.Fatal(err)
 	}
 	trm := regionTestTerminal(t)
-	ensureFramebuffer(322, 194)
+	trm.ensureFramebuffer(322, 194)
 	trm.applyDisplayLayout(80, 24)
 	trm.ttyResize = func(rows, cols int) { ptyutil.SetWinSizePixels(master, rows, cols, cols*trm.cw, rows*trm.ch) }
 	var replies, output bytes.Buffer

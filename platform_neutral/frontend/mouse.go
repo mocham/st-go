@@ -15,11 +15,6 @@ type mouseSel struct {
 	tclick2    time.Time
 }
 
-var msel mouseSel
-
-// buttons holds currently-pressed mouse buttons (bitmask).
-var buttons uint
-
 func buttonmask(btn byte) uint {
 	if btn < 1 || btn > 32 {
 		return 0
@@ -53,7 +48,7 @@ func (t *Terminal) pointerPress(btn byte, state uint16, px, py int) {
 	y := t.evrow(py)
 
 	if 1 <= btn && btn <= 11 {
-		buttons |= buttonmask(btn)
+		t.buttons |= buttonmask(btn)
 	}
 
 	if t.termCore.WinMode()&term.ModeMouse != 0 && state&t.forceMouseMod == 0 {
@@ -68,15 +63,15 @@ func (t *Terminal) pointerPress(btn byte, state uint16, px, py int) {
 	if btn == 1 {
 		now := time.Now()
 		snap := 0
-		if now.Sub(msel.tclick2) < time.Duration(t.tripleClick)*time.Millisecond {
+		if now.Sub(t.msel.tclick2) < time.Duration(t.tripleClick)*time.Millisecond {
 			snap = 2 // SNAP_LINE
-		} else if now.Sub(msel.tclick1) < time.Duration(t.doubleClick)*time.Millisecond {
+		} else if now.Sub(t.msel.tclick1) < time.Duration(t.doubleClick)*time.Millisecond {
 			snap = 1 // SNAP_WORD
 		}
-		msel.tclick2 = msel.tclick1
-		msel.tclick1 = now
-		msel.active = true
-		msel.selx, msel.sely = x, y
+		t.msel.tclick2 = t.msel.tclick1
+		t.msel.tclick1 = now
+		t.msel.active = true
+		t.msel.selx, t.msel.sely = x, y
 		t.termCore.SelStart(x, y, snap)
 	}
 }
@@ -85,7 +80,7 @@ func (t *Terminal) pointerMotion(state uint16, px, py int) {
 	if t.suppressRestoreButton {
 		return
 	}
-	if t.regionButtons != 0 || (buttons == 0 && t.overSecondary(px, py)) {
+	if t.regionButtons != 0 || (t.buttons == 0 && t.overSecondary(px, py)) {
 		return
 	}
 	x := t.evcol(px)
@@ -96,11 +91,11 @@ func (t *Terminal) pointerMotion(state uint16, px, py int) {
 		return
 	}
 
-	if !msel.active {
+	if !t.msel.active {
 		return
 	}
-	if x != msel.oldx || y != msel.oldy {
-		msel.oldx, msel.oldy = x, y
+	if x != t.msel.oldx || y != t.msel.oldy {
+		t.msel.oldx, t.msel.oldy = x, y
 		seltype := t.selTypeForState(state)
 		t.termCore.SelExtend(x, y, seltype, 0)
 		t.termCore.Redraw()
@@ -116,14 +111,14 @@ func (t *Terminal) pointerRelease(btn byte, state uint16, px, py int) {
 		t.regionButtons &^= buttonmask(btn)
 		return
 	}
-	if buttons == 0 && t.overSecondary(px, py) {
+	if t.buttons == 0 && t.overSecondary(px, py) {
 		return
 	}
 	x := t.evcol(px)
 	y := t.evrow(py)
 
 	if 1 <= btn && btn <= 11 {
-		buttons &^= buttonmask(btn)
+		t.buttons &^= buttonmask(btn)
 	}
 
 	if t.termCore.WinMode()&term.ModeMouse != 0 && state&t.forceMouseMod == 0 {
@@ -135,8 +130,8 @@ func (t *Terminal) pointerRelease(btn byte, state uint16, px, py int) {
 		return
 	}
 
-	if btn == 1 && msel.active {
-		msel.active = false
+	if btn == 1 && t.msel.active {
+		t.msel.active = false
 		seltype := t.selTypeForState(state)
 		t.termCore.SelExtend(x, y, seltype, 1)
 		sel := t.termCore.GetSel()
@@ -200,19 +195,19 @@ func (t *Terminal) mousereport(btn byte, state uint16, x, y int, etype byte) {
 	var code int
 
 	if etype == evMotion {
-		if x == msel.oldx && y == msel.oldy {
+		if x == t.msel.oldx && y == t.msel.oldy {
 			return
 		}
 		if t.termCore.WinMode()&(term.ModeMouseMotion|term.ModeMouseMany) == 0 {
 			return
 		}
 		// MODE_MOUSEMOTION: no reporting if no button is pressed
-		if t.termCore.WinMode()&term.ModeMouseMotion != 0 && buttons == 0 {
+		if t.termCore.WinMode()&term.ModeMouseMotion != 0 && t.buttons == 0 {
 			return
 		}
 		// btn = lowest-numbered pressed button, or 12 if none
 		b := 1
-		for ; b <= 11 && buttons&buttonmask(byte(b)) == 0; b++ {
+		for ; b <= 11 && t.buttons&buttonmask(byte(b)) == 0; b++ {
 		}
 		btn = byte(b)
 		code = 32
@@ -232,7 +227,7 @@ func (t *Terminal) mousereport(btn byte, state uint16, x, y int, etype byte) {
 		code = 0
 	}
 
-	msel.oldx, msel.oldy = x, y
+	t.msel.oldx, t.msel.oldy = x, y
 
 	// encode btn into code
 	if (t.termCore.WinMode()&term.ModeMouseSgr == 0 && etype == evRelease) ||

@@ -149,11 +149,11 @@ func TestContinuousRegionOccurrenceNavigationAndHighlights(t *testing.T) {
 		}
 		viewport, pane := trm.displayRegions.viewport, trm.displayRegions.pane
 		trm.displayRegions.mu.Unlock()
-		colored, plain := make([]uint32, len(framebuf)), make([]uint32, len(framebuf))
-		renderRegionPixels(s, viewport, pane, 0xffffffff, colored, fbW)
+		colored, plain := make([]uint32, len(trm.framebuf)), make([]uint32, len(trm.framebuf))
+		renderRegionPixels(s, viewport, pane, 0xffffffff, colored, trm.fbW)
 		base := s
 		base.search = nil
-		renderRegionPixels(base, viewport, pane, 0xffffffff, plain, fbW)
+		renderRegionPixels(base, viewport, pane, 0xffffffff, plain, trm.fbW)
 		changed := false
 		for i := range colored {
 			if colored[i] != plain[i] {

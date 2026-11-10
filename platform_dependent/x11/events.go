@@ -13,9 +13,7 @@ func (t *Driver) Bind(callbacks api.Callbacks) { t.callbacks = callbacks }
 // Run retains X's own event representation and dispatch loop. Only discrete
 // terminal callbacks cross into the neutral host, under its existing lock.
 func (t *Driver) Run() {
-	if keymapReply == nil {
-		t.SetupKeys()
-	}
+	t.SetupKeys()
 	for {
 		ev, err := t.conn.WaitForEvent()
 		if err != nil {

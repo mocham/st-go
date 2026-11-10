@@ -67,6 +67,10 @@ type Driver struct {
 	callbacks          api.Callbacks
 	surfaces           map[xproto.Window]*Surface
 	surfaceMu          sync.RWMutex
+	keyOnce            sync.Once
+	keymapReply        *xproto.GetKeyboardMappingReply
+	firstKey           xproto.Keycode
+	keysymsPer         byte
 	isClosed           int32
 }
 

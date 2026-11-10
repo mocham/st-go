@@ -87,7 +87,7 @@ func TestFixedPreviewPDFSearchAndHighlight(t *testing.T) {
 	}
 	tinted := false
 	for _, glyph := range glyphs {
-		for _, pixel := range imageAtlas[int(glyph.Fg) : int(glyph.Fg)+trm.cw*trm.ch] {
+		for _, pixel := range trm.imageAtlas[int(glyph.Fg) : int(glyph.Fg)+trm.cw*trm.ch] {
 			r, g, b := (pixel>>16)&255, (pixel>>8)&255, pixel&255
 			if r > g && g > b {
 				tinted = true

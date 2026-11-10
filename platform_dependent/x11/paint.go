@@ -16,22 +16,31 @@ func pixelBytes(v []uint32) []byte {
 // Upload preserves the previous PutImage chunking and copies each request
 // before returning; the host may immediately reuse its framebuffer.
 func (t *Driver) Upload(framebuf []uint32, stride, px, py, w, h int) {
-	if w < 1 || h < 1 || len(framebuf) == 0 || t.conn == nil {
+	t.UploadAt(framebuf, stride, image.Rect(px, py, px+w, py+h), image.Pt(px, py))
+}
+func (t *Driver) UploadAt(framebuf []uint32, stride int, source image.Rectangle, destination image.Point) {
+	if source.Empty() || stride < 1 || len(framebuf) == 0 || t.conn == nil {
 		return
 	}
-	r := t.rememberCursorBase(framebuf, stride, image.Rect(px, py, px+w, py+h))
+	delta := destination.Sub(source.Min)
+	source = source.Intersect(image.Rect(0, 0, stride, len(framebuf)/stride))
+	if source.Empty() {
+		return
+	}
+	px, py, w, h := source.Min.X+delta.X, source.Min.Y+delta.Y, source.Dx(), source.Dy()
+	r := t.rememberCursorBaseAt(framebuf, stride, source, delta)
 	rowsPer := max(1, (262144-28)/(w*4))
 	rowsPer = min(rowsPer, h)
 	for ypos := 0; ypos < h; ypos += rowsPer {
 		chunkRows := min(rowsPer, h-ypos)
 		var pixels []uint32
-		if px == 0 && w == stride {
-			start := (py + ypos) * stride
+		if source.Min.X == 0 && w == stride {
+			start := (source.Min.Y + ypos) * stride
 			pixels = framebuf[start : start+w*chunkRows]
 		} else {
 			pixels = make([]uint32, 0, w*chunkRows)
 			for yy := 0; yy < chunkRows; yy++ {
-				start := (py+ypos+yy)*stride + px
+				start := (source.Min.Y+ypos+yy)*stride + source.Min.X
 				pixels = append(pixels, framebuf[start:start+w]...)
 			}
 		}
@@ -46,10 +55,14 @@ func (t *Driver) Upload(framebuf []uint32, stride, px, py, w, h int) {
 // Keep only the clean cell underneath the caret, never another screen. Content
 // updates must refresh this underlay before moving/hiding a stationary caret.
 func (t *Driver) rememberCursorBase(pixels []uint32, stride int, damage image.Rectangle) image.Rectangle {
-	r := damage.Intersect(t.textCursor.Bounds)
+	return t.rememberCursorBaseAt(pixels, stride, damage, image.Point{})
+}
+func (t *Driver) rememberCursorBaseAt(pixels []uint32, stride int, source image.Rectangle, delta image.Point) image.Rectangle {
+	r := source.Add(delta).Intersect(t.textCursor.Bounds)
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		at := (y-t.textCursor.Bounds.Min.Y)*t.textCursor.Bounds.Dx() + r.Min.X - t.textCursor.Bounds.Min.X
-		copy(t.textCursor.Base[at:at+r.Dx()], pixels[y*stride+r.Min.X:y*stride+r.Max.X])
+		start := (y-delta.Y)*stride + r.Min.X - delta.X
+		copy(t.textCursor.Base[at:at+r.Dx()], pixels[start:start+r.Dx()])
 	}
 	return r
 }
@@ -86,9 +99,14 @@ type Surface struct {
 	pixmap xproto.Pixmap
 	gc     xproto.Gcontext
 	bounds image.Rectangle
+	hidden bool
+	kind   api.WidgetKind
 }
 
 func (t *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surface, error) {
+	return t.NewWidgetSurface(api.TerminalWidget, bounds, background)
+}
+func (t *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, background uint32) (api.Surface, error) {
 	win, err := xproto.NewWindowId(t.conn)
 	if err != nil {
 		return nil, err
@@ -97,7 +115,7 @@ func (t *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surf
 	if err != nil {
 		return nil, err
 	}
-	p := &Surface{driver: t, window: win, gc: gc, bounds: bounds}
+	p := &Surface{driver: t, window: win, gc: gc, bounds: bounds, kind: kind}
 	// Keep pointer propagation and the existing isolated-preview drawable.
 	xproto.CreateWindow(t.conn, 0, win, t.win, int16(bounds.Min.X), int16(bounds.Min.Y),
 		uint16(bounds.Dx()), uint16(bounds.Dy()), 0, xproto.WindowClassInputOutput, 0,
@@ -111,15 +129,41 @@ func (t *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surf
 	t.surfaces[win] = p
 	t.surfaceMu.Unlock()
 	p.resetBacking()
+	t.raiseBars()
 	return p, nil
 }
 
+func (t *Driver) raiseBars() {
+	t.surfaceMu.RLock()
+	defer t.surfaceMu.RUnlock()
+	for _, s := range t.surfaces {
+		if s.kind == api.BarWidget && !s.hidden {
+			xproto.ConfigureWindow(t.conn, s.window, xproto.ConfigWindowStackMode, []uint32{xproto.StackModeAbove})
+		}
+	}
+}
+func (p *Surface) SetVisible(visible bool) {
+	if p.window == 0 || p.hidden != visible {
+		return
+	}
+	p.hidden = !visible
+	if visible {
+		xproto.MapWindow(p.driver.conn, p.window)
+		p.driver.raiseBars()
+	} else {
+		xproto.UnmapWindow(p.driver.conn, p.window)
+	}
+}
+
 func (p *Surface) Configure(bounds image.Rectangle, background uint32) {
+	old := p.bounds
 	p.bounds = bounds
 	xproto.ConfigureWindow(p.driver.conn, p.window,
 		xproto.ConfigWindowX|xproto.ConfigWindowY|xproto.ConfigWindowWidth|xproto.ConfigWindowHeight,
 		[]uint32{uint32(bounds.Min.X), uint32(bounds.Min.Y), uint32(bounds.Dx()), uint32(bounds.Dy())})
-	p.resetBacking()
+	if old.Size() != bounds.Size() {
+		p.resetBacking()
+	}
 }
 
 func (p *Surface) resetBacking() {
@@ -138,6 +182,9 @@ func (p *Surface) resetBacking() {
 }
 
 func (p *Surface) Present(pixels []uint32, w, h, dy int, reusable bool) {
+	if p.hidden || p.window == 0 {
+		return
+	}
 	conn := p.driver.conn
 	drawable := xproto.Drawable(p.window)
 	start, end := 0, h
@@ -167,7 +214,7 @@ func (p *Surface) Present(pixels []uint32, w, h, dy int, reusable bool) {
 }
 
 func (p *Surface) Expose() bool {
-	if p.pixmap == 0 {
+	if p.pixmap == 0 || p.hidden {
 		return false
 	}
 	xproto.CopyArea(p.driver.conn, xproto.Drawable(p.pixmap), xproto.Drawable(p.window), p.gc, 0, 0, 0, 0, uint16(p.bounds.Dx()), uint16(p.bounds.Dy()))

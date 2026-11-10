@@ -25,6 +25,8 @@ func (h *lifecycleHost) Bind(c api.Callbacks)                     { h.callbacks 
 func (h *lifecycleHost) Show()                                    {}
 func (h *lifecycleHost) BackendName() string                      { return "fb" }
 func (h *lifecycleHost) SetupKeys()                               {}
+func (h *lifecycleHost) SetTitle(string)                          {}
+func (h *lifecycleHost) SetIconTitle(string)                      {}
 func (h *lifecycleHost) Upload([]uint32, int, int, int, int, int) {}
 func (h *lifecycleHost) ClientSize() (int, int, error)            { return 482, 282, nil }
 func (h *lifecycleHost) Close() {

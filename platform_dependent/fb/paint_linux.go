@@ -39,7 +39,7 @@ func (d *Driver) composeRect(memory []byte, r image.Rectangle) {
 	// Start at the highest pane covering this entire rectangle, if any.
 	first := -1
 	for i := len(d.surfaces) - 1; i >= 0; i-- {
-		if r.In(d.surfaces[i].bounds) {
+		if !d.surfaces[i].hidden && d.surfaces[i].kind != api.BarWidget && r.In(d.surfaces[i].bounds) {
 			first = i
 			break
 		}
@@ -49,12 +49,20 @@ func (d *Driver) composeRect(memory []byte, r image.Rectangle) {
 		first = 0
 	}
 	for _, s := range d.surfaces[first:] {
+		if s.hidden || s.kind == api.BarWidget {
+			continue
+		}
 		l.blit(memory, r.Intersect(s.bounds), s.bounds.Min, s.pixels, s.bounds.Dx())
 	}
 	c := d.textCursor
 	l.blit(memory, r.Intersect(c.Bounds), c.Bounds.Min, c.Pixels, c.Bounds.Dx())
-	if b := d.systemBar; b != nil {
+	if b := d.systemBar; b != nil && b.widget == nil {
 		l.blit(memory, r.Intersect(b.bounds), b.bounds.Min, b.pixels, b.bounds.Dx())
+	}
+	for _, s := range d.surfaces {
+		if !s.hidden && s.kind == api.BarWidget {
+			l.blit(memory, r.Intersect(s.bounds), s.bounds.Min, s.pixels, s.bounds.Dx())
+		}
 	}
 	if d.pointerVisible {
 		clip := r.Intersect(pointerBounds(d.pointer))
@@ -116,7 +124,11 @@ func (d *Driver) movePointer(p image.Point, visible bool) {
 	}
 }
 func (d *Driver) Upload(pixels []uint32, stride, x, y, w, h int) {
-	if stride <= 0 || w <= 0 || h <= 0 {
+	d.UploadAt(pixels, stride, image.Rect(x, y, x+w, y+h), image.Pt(x, y))
+}
+
+func (d *Driver) UploadAt(pixels []uint32, stride int, source image.Rectangle, destination image.Point) {
+	if stride <= 0 || source.Empty() {
 		return
 	}
 	d.mu.Lock()
@@ -125,12 +137,15 @@ func (d *Driver) Upload(pixels []uint32, stride, x, y, w, h int) {
 		return
 	}
 	l := d.screen.layout
-	r := image.Rect(x, y, x+w, y+h).Intersect(image.Rect(0, 0, l.width, l.height))
-	if r.Empty() || stride < r.Max.X || r.Max.Y > len(pixels)/stride {
+	delta := destination.Sub(source.Min)
+	source = source.Intersect(image.Rect(0, 0, stride, len(pixels)/stride))
+	r := source.Add(delta).Intersect(image.Rect(0, 0, l.width, l.height))
+	if r.Empty() {
 		return
 	}
 	for row := r.Min.Y; row < r.Max.Y; row++ {
-		copy(d.pixels[row*l.width+r.Min.X:row*l.width+r.Max.X], pixels[row*stride+r.Min.X:row*stride+r.Max.X])
+		at := (row-delta.Y)*stride + r.Min.X - delta.X
+		copy(d.pixels[row*l.width+r.Min.X:row*l.width+r.Max.X], pixels[at:at+r.Dx()])
 	}
 	d.invalidate(r)
 }
@@ -140,18 +155,29 @@ type surface struct {
 	bounds image.Rectangle
 	pixels []uint32
 	closed bool
+	hidden bool
+	kind   api.WidgetKind
 }
 
 func (d *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surface, error) {
+	return d.NewWidgetSurface(api.TerminalWidget, bounds, background)
+}
+func (d *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, background uint32) (api.Surface, error) {
 	if _, ok := limits.RGBA("fb surface", bounds.Dx(), bounds.Dy()); !ok {
 		return nil, fmt.Errorf("invalid surface bounds")
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.closed || len(d.surfaces) >= 8 {
+	previews := 0
+	for _, surface := range d.surfaces {
+		if surface.kind == api.TerminalWidget {
+			previews++
+		}
+	}
+	if d.closed || (kind == api.TerminalWidget && previews >= 8) {
 		return nil, fmt.Errorf("framebuffer closed or surface limit reached")
 	}
-	s := &surface{driver: d, bounds: bounds}
+	s := &surface{driver: d, bounds: bounds, kind: kind}
 	s.fill(background)
 	d.surfaces = append(d.surfaces, s)
 	d.invalidate(bounds)
@@ -161,6 +187,15 @@ func (s *surface) fill(background uint32) {
 	s.pixels = make([]uint32, s.bounds.Dx()*s.bounds.Dy())
 	for i := range s.pixels {
 		s.pixels[i] = background
+	}
+}
+func (s *surface) SetVisible(visible bool) {
+	d := s.driver
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !s.closed && s.hidden == visible {
+		s.hidden = !visible
+		d.invalidate(s.bounds)
 	}
 }
 func (s *surface) Configure(bounds image.Rectangle, background uint32) {
@@ -175,7 +210,9 @@ func (s *surface) Configure(bounds image.Rectangle, background uint32) {
 	}
 	old := s.bounds
 	s.bounds = bounds
-	s.fill(background)
+	if old.Size() != bounds.Size() {
+		s.fill(background)
+	}
 	d.invalidate(old)
 	d.invalidate(bounds)
 }

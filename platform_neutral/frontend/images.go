@@ -5,7 +5,7 @@ package frontend
 // When an image is loaded it is immediately decoded and broken into one
 // glyph per terminal cell. Each image-cell glyph is a plain hashable value
 // with U=ImageRune and Fg holding the offset of that cell's raw pixel block
-// (cw*ch uint32s) in the shared atlas below. The original image buffer is
+// (cw*ch uint32s) in this terminal's private atlas. The original image buffer is
 // then discarded. A cell therefore shows the image's actual pixels — many
 // colors per cell — with no per-glyph color transformation.
 
@@ -24,11 +24,6 @@ import (
 // cells). When the bound is reached the most dated bitmap that fits a new
 // image is recycled (dated bitmaps too small for the image are discarded
 // first). This keeps memory bounded instead of growing on every `open`.
-var (
-	imageAtlas    []uint32
-	imageSlots    []*imageSlot
-	imageStampSeq uint64
-)
 
 // imageCacheScreens bounds the atlas to this many full terminal screens of
 // image cells.
@@ -74,11 +69,11 @@ func (t *Terminal) allocImageCells(need int) int {
 	if !limits.Check("image atlas cells", int64(need), maxCells) {
 		return -1
 	}
-	imageStampSeq++
-	now := imageStampSeq
+	t.imageStampSeq++
+	now := t.imageStampSeq
 
 	// 1. reuse a free slot that fits
-	for _, s := range imageSlots {
+	for _, s := range t.imageSlots {
 		if s.used == 0 && s.capacity >= need {
 			s.used = need
 			s.stamp = now
@@ -88,7 +83,7 @@ func (t *Terminal) allocImageCells(need int) int {
 
 	// 2. recycle the most dated bitmap that fits; discard dated bitmaps that
 	//    are too small for this image and keep looking.
-	for _, s := range imageSlotsByStamp() {
+	for _, s := range t.imageSlotsByStamp() {
 		if s.capacity >= need {
 			s.used = need
 			s.stamp = now
@@ -98,32 +93,32 @@ func (t *Terminal) allocImageCells(need int) int {
 	}
 
 	// 3. grow a new bitmap within the bound
-	if imageSlotTotalCells()+need <= maxCells {
-		off := len(imageAtlas)
-		imageAtlas = append(imageAtlas, make([]uint32, need*t.cw*t.ch)...)
-		imageSlots = append(imageSlots, &imageSlot{offset: off, capacity: need, used: need, stamp: now})
+	if t.imageSlotTotalCells()+need <= maxCells {
+		off := len(t.imageAtlas)
+		t.imageAtlas = append(t.imageAtlas, make([]uint32, need*t.cw*t.ch)...)
+		t.imageSlots = append(t.imageSlots, &imageSlot{offset: off, capacity: need, used: need, stamp: now})
 		return off
 	}
 
 	// 4. bound reached and nothing fits (fragmentation): reset and start
 	//    fresh. Dangling image glyphs render blank via the draw bounds check.
-	imageAtlas = nil
-	imageSlots = nil
-	imageAtlas = append(imageAtlas, make([]uint32, need*t.cw*t.ch)...)
-	imageSlots = append(imageSlots, &imageSlot{offset: 0, capacity: need, used: need, stamp: now})
+	t.imageAtlas = nil
+	t.imageSlots = nil
+	t.imageAtlas = append(t.imageAtlas, make([]uint32, need*t.cw*t.ch)...)
+	t.imageSlots = append(t.imageSlots, &imageSlot{offset: 0, capacity: need, used: need, stamp: now})
 	return 0
 }
 
-func imageSlotsByStamp() []*imageSlot {
-	out := make([]*imageSlot, len(imageSlots))
-	copy(out, imageSlots)
+func (t *Terminal) imageSlotsByStamp() []*imageSlot {
+	out := make([]*imageSlot, len(t.imageSlots))
+	copy(out, t.imageSlots)
 	sort.Slice(out, func(i, j int) bool { return out[i].stamp < out[j].stamp })
 	return out
 }
 
-func imageSlotTotalCells() int {
+func (t *Terminal) imageSlotTotalCells() int {
 	n := 0
-	for _, s := range imageSlots {
+	for _, s := range t.imageSlots {
 		n += s.capacity
 	}
 	return n
@@ -386,9 +381,9 @@ func (t *Terminal) writeImageBlockFromUint(offset, w, h int, rgba []uint32, gx, 
 				sx := gx*t.cw + xx
 				o := offset + yy*t.cw + xx
 				if sy < h && sx < w {
-					imageAtlas[o] = rgba[sy*w+sx]
+					t.imageAtlas[o] = rgba[sy*w+sx]
 				} else {
-					imageAtlas[o] = 0xFF000000
+					t.imageAtlas[o] = 0xFF000000
 				}
 			}
 		}
@@ -421,7 +416,7 @@ func (t *Terminal) writeImageBlockFromUint(offset, w, h int, rgba []uint32, gx, 
 				sx = x0
 			}
 			o := offset + yy*t.cw + xx
-			imageAtlas[o] = rgba[sy*w+sx]
+			t.imageAtlas[o] = rgba[sy*w+sx]
 		}
 	}
 }
@@ -442,12 +437,12 @@ func (t *Terminal) writeImageBlock(offset, w, h int, rgba []byte, gx, gy, cols, 
 				o := offset + yy*t.cw + xx
 				if sy < h && sx < w {
 					po := (sy*w + sx) * 4
-					imageAtlas[o] = 0xFF000000 |
+					t.imageAtlas[o] = 0xFF000000 |
 						uint32(rgba[po])<<16 |
 						uint32(rgba[po+1])<<8 |
 						uint32(rgba[po+2])
 				} else {
-					imageAtlas[o] = 0xFF000000
+					t.imageAtlas[o] = 0xFF000000
 				}
 			}
 		}
@@ -482,7 +477,7 @@ func (t *Terminal) writeImageBlock(offset, w, h int, rgba []byte, gx, gy, cols, 
 			}
 			o := offset + yy*t.cw + xx
 			po := (sy*w + sx) * 4
-			imageAtlas[o] = 0xFF000000 |
+			t.imageAtlas[o] = 0xFF000000 |
 				uint32(rgba[po])<<16 |
 				uint32(rgba[po+1])<<8 |
 				uint32(rgba[po+2])
@@ -497,20 +492,20 @@ func (t *Terminal) drawImageCell(g term.Glyph, x, y int) {
 		return
 	}
 	offset := int(g.Fg)
-	if offset < 0 || offset+t.cw*t.ch > len(imageAtlas) {
+	if offset < 0 || offset+t.cw*t.ch > len(t.imageAtlas) {
 		return
 	}
-	if fbW < 1 || fbH < 1 {
+	if t.fbW < 1 || t.fbH < 1 {
 		return
 	}
 	px := t.borderpx + x*t.cw
 	py := t.borderpx + y*t.ch
-	t.blitTerminalPixels(px, py, t.cw, t.ch, imageAtlas[offset:offset+t.cw*t.ch])
+	t.blitTerminalPixels(px, py, t.cw, t.ch, t.imageAtlas[offset:offset+t.cw*t.ch])
 }
 
 // ImageClearAll clears the image glyph atlas (terminal reset / clear).
 func (t *Terminal) ImageClearAll() {
-	imageAtlas = nil
-	imageSlots = nil
-	imageStampSeq = 0
+	t.imageAtlas = nil
+	t.imageSlots = nil
+	t.imageStampSeq = 0
 }

@@ -12,7 +12,7 @@ func (*Terminal) CursorIsOverlay() bool { return true }
 // DrawCursor prepares only a cell-sized overlay. Moving, hiding, or changing
 // the caret never restores/rasterizes glyphs or mutates the content framebuffer.
 func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, _, _ int, _ term.Glyph) {
-	if t.winModeIs(term.ModeHide) || fbW < 1 || fbH < 1 {
+	if t.winModeIs(term.ModeHide) || t.fbW < 1 || t.fbH < 1 {
 		t.textCursor.Bounds = image.Rectangle{}
 		t.textCursor.Pixels = t.textCursor.Pixels[:0]
 		t.textCursor.Base = t.textCursor.Base[:0]
@@ -36,7 +36,7 @@ func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, _, _ int, _ term.Glyph) 
 		pixels = pixels[:size]
 	}
 	for row := bounds.Min.Y; row < bounds.Max.Y; row++ {
-		copy(pixels[(row-bounds.Min.Y)*bounds.Dx():], framebuf[row*fbW+bounds.Min.X:row*fbW+bounds.Max.X])
+		copy(pixels[(row-bounds.Min.Y)*bounds.Dx():], t.framebuf[row*t.fbW+bounds.Min.X:row*t.fbW+bounds.Max.X])
 	}
 	base := t.textCursor.Base
 	if cap(base) < size {

@@ -10,6 +10,7 @@ import (
 	"github.com/BurntSushi/xgb"
 	"github.com/BurntSushi/xgb/xproto"
 	"st-go/platform_dependent/x11"
+	"st-go/widgets"
 )
 
 // Keep old regression inputs intact while production code no longer accepts
@@ -20,7 +21,7 @@ func native(t *Terminal) *x11.Driver {
 		d = x11.Attach(nil, 0, 0)
 		d.Bind(t.eventCallbacks())
 	} else {
-		d = t.host.(*x11.Driver)
+		d = widgets.Unwrap(t.host).(*x11.Driver)
 	}
 	return d
 }
@@ -38,7 +39,7 @@ func (t *Terminal) selrequest(e xproto.SelectionRequestEvent) { native(t).Select
 func (t *Terminal) selnotify(e xproto.SelectionNotifyEvent)   { native(t).SelectionNotify(e) }
 func (t *Terminal) propnotify(e xproto.PropertyNotifyEvent)   { native(t).PropertyNotify(e) }
 func (t *Terminal) verifyBarData(instance, class string)      { native(t).VerifyIdentity(instance, class) }
-func getImage(t *Terminal) (*xproto.GetImageReply, error)     { return native(t).Image(fbW, fbH) }
+func getImage(t *Terminal) (*xproto.GetImageReply, error)     { return native(t).Image(t.fbW, t.fbH) }
 func uint32Bytes(value uint32) []byte {
 	var b [4]byte
 	binary.LittleEndian.PutUint32(b[:], value)

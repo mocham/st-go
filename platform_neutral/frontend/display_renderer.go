@@ -26,6 +26,7 @@ type regionFrame struct {
 	pane, viewport image.Rectangle
 	background     uint32
 	epoch          uint64
+	presentation   uint64
 }
 
 // Called with Terminal.mu, after releasing the preview state mutex.
@@ -108,14 +109,20 @@ func (p *regionPresenter) present(frame regionFrame, pixels []uint32) {
 	}
 	w, h := frame.pane.Dx(), frame.pane.Dy()
 	dy, reusable := regionScrollCopy(p.last, frame)
-	p.native.Present(pixels, w, h, dy, reusable)
+	if native, ok := p.native.(api.GuardedSurface); ok {
+		if !native.PresentIfCurrent(frame.presentation, pixels, w, h, dy, reusable) {
+			return
+		}
+	} else {
+		p.native.Present(pixels, w, h, dy, reusable)
+	}
 	p.last = &frame
 }
 
 // A backing pixmap is the scroll source, so obscured/unmapped window pixels
 // cannot corrupt the retained view. Only newly exposed rows cross the X socket.
 func regionScrollCopy(previous *regionFrame, next regionFrame) (int, bool) {
-	if previous == nil || previous.epoch != next.epoch || previous.pane != next.pane || previous.viewport != next.viewport || previous.background != next.background {
+	if previous == nil || previous.epoch != next.epoch || previous.presentation != next.presentation || previous.pane != next.pane || previous.viewport != next.viewport || previous.background != next.background {
 		return 0, false
 	}
 	a, b := previous.surface, next.surface
@@ -186,11 +193,19 @@ func (t *Terminal) regionPainter(wake <-chan struct{}, done <-chan struct{}, pre
 // Caller holds the preview mutex.
 func (t *Terminal) regionFrame() (regionFrame, bool) {
 	s := &t.displayRegions
+	var generation uint64
+	if host, ok := t.host.(api.WidgetPresentation); ok {
+		var visible bool
+		generation, visible = host.PresentationState()
+		if !visible {
+			return regionFrame{}, false
+		}
+	}
 	if s.secondary == nil || !s.secondary.dirty || s.paused || s.pane.Empty() || t.closed() {
 		return regionFrame{}, false
 	}
 	s.secondary.dirty = false
-	return regionFrame{*s.secondary, s.pane, s.viewport, s.background, s.layoutEpoch}, true
+	return regionFrame{surface: *s.secondary, pane: s.pane, viewport: s.viewport, background: s.background, epoch: s.layoutEpoch, presentation: generation}, true
 }
 
 // Called with Terminal.mu at PTY batch boundaries. Region hooks also sample
