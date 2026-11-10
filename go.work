@@ -1,0 +1,24 @@
+go 1.26.0
+
+use (
+	.
+	./demo-go
+	./demo-go/file-browser
+	./demo-go/gols
+	./demo-go/govim
+	./demo-go/pinyind
+	./demo-go/vimtex
+	./demo-go/zat
+	./functionalities/audio
+	./functionalities/config
+	./functionalities/latexpdf
+	./functionalities/limits
+	./functionalities/pdfmeta
+	./functionalities/ptyutil
+	./functionalities/semhtml
+	./functionalities/terminfo
+	./functionalities/tui
+	./platform_neutral/api
+	./platform_neutral/stterminal
+	./term
+)

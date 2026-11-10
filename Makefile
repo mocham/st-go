@@ -42,7 +42,12 @@ OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat govim govim-pinyind
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
-CFG         = config/config.json
+FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config latexpdf limits pdfmeta ptyutil semhtml terminfo tui)
+SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/gols demo-go/govim demo-go/pinyind demo-go/vimtex demo-go/zat
+GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
+MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
+CFG         = functionalities/config/config.json
 PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
 TERMINFO_DIR ?= $(PREFIX)/share/terminfo
@@ -50,28 +55,26 @@ TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 # SQLite is only used by the full terminal. Omit it from reduced builds and
 # disable runtime extension loading so the static binary has no dlopen
 # dependency from SQLite.
-FULL_GO_TAGS = webpcache sqlite_omit_load_extension
+FULL_GO_TAGS = webpcache sqlite_omit_load_extension alsa_static
 
 # Sources that affect the Go file-browser demo, including the sibling
-# latexpdf module and semantic-HTML renderer. The target links the existing
-# static ALSA wrapper below.
+# latexpdf module and semantic-HTML renderer. Audio is terminal-owned.
 FILE_BROWSER = $(OUTPUT_DIR)/file-browser
-LATEXPDF_SRC = $(wildcard latexpdf/*.go) \
-	       $(wildcard latexpdf/pdf_assets/*)
-SEMHTML_SRC = $(wildcard semhtml/*.go)
-TUI_NAV_SRC = $(wildcard tui/navigation/*.go)
-TUI_SEARCH_SRC = $(wildcard tui/textsearch/*.go)
-TUI_READLINE_SRC = $(wildcard tui/readline/*.go)
+LATEXPDF_SRC = $(wildcard functionalities/latexpdf/*.go) \
+	       $(wildcard functionalities/latexpdf/pdf_assets/*)
+SEMHTML_SRC = $(wildcard functionalities/semhtml/*.go)
+TUI_NAV_SRC = $(wildcard functionalities/tui/navigation/*.go)
+TUI_SEARCH_SRC = $(wildcard functionalities/tui/textsearch/*.go)
+TUI_READLINE_SRC = $(wildcard functionalities/tui/readline/*.go)
 STTERMINAL_SRC = $(wildcard term/*.go platform_neutral/stterminal/*.go)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 	       $(wildcard platform_neutral/api/*.go) \
-	       $(wildcard demo-go/file-browser/*.conf tui/preview/*.go) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
-GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) $(wildcard pdfmeta/*.go) $(wildcard limits/*.go)
-VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go) $(wildcard demo-go/vimtex/*.vim) $(wildcard ptyutil/*.go) \
-	       $(wildcard limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
-ZAT_GO_SRC = $(wildcard demo-go/zat/*.go) $(wildcard limits/*.go) $(wildcard pdfmeta/*.go) \
-	       $(STTERMINAL_SRC) $(wildcard config/*.go) $(wildcard config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
-GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* tui/imap/*.go tui/preview/*.go tui/outline/*.go config/*.go config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard limits/*.go) go.mod go.sum
+	       $(wildcard demo-go/file-browser/*.conf functionalities/tui/audio/*.go functionalities/tui/preview/*.go) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
+GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go)
+VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go demo-go/vimtex/*.vim functionalities/ptyutil/*.go functionalities/limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
+ZAT_GO_SRC = $(wildcard demo-go/zat/*.go functionalities/limits/*.go functionalities/pdfmeta/*.go) \
+	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
+GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 
 # Google Pinyin decoder only: no SCIM, GTK, X11 or installed IM framework.
 PINYIN_REV = 0b9407ef8e4e5fbf74d5ff4e42ea20025a1483fc
@@ -117,8 +120,8 @@ $(PINYIN_DATA): third_party/googlepinyin/dictbuilder
 	cp $(PINYIN_SRC)/src/data/dict_pinyin.dat $@
 	cp $(PINYIN_SRC)/COPYING $(@D)/LICENSE
 
-$(OUTPUT_DIR)/govim-pinyind: $(PINYIN_LIB) $(PINYIN_ASSET_DEP) $(wildcard demo-go/pinyind/*.go demo-go/pinyind/internal/pinyinengine/*.* tui/pinyin/*.go) go.mod go.sum Makefile pinyin-force | $(OUTPUT_DIR)
-	CGO_ENABLED=1 go build -trimpath -tags 'netgo,osusergo,$(PINYIN_GO_TAGS)' -ldflags '-linkmode external -extldflags "-static -pthread"' -o $@ ./demo-go/pinyind
+$(OUTPUT_DIR)/govim-pinyind: $(PINYIN_LIB) $(PINYIN_ASSET_DEP) $(wildcard demo-go/pinyind/*.go demo-go/pinyind/internal/pinyinengine/*.* functionalities/tui/pinyin/*.go) go.mod go.sum Makefile pinyin-force | $(OUTPUT_DIR)
+	CGO_ENABLED=1 go -C demo-go/pinyind build -trimpath -tags 'netgo,osusergo,$(PINYIN_GO_TAGS)' -ldflags '-linkmode external -extldflags "-static -pthread"' -o $(abspath $@) .
 
 pinyin-assets: $(PINYIN_DATA)
 
@@ -162,7 +165,7 @@ WEBP_DEMUX   = third_party/webp/lib/libwebpdemux.a
 WEBP_ANIM_C  = third_party_wrapper/webp_anim.c
 WEBP_ANIM_O  = third_party/webp/webp_anim.o
 
-# ALSA (libasound): audio playback for the Go file-browser's mp3 viewer.
+# ALSA (libasound): terminal-owned audio playback requested by TUI clients.
 # Built statically following the gowidgets/CLibBuild recipe, including its
 # static-linking patches: dlopen() and NSS lookups (getgrnam_r/getpwuid_r)
 # are unavailable in a statically linked binary, so they are neutralized.
@@ -172,7 +175,7 @@ ALSA_TAR     = third_party/alsa-lib-$(ALSA_VERSION).tar.bz2
 ALSA_SRC     = third_party/alsa-lib-src
 ALSA_DIR     = third_party/alsa
 ALSA_LIB     = third_party/alsa/lib/libasound.a
-SND_C        = third_party_wrapper/alsa_snd.c
+SND_C        = functionalities/audio/alsa_snd.c
 SND_O        = third_party/alsa/snd.o
 
 all: $(BIN)
@@ -392,10 +395,7 @@ STB_EXTRA  = $(STB_O) -lm $(DUMMY_WEBP) $(DUMMY_PDF)
 PDF_EXTRA  = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(DUMMY_WEBP)
 FULL_EXTRA = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
 
-# ALSA link items for the Go file-browser (libasound + the playback wrapper).
-# snd.o must precede -l:libasound.a. -ldl/-lpthread are no-ops on modern glibc
-# where they are merged into libc.
-ALSA_EXTRA = $(SND_O) -Lthird_party/alsa/lib -l:libasound.a -ldl -lpthread -lm
+# The file-browser's alsa_static profile supplies its own native link items.
 
 # Animated-WebP items for the Go file-browser (WebPAnimDecoder playback).
 # webp_anim.o must precede -l:libwebpdemux.a; libwebp.a comes via WEBP_LIB.
@@ -405,17 +405,19 @@ WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:lib
 GC_EXTRA   = -Wl,--gc-sections
 
 PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go platform_dependent/web/assets/*)
-GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) $(PLATFORM_SRC) \
+GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard functionalities/config/*.go functionalities/audio/*.go) $(PLATFORM_SRC) \
 	  go.mod go.sum Monaco_Linux.ttf \
-	  $(wildcard pdfmeta/*.go) \
-	  $(wildcard limits/*.go) \
-          $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard terminfo/*.go) \
+	  $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go) \
+          $(wildcard functionalities/config/*.json functionalities/ptyutil/*.go functionalities/terminfo/*.go) \
           $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h) \
           $(wildcard third_party_wrapper/*.cpp) $(wildcard *.h)
 
 # Rebuild when build flags change; trim source and module-cache paths from all
 # distributable Go binaries, including their stack-trace/debug metadata.
-$(BINARY_PATHS): Makefile | $(OUTPUT_DIR)
+$(BINARY_PATHS): Makefile $(MODULE_META) | $(OUTPUT_DIR)
+
+# Sound-device ownership belongs to the terminal, on every display backend.
+$(addprefix $(OUTPUT_DIR)/,st st-web st-fb st-pdf st-stb st-min): $(ALSA_LIB) $(SND_O)
 
 $(OUTPUT_DIR):
 	mkdir -p $@
@@ -441,43 +443,41 @@ $(OUTPUT_DIR)/st-fb: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $
 	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
-	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
+	go build -trimpath -tags 'alsa_static' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
+	go build -trimpath -tags 'alsa_static' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
+	go build -trimpath -tags 'alsa_static' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
 
 # --- Go file-browser demo --------------------------------------------------
-# A Go clone of demo/file-browser.sh. It links the static ALSA library for the
-# mp3 viewer (embedded alsa.conf + go-mp3 decoded PCM playback). TeX previews
-# are vector PDFs rendered by latexpdf; Markdown previews remain paginated PNGs
-# composed with mathjax-go. The terminal displays them through the DCS DSL.
+# Independent TUI module. TeX/Markdown previews are vector PDFs from latexpdf;
+# the terminal displays them through DCS, and owns MP3 playback too.
 # Run it inside the terminal:
 #   ./BINARIES/st -e ./BINARIES/file-browser /path/to/files
-$(FILE_BROWSER): $(FB_GO_SRC) $(ALSA_LIB) $(SND_O)
-	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(ALSA_EXTRA)"' ./demo-go/file-browser
+$(FILE_BROWSER): $(FB_GO_SRC)
+	go -C demo-go/file-browser build -trimpath -tags 'sqlite_omit_load_extension' -o $(abspath $@) -ldflags '-linkmode external -extldflags "-static"' .
 
 # --- GoLS static-corpus browser -------------------------------------------
 # Read-only terminal UI over one or more lecture-server corpus databases.
 # It shares latexpdf with lecture-server and asks st-go to display generated
 # vector PDFs through the existing DCS open protocol; no HTTP server is used.
 $(OUTPUT_DIR)/gols: $(GOLS_GO_SRC)
-	go build -trimpath -tags 'sqlite_omit_load_extension' -o $@ \
-		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' ./demo-go/gols
+	go -C demo-go/gols build -trimpath -tags 'sqlite_omit_load_extension' -o $(abspath $@) \
+		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' .
 
 # Real Vim on a pane-sized PTY, with save-triggered LaTeX PDF previews.
 $(OUTPUT_DIR)/vimtex: $(VIMTEX_GO_SRC)
-	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/vimtex
+	CGO_ENABLED=0 go -C demo-go/vimtex build -trimpath -o $(abspath $@) .
 
 # PDF viewer; Poppler and the pixel cache live in the terminal, not this TUI.
 $(OUTPUT_DIR)/zat: $(ZAT_GO_SRC)
-	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/zat
+	CGO_ENABLED=0 go -C demo-go/zat build -trimpath -o $(abspath $@) .
 
 # Native Go TUI editor, with terminal clipboard protocol and recovery journal.
-$(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC) $(wildcard tui/pinyin/*.go) $(OUTPUT_DIR)/govim-pinyind
-	CGO_ENABLED=0 go build -trimpath -o $@ ./demo-go/govim
+$(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC) $(wildcard functionalities/tui/pinyin/*.go) $(OUTPUT_DIR)/govim-pinyind
+	CGO_ENABLED=0 go -C demo-go/govim build -trimpath -o $(abspath $@) .
 
 # --- dummy objects (no-op stubs for dropped libraries) --------------------
 $(DUMMY_DIR)/dummy-stb.o: third_party_wrapper/dummy-stb.c
@@ -503,13 +503,25 @@ install: st
 	install -m 0644 "$(CFG)" "$(DESTDIR)$(BINDIR)/st.json"
 	TERMINFO="$(DESTDIR)$(TERMINFO_DIR)" ./$(BIN) -install-terminfo >/dev/null
 
-# go test ./... needs the third-party libs linked too (they moved out of the
-# #cgo LDFLAGS into -extldflags); test against the full build. The ALSA items
-# are needed because the Go file-browser package uses cgo.
-TEST_EXTRA = $(FULL_EXTRA) $(ALSA_EXTRA)
+# Only the root graphical host needs the decoder link flags. Nested modules
+# are tested explicitly: Go's ./... pattern never crosses module boundaries.
+TEST_EXTRA = $(FULL_EXTRA)
 
-test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O) govim-pinyind st-web st-fb
+test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(WEBP_ANIM_O) st-web st-fb test-modules
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
+
+# Integrated native profile, including real isolated CJK helper tests.
+test-modules: $(ALSA_LIB) $(SND_O) govim-pinyind
+	@set -e; for module in $(GO_MODULES); do \
+		GOWORK=off go -C "$$module" test -tags 'alsa_static sqlite_omit_load_extension' ./... -count=1; \
+	done
+
+# Standard Go workflow: no graphical libraries or Make-built assets needed.
+# File-browser/GoLS use bundled SQLite and need a C compiler, not ALSA.
+test-tui:
+	@set -e; for module in $(filter-out functionalities/audio,$(GO_MODULES)); do \
+		GOWORK=off go -C "$$module" test ./... -count=1; \
+	done
 
 # Optional live canvas check using installed Chromium and Node's built-in CDP.
 test-web-browser: st-web
@@ -540,4 +552,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-web-browser test-webp-x11 test-zat-x11 $(BINARY_NAMES) pinyin-assets pinyin-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-web-browser test-webp-x11 test-zat-x11 $(BINARY_NAMES) pinyin-assets pinyin-force

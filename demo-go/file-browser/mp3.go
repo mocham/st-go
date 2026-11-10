@@ -79,49 +79,6 @@ func readMp3Meta(path string) (mp3Meta, error) {
 	return meta, nil
 }
 
-// streamMp3 decodes path with go-mp3 and writes the 16-bit stereo PCM to the
-// ALSA player until the file ends or playback is stopped. It owns the player
-// handle and closes it exactly once. Runs in a background goroutine.
-func (b *Browser) streamMp3(path string, player *alsaPlayer) {
-	defer player.close()
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	dec, err := mp3.NewDecoder(f)
-	if err != nil {
-		return
-	}
-	buf := make([]byte, 8192)
-	for {
-		select {
-		case <-b.playbackStop:
-			return
-		default:
-		}
-		n, err := dec.Read(buf)
-		if n > 0 {
-			if serr := player.send(buf[:n]); serr != nil {
-				return
-			}
-		}
-		if err != nil {
-			return
-		}
-	}
-}
-
-// stopPlayback signals the streaming goroutine to stop. The goroutine owns the
-// ALSA handle and closes it.
-func (b *Browser) stopPlayback() {
-	if b.playbackStop != nil {
-		close(b.playbackStop)
-		b.playbackStop = nil
-	}
-	b.playback = nil
-}
-
 // parseID3v2 reads an ID3v2 tag from the start of r and returns the title,
 // artist, album, year, the total tag size (header + body), and whether a tag
 // was present.

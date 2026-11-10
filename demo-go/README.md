@@ -7,8 +7,22 @@ belong to st-go (or another host implementing the same capabilities).
 
 ## Applications
 
-Run build and launch commands from the repository root. Generated executables
-live in `BINARIES/`; see the [build guide](../platform_neutral/BUILDING.md).
+Each application is a separate Go module, independent of the root graphical
+host. Generated executables live in `BINARIES/`; see the
+[build guide](../platform_neutral/BUILDING.md).
+
+```sh
+go -C demo-go/govim build -o ../../BINARIES/govim .
+go -C demo-go/govim test ./...
+GOWORK=off go -C demo-go/zat test ./...   # standalone, without workspace help
+make test-tui                           # all demo/shared client modules
+```
+
+The checked-in `go.work` supports cross-module development. Every module also
+has local replacements for its dependencies so `go build`, `go test`, and
+`go mod tidy` work from its directory with the workspace disabled. Root
+`go test ./...` intentionally excludes nested modules; `make test` includes them.
+The sibling `demo-go` module contains architecture/dependency guards only.
 
 | Application | Guide |
 | --- | --- |
@@ -27,7 +41,7 @@ documents the shared host interface.
 * No demo imports XGB/X11 or connects to a display server. Govim's former native
   clipboard connection/helper was removed. Its host clipboard transport is OSC
   52, and ordinary editor registers/paste never query the host clipboard.
-* `tui/readline` supplies shared, backend-neutral single-line editing for all
+* `functionalities/tui/readline` supplies shared, backend-neutral single-line editing for all
   app-owned command/search/path prompts. Vimtex delegates editing to child Vim.
 * Images/PDFs, region placement, mouse events, and window geometry are terminal
   protocol requests. The descriptions of X11 surfaces in zat's performance
@@ -39,12 +53,21 @@ documents the shared host interface.
   dependency on a particular desktop. Vimtex/TeX tools are external programs.
 
 Other portability boundaries remain: entry points use Unix TTY/PTY/signal APIs;
-the file-browser audio adapter uses Linux ALSA, and GoLS uses SQLite/cgo. These
-are OS/runtime constraints, not X11 dependencies. On the web backend the clients
-and their PTYs still run on the Linux server, not inside the browser.
+file-browser and GoLS use bundled SQLite/cgo. File-browser has **no ALSA/native
+audio linkage**: MP3 playback is an authenticated terminal request, handled by
+st-go's `functionalities/audio` service. Metadata remains available on hosts
+without audio support. The optional Pinyin helper alone owns its native decoder.
+These are OS/runtime constraints, not graphical dependencies. On the web backend
+the clients, PTYs, and native audio still run on the Linux server.
 
-`TestNoDisplayBackendDependencies` guards demo source imports and display-server
-environment probes. X11 integration tests belong beside the st-go frontend,
+Reusable modules live under [`functionalities/`](../functionalities/README.md),
+with unchanged import paths (`st-go/tui`, `st-go/limits`, etc.). The terminal
+engine/contracts are separate modules under `platform_neutral/`; no TUI module
+requires the root host or native graphical codecs.
+
+`TestNoDisplayBackendDependencies` guards source imports and display-server
+environment probes. `TestApplicationModulesDoNotDependOnGraphicalHost` checks
+actual transitive package dependencies with `GOWORK=off`. X11 tests belong beside the st-go frontend,
 not inside the demo applications.
 
 ## Shared TUI navigation

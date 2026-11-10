@@ -5,6 +5,8 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -60,5 +62,32 @@ func TestNoDisplayBackendDependencies(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestApplicationModulesDoNotDependOnGraphicalHost(t *testing.T) {
+	for _, name := range []string{"file-browser", "gols", "govim", "pinyind", "vimtex", "zat"} {
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(name, "go.mod"))
+			if err != nil || !strings.HasPrefix(string(data), "module st-go/demo-go/"+name+"\n") {
+				t.Fatalf("missing independent module: %v", err)
+			}
+			cmd := exec.Command("go", "list", "-deps", "-test", "-f", `{{if .Module}}{{.Module.Path}}{{end}} {{.ImportPath}}`, "./...")
+			cmd.Dir = name
+			cmd.Env = append(os.Environ(), "GOWORK=off")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("standalone module dependencies: %v\n%s", err, output)
+			}
+			for _, line := range strings.Split(string(output), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) == 0 {
+					continue
+				}
+				if fields[0] == "st-go" || fields[0] == "st-go/audio" || strings.Contains(line, "github.com/BurntSushi/xgb") || strings.Contains(line, "st-go/platform_dependent/") || strings.Contains(line, "st-go/platform_neutral/frontend") {
+					t.Errorf("TUI module inherited native host dependency: %s", line)
+				}
+			}
+		})
 	}
 }

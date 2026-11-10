@@ -1,6 +1,8 @@
+//go:build !alsa_static
+
 /*
- * alsa_snd.c — minimal ALSA playback wrapper used by the Go file-browser's
- * mp3 viewer. Adapted from gowinmgr's CPlugins/plugin-snd.c:
+ * alsa_snd.c — minimal ALSA playback wrapper owned by the terminal audio
+ * service. Adapted from gowinmgr's CPlugins/plugin-snd.c:
  *
  *   - Opens the hardware device directly (hw:card,0) rather than the "default"
  *     PCM. "default" routes through dmix, whose config parse calls
@@ -10,8 +12,8 @@
  *     every SNDERR message to the file named by $ST_GO_ALSA_LOG instead of
  *     writing to stderr, so ALSA diagnostics never corrupt the terminal UI.
  *
- * Compiled once (like pdf_bridge.o) so the Go side only declares extern
- * functions and never needs the ALSA headers.
+ * Ordinary Go builds compile this wrapper with system ALSA. The Makefile's
+ * alsa_static profile compiles the identical source against its static library.
  */
 #include <alsa/asoundlib.h>
 #include <alsa/error.h>

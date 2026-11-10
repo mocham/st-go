@@ -591,6 +591,8 @@ func (t *Term) dcs() {
 			t.dslWindow(args[1:])
 		case "native-video":
 			t.dslNativeVideo(args[1:])
+		case "native-audio":
+			t.dslNativeAudio(args[1:])
 		case "region":
 			if err := t.dslRegion(args[1:]); err != nil {
 				log.Printf("dsl: region: %v", err)

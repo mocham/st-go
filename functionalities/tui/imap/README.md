@@ -2,7 +2,7 @@
 
 `imap` is a pure-Go, immutable text-expansion mechanism, independent of editor
 state, terminal input/output, filesystem loading, and Vimscript. Govim embeds
-[`imap/tex.json`](../../demo-go/govim/imap/tex.json); changing that file and
+[`imap/tex.json`](../../../demo-go/govim/imap/tex.json); changing that file and
 rebuilding changes the mappings without adding editor-specific mapping code.
 
 ```json

@@ -46,7 +46,7 @@ diagnostic; it must not prevent startup or leave black text on black.
 
 Relative font paths are resolved beside the selected configuration. A missing
 or corrupt custom font, or missing glyphs in it, falls back to embedded Monaco
-before optional system fallback faces. See the [default configuration](../../config/config.json).
+before optional system fallback faces. See the [default configuration](../../functionalities/config/config.json).
 
 The terminal generates compiled `st-256color` terminfo directly in Go; neither
 `tic` nor a system terminfo development package is required. `make install`
@@ -101,7 +101,7 @@ and queued for caching only when playback requests them.
 
 ## Resource limits and error logs
 
-Budgets are centralized in [`limits/limits.go`](../../limits/limits.go).
+Budgets are centralized in [`limits/limits.go`](../../functionalities/limits/limits.go).
 `MaxBytes` defaults to **64 MiB** per input/buffer; decoded still images have a
 separate **256 MiB** budget before preview scaling.
 

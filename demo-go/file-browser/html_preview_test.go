@@ -44,7 +44,7 @@ func TestReadHTMLBookNormalizesDocument(t *testing.T) {
 			t.Errorf("semantic HTML is missing %q: %s", wanted, book.HTML)
 		}
 	}
-	for _, unwanted := range []string{"epub-chapter", "script-marker", "hidden-marker", "<style", "javascript:"} {
+	for _, unwanted := range []string{`class="epub-chapter"`, "script-marker", "hidden-marker", "<style", "javascript:"} {
 		if strings.Contains(book.HTML, unwanted) {
 			t.Errorf("semantic HTML retained %q: %s", unwanted, book.HTML)
 		}

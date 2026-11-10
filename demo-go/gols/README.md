@@ -15,7 +15,7 @@ make gols
 ```
 
 TeX documents expand archived `\input`/`\include` records. Markdown, including
-inline/display LaTeX math, uses the shared [`latexpdf`](../../latexpdf/README.md)
+inline/display LaTeX math, uses the shared [`latexpdf`](../../functionalities/latexpdf/README.md)
 vector-PDF pipeline; other archived text is displayed as source. The final
 level is an outline whose entries jump to exact rendered PDF pages. The preview
 uses a **3.23×** font scale, compared with the file browser's **1.7×**.

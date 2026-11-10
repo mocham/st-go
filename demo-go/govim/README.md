@@ -7,7 +7,8 @@ this implementation. This is an initial implementation, **not complete Vim 7
 compatibility**; the supported commands and limits are listed below.
 
 ```sh
-make govim                 # pure Go; no native-library builds
+make govim                 # editor plus isolated native Pinyin helper
+go -C demo-go/govim build -o ../../BINARIES/govim .  # pure-Go editor only
 ./BINARIES/govim document.tex
 ./BINARIES/govim +42 document.tex
 ./BINARIES/govim -r document.tex    # recover after a crash
@@ -88,7 +89,7 @@ make st govim
   `--no-preview` skips negotiation entirely.
 
 Rendering reuses the existing `latexpdf` subset through the backend-neutral
-[`tui/preview`](../../tui/preview) component, not a complete TeX distribution or
+[`tui/preview`](../../functionalities/tui/preview) component, not a complete TeX distribution or
 browser-based Markdown renderer. The panel itself is owned by the terminal
 frontend; govim communicates using DCS region commands and never assumes X11.
 
@@ -330,7 +331,7 @@ With a standalone name on the current line, **F5** (Insert or Normal mode):
   does nothing; **Enter** still inserts an ordinary newline.
 
 Mappings and template bodies are embedded JSON, not hardcoded Greek handlers.
-The independent [`tui/imap`](../../tui/imap) component supplies longest-suffix
+The independent [`tui/imap`](../../functionalities/tui/imap) component supplies longest-suffix
 matching, prefix guards, literal variable substitution, and rune-safe cursor
 stops. Editing the JSON and rebuilding changes the table. All document changes
 use normal insert undo groups and the recovery journal. This is a native subset,

@@ -18,6 +18,7 @@ make st-min     # text-only X11 terminal
 make st-web     # embedded HTTP server and browser client
 make st-fb      # Linux virtual-console framebuffer terminal
 make test       # full test suite with native libraries linked
+make test-tui   # independent TUI/helper modules, without graphical libraries
 make install    # installs to $(BINDIR), default /usr/local/bin
 make clean      # removes built binaries
 make distclean  # removes binaries and downloaded/built third_party/ files
@@ -113,8 +114,31 @@ the cgo files' `#cgo LDFLAGS`. Stub objects come from
 
 ## Verification
 
+Every demo is a separate module, and shared modules live under
+[`functionalities/`](../functionalities/README.md). The workspace supports
+cross-module editing, but each module also works with `GOWORK=off`:
+
 ```sh
-go test ./platform_neutral/api ./platform_neutral/stterminal ./term
+GOWORK=off go -C demo-go/govim build -o ../../BINARIES/govim .
+GOWORK=off go -C demo-go/file-browser test ./...
+go -C functionalities/tui test ./...
+make test-tui
+```
+
+Govim, zat, and vimtex build without cgo. File-browser and GoLS need a C compiler
+for bundled SQLite, **not** graphical codecs or ALSA. File-browser sends audio
+requests to st-go, whose audio module owns libasound and MP3 playback. The optional
+Pinyin helper keeps its native decoder isolated. `make` still builds static
+distribution binaries, including terminal-owned audio with `alsa_static`.
+
+Go's `./...` does not cross module boundaries. The root pattern tests only the
+host; `make test` additionally tests every shared/demo module, including the
+previously separate latexpdf suite. `make test-tui` uses standard standalone Go
+commands and excludes the native host audio module.
+
+```sh
+go -C platform_neutral/api test ./...
+go -C platform_neutral/stterminal test ./...
 make test
 ```
 

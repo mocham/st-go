@@ -45,7 +45,7 @@ INSERT INTO documents VALUES(1,'AA/document.tex','AA','document.tex','.tex','Syn
 		t.Fatal(err)
 	}
 	binaryPath := filepath.Join(dir, "gols")
-	build := exec.Command("go", "build", "-tags", "sqlite_omit_load_extension", "-o", binaryPath, "-ldflags", `-linkmode external -extldflags "-static"`, "./demo-go/gols")
+	build := exec.Command("go", "-C", "demo-go/gols", "build", "-tags", "sqlite_omit_load_extension", "-o", binaryPath, "-ldflags", `-linkmode external -extldflags "-static"`, ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build gols:%v\n%s", err, output)
 	}

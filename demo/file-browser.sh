@@ -241,9 +241,9 @@ restore_input_mode() { [[ -z $TTY_MODE ]] || stty "$TTY_MODE" 2>/dev/null; }
 cleanup() {
 	((CLEANED)) && return
 	CLEANED=1
+	restore_input_mode
 	window_dcs forget "$GEOMETRY_TAG"
 	printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l'
-	restore_input_mode
 	rm -rf -- "$CACHE_DIR"
 }
 trap cleanup EXIT

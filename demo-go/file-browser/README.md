@@ -186,7 +186,7 @@ full-width preview. Tab toggles visibility; Shift+Tab switches floating and
 pinned-right mode without repainting the current preview. The next selected
 file/page uses the new geometry.
 
-TeX and Markdown share the native [`latexpdf`](../../latexpdf/README.md)
+TeX and Markdown share the native [`latexpdf`](../../functionalities/latexpdf/README.md)
 vector-PDF pipeline. Markdown supports inline `$...$`/`\(...\)` and display
 `$$...$$`/`\[...\]` mathematics. HTML, XHTML, and EPUB use sanitized semantic
 markup through the separate native `semhtml` PDF renderer; EPUB resolves its
@@ -216,6 +216,23 @@ size: both are **7% larger than the shared 0.64× setting**. The browser compens
 pane-sized PDF pages, keeping text size unchanged when its sidebar is pinned or
 hidden. Govim uses a **0.6848×** scale on a 140 mm fit-width page. GoLS (**3.23×**)
 and Vimtex (**0.8×**) are unchanged.
+
+## Module and audio ownership
+
+This directory is an independent Go module. `go build` and `go test ./...`
+need a C compiler for bundled SQLite, but **no graphical libraries or ALSA
+linker flags**. From the repository root:
+
+```sh
+GOWORK=off go -C demo-go/file-browser build -o ../../BINARIES/file-browser .
+GOWORK=off go -C demo-go/file-browser test ./...
+```
+
+MP3 metadata is decoded locally in Go. Opening it requests playback from st-go
+using the authenticated `native-audio` protocol; `q` sends a stop for the same
+job. The terminal owns decoding, ALSA, and device cleanup. Restart rebuilt st-go
+to export `ST_GO_NATIVE_AUDIO` and its per-session capability. Unsupported hosts
+keep the metadata viewer usable without launching an external player.
 
 Generated previews are session-temporary. A changed source digest deletes all
 variants of the superseded revision. Each current revision retains at most four

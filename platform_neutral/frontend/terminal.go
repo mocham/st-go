@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"st-go/audio"
 	"st-go/config"
 	"st-go/platform_neutral/api"
 	term "st-go/platform_neutral/stterminal"
@@ -23,7 +24,8 @@ const (
 type Color struct{ argb, pixel uint32 }
 
 // Terminal owns backend-neutral terminal presentation and protocol state.
-// Native resources and event decoding are accessed only through api.Host.
+// Native display resources and event decoding are accessed only through api.Host;
+// session-owned audio is a separate reusable service.
 type Terminal struct {
 	host                              api.Host
 	cols, rows, windowCols            int
@@ -36,6 +38,7 @@ type Terminal struct {
 	cfg                               *config.Config
 	webpCache                         *webPCache
 	webpAnimDecoder                   *webPAnimDecoder
+	audio                             nativeAudioPlayer
 	title, iconTitle                  string
 	lockTitle                         bool
 	cursorShape, cursorThick          int
@@ -99,7 +102,7 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 		cursorShape: int(cfg.CursorShape), cursorThick: int(cfg.CursorThick),
 		ignoreMod: cfg.IgnoreMod, forceMouseMod: uint16(cfg.ForceMouseMod),
 		doubleClick: cfg.DoubleClickMs, tripleClick: cfg.TripleClickMs, blinkMs: cfg.BlinkTimeout,
-		geometryTags: make(map[string]windowRect), done: make(chan struct{}),
+		geometryTags: make(map[string]windowRect), done: make(chan struct{}), audio: &audio.Player{},
 	}
 	if openWindow == nil {
 		return nil, fmt.Errorf("no display backend configured")
@@ -180,6 +183,9 @@ func (t *Terminal) Close() {
 	}
 	if t.done != nil {
 		close(t.done)
+	}
+	if t.audio != nil {
+		t.audio.Close()
 	}
 	t.closeRegionPresenter()
 	if t.webpCache != nil {

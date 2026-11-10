@@ -14,4 +14,4 @@ remaining stops are consumed by Ctrl-J.
 
 Edit the JSON and run `make govim` to add/change text expansions. A new literal
 suffix rule can use any printable trigger, not only a backtick/Greek key. See
-[`tui/imap/README.md`](../../../tui/imap/README.md) for the schema and mechanism.
+[`tui/imap/README.md`](../../../functionalities/tui/imap/README.md) for the schema and mechanism.

@@ -145,6 +145,8 @@ func (b *Browser) handleKey(k byte) {
 				if st2 == inData {
 					b.handleCSI(first)
 				}
+			} else if next == 'P' {
+				b.readAudioReply()
 			}
 			// ESC followed by another byte is otherwise ignored.
 		} else {

@@ -26,19 +26,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	browserBin = filepath.Join(dir, "file-browser")
-	// The browser uses cgo + the static ALSA library, so it must be linked
-	// with the same extldflags as the Makefile's file-browser target.
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	ldflags := "-linkmode external -extldflags \"-static " +
-		filepath.Join(root, "third_party/alsa/snd.o") +
-		" -L" + filepath.Join(root, "third_party/alsa/lib") +
-		" -l:libasound.a -ldl -lpthread -lm\""
-	build := exec.Command("go", "build", "-o", browserBin, "-ldflags", ldflags, "./demo-go/file-browser")
-	build.Dir = root
+	build := exec.Command("go", "build", "-o", browserBin, ".")
 	out, err := build.CombinedOutput()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "build browser: %v\n%s", err, out)
@@ -190,7 +178,7 @@ func lastHeaderPath(s string) string {
 // testEnv returns the browser environment with extra vars appended.
 func testEnv(extra ...string) []string {
 	env := os.Environ()
-	for _, name := range []string{"ST_GO_BACKEND", "ST_GO_NATIVE_VIDEO", "ST_GO_NATIVE_VIDEO_TOKEN", "ST_FILE_BROWSER_OPEN_X11", "ST_FILE_BROWSER_OPEN_FB", "ST_FILE_BROWSER_OPEN_WEB", "ST_FILE_BROWSER_OPEN_ALL"} {
+	for _, name := range []string{"ST_GO_BACKEND", "ST_GO_NATIVE_VIDEO", "ST_GO_NATIVE_VIDEO_TOKEN", "ST_GO_NATIVE_AUDIO", "ST_GO_NATIVE_AUDIO_TOKEN", "ST_FILE_BROWSER_OPEN_X11", "ST_FILE_BROWSER_OPEN_FB", "ST_FILE_BROWSER_OPEN_WEB", "ST_FILE_BROWSER_OPEN_ALL"} {
 		env = envWithout(env, name)
 	}
 	return append(append(env, "ST_GO_BACKEND=x11"), extra...)

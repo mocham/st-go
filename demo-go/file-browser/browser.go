@@ -141,12 +141,13 @@ type Browser struct {
 	manualLines  []string
 
 	// mp3 state
-	mp3Active     bool
-	mp3Cache      map[string]mp3CacheEntry
-	mp3CacheOrder []string
-	playback      *alsaPlayer // non-nil while the mp3 viewer is playing
-	playbackStop  chan struct{}
-	playbackErr   error
+	mp3Active        bool
+	mp3Cache         map[string]mp3CacheEntry
+	mp3CacheOrder    []string
+	playback         string // terminal-owned audio job ID, not a native device.
+	playbackStarting bool
+	playbackDeadline time.Time
+	playbackErr      error
 
 	// runtime
 	resized  bool
@@ -292,6 +293,7 @@ func (b *Browser) cleanup() {
 		return
 	}
 	b.cleaned = true
+	b.stopPlayback()
 	for _, ctx := range b.archiveStack {
 		if ctx.zip != nil {
 			ctx.zip.Close()
@@ -1421,7 +1423,7 @@ func (b *Browser) drawMp3View(path string) {
 	b.drawMp3Preview(path)
 	b.drawNavigationSidebar()
 	switch {
-	case b.playback != nil:
+	case b.playback != "" && !b.playbackStarting:
 		b.status = "Playing  q stop"
 	case b.playbackErr != nil:
 		b.status = "No audio  q close"
@@ -1433,10 +1435,8 @@ func (b *Browser) drawMp3View(path string) {
 	b.flush()
 }
 
-// openMp3 opens an mp3 in the browser itself: it decodes the file, shows a
-// viewer modal with its metadata, and streams the decoded PCM to the static
-// ALSA device. If no sound device is available it degrades to a metadata-only
-// viewer.
+// openMp3 shows metadata and controls terminal-owned playback. The browser
+// never opens an audio device; unsupported hosts retain a metadata-only viewer.
 func (b *Browser) openMp3(path string) {
 	if b.isArchiveMode() {
 		real, err := b.materializeEntry(b.currentArchive(), path)
@@ -1448,20 +1448,18 @@ func (b *Browser) openMp3(path string) {
 		}
 		path = real
 	}
-	meta, _ := b.cachedMP3Meta(path)
 	b.mp3Active = true
 	b.playbackErr = nil
-	b.playbackStop = nil
-	if player, err := openALSA(meta.sampleRate); err != nil {
+	if err := b.startPlayback(path); err != nil {
 		b.playbackErr = err
-		b.playback = nil
-	} else {
-		b.playback = player
-		b.playbackStop = make(chan struct{})
-		go b.streamMp3(path, player)
 	}
 	b.drawMp3View(path)
 	for b.mp3Active {
+		if b.playbackStarting && time.Now().After(b.playbackDeadline) {
+			b.stopPlayback()
+			b.playbackErr = fmt.Errorf("terminal audio did not acknowledge playback")
+			b.drawMp3View(path)
+		}
 		b.processPendingSignals()
 		if !b.running {
 			b.mp3Active = false
@@ -1486,8 +1484,15 @@ func (b *Browser) openMp3(path string) {
 			break
 		case inData:
 			switch key {
-			case 'q', 'Q', 0x03, 0x1b:
+			case 'q', 'Q', 0x03:
 				b.mp3Active = false
+			case 0x1b:
+				if next, status := b.in.readByte(50 * time.Millisecond); status == inData && next == 'P' {
+					b.readAudioReply()
+					b.drawMp3View(path)
+				} else {
+					b.mp3Active = false
+				}
 			}
 		}
 	}

@@ -37,8 +37,8 @@ PREVIEW
   Animated WebP files play once in the preview pane (progress shown in
   the rect); a visible sidebar reserves its space so redraws do not stop
   playback. The terminal does all image/animation decoding.
-  MP3 files are decoded in-browser and played through the ALSA
-  device; their tags, duration, and sample rate are shown. Enter or
+  MP3 metadata is decoded in-browser; the terminal owns audio playback
+  and its device. Tags, duration, and sample rate are shown. Enter or
   o opens the mp3 viewer, q stops playback and closes it.
   Wheel over a PDF or rendered document preview changes pages; [ and ] do the same.
   A text preview stops at the last visible row and never scrolls.

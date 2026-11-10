@@ -18,14 +18,15 @@ import (
 // parser, native PDF worker, region negotiation, and controlling PTY.
 func TestFileBrowserNativeDocumentToolsPTY(t *testing.T) {
 	tools := t.TempDir()
-	build := exec.Command("go", "build", "-o", tools+"/", "./demo-go/zat", "./demo-go/govim")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build document tools: %v\n%s", err, output)
+	for _, name := range []string{"zat", "govim"} {
+		build := exec.Command("go", "-C", "demo-go/"+name, "build", "-o", filepath.Join(tools, name), ".")
+		build.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if output, err := build.CombinedOutput(); err != nil {
+			t.Fatalf("build %s: %v\n%s", name, err, output)
+		}
 	}
 	browser := filepath.Join(tools, "file-browser")
-	build = exec.Command("go", "build", "-o", browser, "-tags", "sqlite_omit_load_extension",
-		"-ldflags", `-linkmode external -extldflags "-static third_party/alsa/snd.o -Lthird_party/alsa/lib -l:libasound.a -ldl -lpthread -lm"`, "./demo-go/file-browser")
+	build := exec.Command("go", "-C", "demo-go/file-browser", "build", "-o", browser, "-tags", "sqlite_omit_load_extension", ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build browser: %v\n%s", err, output)
 	}

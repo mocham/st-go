@@ -1,0 +1,14 @@
+codeberg.org/go-fonts/liberation v0.6.0 h1:15Gh6SdwYve22CWCm9jYpVpRuaTh726av2TgHTHvAtQ=
+codeberg.org/go-fonts/liberation v0.6.0/go.mod h1:J15VAa+lyxdcI/Je7lDDDl6QOhLk9feNBnnwXqEHXOk=
+codeberg.org/go-pdf/fpdf v0.12.0 h1:g8E/1VqGqB2lZUUaqQrrTnA0IEJLPTTX1DZ0qS/ZmhU=
+codeberg.org/go-pdf/fpdf v0.12.0/go.mod h1:WJNJ2bvCj81rZBdhOf7lKOGoSl+OKMXcIcXqDcP8r5Y=
+github.com/d2lang/mathjax-go v0.1.0 h1:wwEYeMNpjqZrKqoZYNA3ZvVxQuN0EzBwEPClUT/KcwE=
+github.com/d2lang/mathjax-go v0.1.0/go.mod h1:ltfD9ACCPWhnU2KVOCKaUyBa3vUDGZoc1njExXypym4=
+github.com/mattn/go-sqlite3 v1.14.32 h1:JD12Ag3oLy1zQA+BNn74xRgaBbdhbNIDYvQUEuuErjs=
+github.com/mattn/go-sqlite3 v1.14.32/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+golang.org/x/net v0.60.0 h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU=
+golang.org/x/net v0.60.0/go.mod h1:2DA/G1UfVbCpQPeWTmMPGY7Cs2PkBkwu743bVX5PIVg=
+golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
+golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
+golang.org/x/text v0.42.0 h1:JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=
+golang.org/x/text v0.42.0/go.mod h1:ojzP1Z+2QtioaF8DTtO8K5q7JWVVYwZKenzujK0Zd0E=

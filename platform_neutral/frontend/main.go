@@ -213,6 +213,7 @@ func main() {
 		log.Fatalf("display: %v", err)
 	}
 	defer t.Close()
+	cfg.NativeAudioToken = newGeometryToken()
 	if _, ok := t.host.(api.NativeVideoHost); ok {
 		cfg.NativeVideoToken = newGeometryToken()
 	}

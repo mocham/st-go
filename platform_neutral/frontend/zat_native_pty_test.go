@@ -35,7 +35,7 @@ func TestZatNativePageTextPTY(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(t.TempDir(), "zat")
-	build := exec.Command("go", "build", "-o", binary, "./demo-go/zat")
+	build := exec.Command("go", "-C", "demo-go/zat", "build", "-o", binary, ".")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build zat: %v\n%s", err, output)

@@ -33,6 +33,9 @@ terminal text rather than native display connections.
   keyboard lookup, clipboard ownership/transfers, window-manager operations,
   and X pixel/pane presentation. These use the same request ordering, pixel
   format, dirty uploads and preview backing-pixmap strategy as before.
+* **[`../functionalities/`](../functionalities/README.md)**: independent reusable
+  Go modules for TUI helpers, PDF generation, PTYs, configuration, limits, metadata,
+  terminfo, and terminal-owned audio. Their original import paths are preserved.
 * **`../main.go`**: executable wiring, including the original embedded font.
   `backend_x11.go` selects X11 by default; `backend_web.go` selects web with
   `backend_web`; `backend_fb.go` selects fbdev with `backend_fb`. No backend is
@@ -40,8 +43,10 @@ terminal text rather than native display connections.
 
 The root **`term/`** package is a type-alias/forwarding compatibility shim, not a
 second engine. Existing demo/client imports continue to work. Shared public
-helpers (`config`, `limits`, `pdfmeta`, `tui`, etc.) retain their existing paths
-to avoid unrelated client import churn.
+helpers (`config`, `limits`, `pdfmeta`, `tui`, etc.) now live in `functionalities/`
+as independent modules, with unchanged import paths. The engine, `api`, and
+compatibility shim also have their own modules. `go.work` selects local modules;
+per-consumer replacements keep standalone `GOWORK=off` workflows working.
 
 ## Dependencies and ownership
 
@@ -80,7 +85,10 @@ engine, PTY and native codecs on the Linux server; it is not a Wasm port.
 ## Verification
 
 ```sh
-go test ./platform_neutral/api ./platform_neutral/stterminal ./term
+go -C platform_neutral/api test ./...
+go -C platform_neutral/stterminal test ./...
+go -C term test ./...
+make test-tui
 make test
 make st
 make st-web

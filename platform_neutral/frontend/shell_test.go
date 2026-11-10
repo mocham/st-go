@@ -15,10 +15,13 @@ func TestStChildEnvExportsFileBrowserIcons(t *testing.T) {
 	t.Setenv("ST_GO_BACKEND", "inherited-backend")
 	t.Setenv("ST_GO_NATIVE_VIDEO", "forged")
 	t.Setenv("ST_GO_NATIVE_VIDEO_TOKEN", "stale")
+	t.Setenv("ST_GO_NATIVE_AUDIO", "forged")
+	t.Setenv("ST_GO_NATIVE_AUDIO_TOKEN", "stale")
 	t.Setenv("ST_FILE_BROWSER_ICON_DIRECTORY", "user override")
 	cfg := config.Default()
 	cfg.GeometryToken = "geometry-secret"
 	cfg.NativeVideoToken = "fresh-native-secret"
+	cfg.NativeAudioToken = "fresh-audio-secret"
 	cfg.FileBrowser.Icons.Directory = "configured"
 
 	env := stChildEnv(cfg)
@@ -61,6 +64,9 @@ func TestStChildEnvExportsFileBrowserIcons(t *testing.T) {
 	}
 	if values["ST_GO_NATIVE_VIDEO_TOKEN"] != "fresh-native-secret" {
 		t.Fatal("native video capability was not replaced")
+	}
+	if values["ST_GO_NATIVE_AUDIO_TOKEN"] != "fresh-audio-secret" || values["ST_GO_NATIVE_AUDIO"] != "1" {
+		t.Fatal("native audio capability was not replaced")
 	}
 }
 

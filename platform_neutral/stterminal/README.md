@@ -178,7 +178,7 @@ Continuous PDF queries reply with
 `DCS region secondary data TOKEN KIND PAGE OFFSET NEXT BASE64 ST`. Decode and
 append JSON bytes in offset order; request `NEXT` until it is `-1`. TOC replies
 use page 0; destinations are one-based, with 0 meaning no local destination.
-[`pdfmeta`](../../pdfmeta/metadata.go) defines the payload: `toc` entries have
+[`pdfmeta`](../../functionalities/pdfmeta/metadata.go) defines the payload: `toc` entries have
 `title`, `page`, and `level`; page text uses `text`; `truncated` and `error`
 report limits/failures. Use fresh positive tokens and discard stale replies.
 
@@ -196,7 +196,7 @@ external converter. Replies are tokenized, chunked base64 JSON:
 DCS pdfsearch data TOKEN OFFSET NEXT BASE64 ST
 ```
 
-The [`pdfmeta.Search`](../../pdfmeta/metadata.go) payload has `pages` (one page
+The [`pdfmeta.Search`](../../functionalities/pdfmeta/metadata.go) payload has `pages` (one page
 per occurrence), plus `truncated`/`error`. `NEXT=-1` ends the reply. Append
 `pdfsearch TOKEN MATCH` to `open ... rect` to paint retained highlights.
 `MATCH` is one-based; zero highlights all occurrences equally. The terminal
@@ -210,6 +210,39 @@ OSC 52 clipboard writes use `allowclipboardwrite` (default true); reads require
 host, not client-owned X connections or external clipboard helpers. Native
 selection transfers, browser permissions/timeouts, and process-local framebuffer
 clipboard behavior are described in the [backend guides](../../platform_dependent/README.md).
+
+## Native audio
+
+st-go advertises `ST_GO_NATIVE_AUDIO=1` and a per-session
+`ST_GO_NATIVE_AUDIO_TOKEN` on every display backend. Audio is a terminal-owned
+service, not an application-owned ALSA connection or an external-player command.
+Clients use the pure-Go `st-go/tui/audio` helper or encode:
+
+```text
+DCS native-audio auth TOKEN ID BASE64_JSON ST
+```
+
+`ID` is 32 hexadecimal characters. Raw unpadded standard-base64 JSON (at most
+16384 encoded bytes) contains only one of:
+
+```json
+{"action":"play","file":"/absolute/song.mp3"}
+{"action":"stop"}
+```
+
+The file path must be valid UTF-8, NUL-free, absolute, and at most 8192 bytes.
+Only regular files are opened; the terminal decodes MP3 in Go and owns PCM
+output. Unknown fields, trailing JSON values, malformed IDs, and unauthenticated
+requests are rejected. Stop affects only the matching job ID. One active job is
+allowed per terminal; there is no unbounded media/PCM queue.
+
+Replies are `DCS native-audio ID accepted ST`, `DCS native-audio ID done ST`, or
+`DCS native-audio ID error BASE64_MESSAGE ST`. Clients must drain late completion
+replies rather than interpreting their payload as keystrokes. File-browser waits
+up to five seconds for acknowledgement; unsupported hosts keep metadata usable.
+Playback and device cleanup run outside the terminal parser/render lock. Terminal
+exit stops outstanding playback. No mixer controls or video audio defaults are
+changed. See the [host audio module](../../functionalities/audio/README.md).
 
 ## Native video handoff
 
