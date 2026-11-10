@@ -119,6 +119,7 @@ type framebuffer struct {
 	layout           layout
 	memory, original []byte
 	current          func() (layout, error)
+	present          func([]byte, []image.Rectangle) // optional injected transport
 }
 
 func openFramebuffer(path string) (*framebuffer, error) {
@@ -219,6 +220,19 @@ func (f *framebuffer) close() error {
 	err := unix.Munmap(f.memory)
 	f.memory, f.original = nil, nil
 	return fmtClose(err, unix.Close(f.fd))
+}
+
+// One bulk copy per damaged row, after every layer has been composed in RAM.
+// Native padding and virtual offsets are not presented outside the damage.
+func (f *framebuffer) copyFrame(frame []byte, damage []image.Rectangle) {
+	l := f.layout
+	for _, r := range damage {
+		for y := r.Min.Y; y < r.Max.Y; y++ {
+			start := (y+l.yOffset)*l.stride + (r.Min.X+l.xOffset)*l.bytes
+			end := start + r.Dx()*l.bytes
+			copy(f.memory[start:end], frame[start:end])
+		}
+	}
 }
 func (f *framebuffer) restore() {
 	l := f.layout

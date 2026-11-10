@@ -14,6 +14,45 @@ type cursorRecordingHost struct {
 	cursor api.TextCursor
 }
 
+type batchingCursorHost struct {
+	cursorRecordingHost
+	t              *testing.T
+	depth, commits int
+}
+
+func (h *batchingCursorHost) BeginPaint() { h.depth++ }
+func (h *batchingCursorHost) EndPaint() {
+	if h.depth != 1 {
+		h.t.Fatal("unbalanced paint batch")
+	}
+	h.depth--
+	h.commits++
+}
+func (h *batchingCursorHost) Upload(pixels []uint32, stride, x, y, w, height int) {
+	if h.depth != 1 {
+		h.t.Fatal("glyph upload was outside a paint batch")
+	}
+	h.recordingHost.Upload(pixels, stride, x, y, w, height)
+}
+func (h *batchingCursorHost) SetTextCursor(c api.TextCursor) {
+	if h.depth != 1 {
+		h.t.Fatal("caret update happened after the paint committed")
+	}
+	h.cursorRecordingHost.SetTextCursor(c)
+}
+
+func TestTextCursorCommitsInsideSameBatchAsGlyphUploads(t *testing.T) {
+	trm := regionTestTerminal(t)
+	host := &batchingCursorHost{t: t}
+	trm.host = host
+	defer func() { trm.host = nil }()
+	trm.writeTerminalOutput(trm.termCore, []byte("abc"))
+	trm.paintTerminalOutput(trm.termCore)
+	if host.commits == 0 || host.depth != 0 || len(host.uploads) == 0 || !host.cursor.Valid() {
+		t.Fatal("paint did not atomically commit glyphs and caret")
+	}
+}
+
 func (h *cursorRecordingHost) SetTextCursor(c api.TextCursor) {
 	h.cursor = api.TextCursor{Bounds: c.Bounds, Pixels: slices.Clone(c.Pixels), Base: slices.Clone(c.Base)}
 }

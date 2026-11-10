@@ -96,9 +96,7 @@ func (d *Driver) runNativeVideo(request api.NativeVideoRequest) (result error) {
 		cb.Unlock()
 		return fmt.Errorf("native video requires the active owned VT")
 	}
-	d.mu.Lock()
-	d.active, d.restorePixels = false, false
-	d.mu.Unlock()
+	d.suspendPresentation()
 	for _, m := range d.mice {
 		d.releaseMouse(m)
 		m.grab(false)
@@ -186,7 +184,7 @@ func (d *Driver) resumeNativeVideo() error {
 	d.callbacks.Lock()
 	d.mu.Lock()
 	d.active, d.restorePixels = owned, owned
-	d.paintRect(image.Rect(0, 0, l.width, l.height))
+	d.invalidate(image.Rect(0, 0, l.width, l.height))
 	d.mu.Unlock()
 	d.callbacks.Focus(owned)
 	d.callbacks.Unlock()

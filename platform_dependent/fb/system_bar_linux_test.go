@@ -222,6 +222,7 @@ func TestSystemBarRefreshIntervalAndShrinkingDamage(t *testing.T) {
 	now := time.Date(2026, 11, 10, 12, 34, 56, 0, time.Local)
 	d.refreshSystemBar(now)
 	oldBounds, oldText := d.systemBar.bounds, d.systemBar.text
+	d.flushPending()
 	before := slices.Clone(d.screen.memory)
 	writePowerSupply(t, root, "BAT0", map[string]string{"capacity": "9"})
 	d.refreshSystemBar(now.Add(30*time.Second - time.Nanosecond))
@@ -250,6 +251,7 @@ func TestSystemBarInactiveVTReacquireAndClosedSuppression(t *testing.T) {
 	d.systemBar = &systemBar{powerSupplyPath: root}
 	now := time.Now()
 	d.refreshSystemBar(now)
+	d.flushPending()
 	d.active = false
 	before := slices.Clone(d.screen.memory)
 	writePowerSupply(t, root, "BAT0", map[string]string{"capacity": "72"})

@@ -30,6 +30,11 @@ func memoryDriver(t *testing.T, w, h int) *Driver {
 	return d
 }
 func pixelAt(d *Driver, x, y int) uint32 {
+	// Inspection is an explicit presentation barrier for deterministic tests.
+	// Paint requests themselves must never write scanout synchronously.
+	d.flushPending()
+	d.presentMu.Lock()
+	defer d.presentMu.Unlock()
 	l := d.screen.layout
 	return binary.NativeEndian.Uint32(d.screen.memory[(y+l.yOffset)*l.stride+(x+l.xOffset)*4:])
 }

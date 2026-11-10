@@ -63,6 +63,13 @@ Backends restore/recompose only the affected caret rectangles. X11 and browsers
 retain native mouse pointers; software mouse/touchpad pointer and system-bar
 painting belong exclusively to the framebuffer backend.
 
+Painter uploads and retained-surface updates transfer pixels/state to a backend;
+they do not require immediate physical presentation. The framebuffer backend's
+[presentation worker](../../platform_dependent/fb/README.md#rendering-and-input)
+coalesces damage and composes a finished back buffer before paced scanout copies.
+Optional `api.PaintBatcher` groups a terminal paint's uploads and caret into one
+commit, so the presenter cannot sample a half-updated terminal frame.
+
 The frontend decodes PNG, JPEG, GIF, BMP, and TGA through stb_image, WebP through
 libwebp, and PDF through static Poppler/Splash, including embedded JPEG images.
 Availability depends on the [build profile](../BUILDING.md#build-targets).

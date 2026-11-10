@@ -67,9 +67,9 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 		}
 	}
 	// If the battery disappears or its percentage shrinks, restore the uncovered
-	// area from retained application pixels. paintRect also suppresses inactive
-	// VT writes; acquire will compose the most recently cached bar on return.
-	d.paintRect(old.Union(b.bounds))
+	// area from retained application pixels. Inactive VTs retain damage without
+	// presenting; acquire composes the most recently cached bar on return.
+	d.invalidate(old.Union(b.bounds))
 }
 
 func systemBarText(now time.Time, powerSupplyPath string) string {

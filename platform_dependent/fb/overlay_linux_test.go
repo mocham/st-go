@@ -55,7 +55,7 @@ func TestTextCursorOverlayRestoresLatestContentAndIndependentDamage(t *testing.T
 		t.Fatal("overlay painted into inactive VT")
 	}
 	d.active = true
-	d.paintRect(image.Rect(0, 0, 40, 40))
+	d.invalidate(image.Rect(0, 0, 40, 40))
 	if pixelAt(d, 30, 30) != 0xffffff {
 		t.Fatal("overlay did not survive VT return")
 	}

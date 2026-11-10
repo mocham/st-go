@@ -55,13 +55,24 @@ type EventHost interface {
 
 // Painter consumes final opaque 0xAARRGGBB pixels. Upload copies the supplied
 // pixels before returning, matching the existing terminal framebuffer lifetime.
+// This transfers content, not a synchronous physical flush: backends may retain
+// it, accumulate damage, and schedule presentation independently of producers.
 type Painter interface {
 	Upload(pixels []uint32, stride, x, y, width, height int)
 	NewSurface(bounds image.Rectangle, background uint32) (Surface, error)
 }
 
+// PaintBatcher optionally groups content uploads and the caret update into one
+// committed state. EndPaint makes the batch eligible for scheduled presentation;
+// it must not synchronously flush hardware. Nested batches are permitted.
+type PaintBatcher interface {
+	BeginPaint()
+	EndPaint()
+}
+
 // Surface is an independently presented retained pane. Scroll reuse is optional;
 // Present receives a complete frame so implementations can upload it in full.
+// It may instead replace retained pixels and mark damage for a later presentation.
 // Calls are serialized by the host's existing presenter lock.
 type Surface interface {
 	Configure(bounds image.Rectangle, background uint32)

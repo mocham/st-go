@@ -52,6 +52,12 @@ func RegisterFlags(fs *flag.FlagSet) api.OpenHost {
 
 type Driver struct {
 	mu                      sync.Mutex
+	presentMu               sync.Mutex
+	presentWake             chan struct{}
+	presentDone             chan struct{}
+	damage                  []image.Rectangle
+	paintDepth              int
+	backBuffer              []byte
 	callbacks               api.Callbacks
 	window                  api.WindowOptions
 	screen                  *framebuffer
@@ -197,10 +203,13 @@ func (d *Driver) Close() {
 	}
 	d.closed = true
 	close(d.done)
-	if !d.running {
-		d.cleanup()
-	}
+	running := d.running
 	d.mu.Unlock()
+	if !running {
+		d.presentMu.Lock()
+		d.cleanup()
+		d.presentMu.Unlock()
+	}
 }
 
 func (d *Driver) cleanup() {
@@ -238,7 +247,15 @@ func (d *Driver) Run() {
 	}
 	d.running = true
 	d.mu.Unlock()
-	defer func() { d.mu.Lock(); d.cleanup(); d.closed = true; d.mu.Unlock() }()
+	defer func() {
+		d.Close()
+		if d.presentDone != nil {
+			<-d.presentDone
+		}
+		d.presentMu.Lock()
+		d.cleanup()
+		d.presentMu.Unlock()
+	}()
 	cb := d.callbacks
 	cb.Lock()
 	if cb.Closed() {
@@ -250,6 +267,7 @@ func (d *Driver) Run() {
 	cb.Focus(true)
 	cb.PaintDirty()
 	cb.Unlock()
+	d.startPresenter()
 	for {
 		select {
 		case <-d.done:
@@ -360,10 +378,7 @@ func (d *Driver) Run() {
 func (d *Driver) isActive() bool { d.mu.Lock(); defer d.mu.Unlock(); return d.active && !d.closed }
 
 func (d *Driver) release() {
-	d.mu.Lock()
-	d.active = false
-	d.restorePixels = false
-	d.mu.Unlock()
+	d.suspendPresentation()
 	for _, m := range d.mice {
 		d.releaseMouse(m)
 		m.grab(false)
@@ -378,10 +393,7 @@ func (d *Driver) release() {
 	}
 }
 func (d *Driver) acquire() error {
-	d.mu.Lock()
-	d.active = false
-	d.restorePixels = false
-	d.mu.Unlock()
+	d.suspendPresentation()
 	active, err := d.console.active()
 	if err != nil {
 		return err
@@ -416,7 +428,7 @@ func (d *Driver) acquire() error {
 	d.mu.Lock()
 	d.active = true
 	d.restorePixels = true
-	d.paintRect(image.Rect(0, 0, l.width, l.height))
+	d.invalidate(image.Rect(0, 0, l.width, l.height))
 	d.mu.Unlock()
 	d.callbacks.Focus(true)
 	return nil

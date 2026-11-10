@@ -44,15 +44,40 @@ display owner against the same active framebuffer.
 
 ## Rendering and input
 
-Uniform `api.Painter` damage spans copy into retained, cursor-free terminal
-pixels. Preview surfaces are retained separately. A second presentation layer
-holds the text caret, system bar, and software mouse/touchpad pointer; moving or
-hiding an overlay restores its old rectangle from retained content without
-rerasterizing glyphs. Unchanged overlays are reapplied only where content damage
-intersects them. Clean rows are not bridged. Composition uses rectangle
-intersections and row spans, with a fast converter for common 32-bit layouts,
-rather than checking every layer at every content pixel. No second full-screen
-overlay framebuffer is allocated.
+Paint requests only update retained, cursor-free terminal/preview buffers and
+mark rectangles dirty. They never write visible scanout. The text caret, system
+bar, and software mouse/touchpad pointer are retained as separate overlays;
+moving or hiding them damages their old/new bounds without rerasterizing glyphs.
+
+An independent presenter sleeps while clean and coalesces updates on a **60 Hz
+software frame clock**. There is one bounded pending damage batch (at most 128
+rectangles), not a queue of obsolete PDF frames. Separate dirty rows are not
+bridged unless damage fragmentation exceeds that bound. The worker composes all
+layers into one reusable, native-format RAM back buffer, then bulk-copies only
+the finished damaged rows into scanout. Opaque PDF/list updates skip terminal
+pixels hidden beneath them. No intermediate background-only or overlay-less
+image is deliberately exposed.
+
+Terminal uploads and the corresponding caret update are grouped by
+`api.PaintBatcher`; only the outer `EndPaint` publishes that state to the worker.
+It does not flush synchronously. PDF surface updates and pointer/bar changes
+likewise only replace retained state and invalidate damage.
+
+Hardware copies run outside the producer mutex. Updates arriving during a copy
+remain dirty for the next frame; completing an older batch cannot clear them.
+VT release and native-video handoff drain any in-flight copy before returning
+display ownership. Shutdown stops the presenter before restoring/unmapping the
+device. Inactive VTs retain the latest state without rendering it.
+
+This follows the render/commit/present separation used by
+[Wayland frame callbacks](https://wayland-book.com/surfaces-in-depth/frame-callbacks.html),
+[X Present](https://man.archlinux.org/man/XPresentPixmap.3.en), and
+[mpv's output thread](https://github.com/mpv-player/mpv/blob/master/video/out/vo.c).
+The clock here is a fallback, **not hardware vsync**. A RAM back buffer followed
+by copying into `/dev/fb0` cannot guarantee tear-free scanout: that requires
+synchronized page flips/swapchain presentation (for example DRM/KMS), not merely
+moving the same immediate writes to another thread. This backend does not change
+display modes or introduce a new DRM/Wayland dependency.
 
 The software mouse/touchpad pointer uses a **2× scale** (18×32 pixel bounds),
 with its hotspot at the unchanged top-left tip.
@@ -184,7 +209,9 @@ Default tests never open a real framebuffer, change a real VT or grab real input
 They use byte-backed scanout and injected console operations for format/stride
 and bounds checks, dirty rows, preview retention, pointer restoration, keymap
 translation, evdev framing/scroll/drop recovery, multi-mouse button ownership,
-VT transitions and partial-startup cleanup. Shared frontend process tests check
+VT transitions and partial-startup cleanup. Presenter tests cover deferred writes,
+burst coalescing, final-frame composition, bounded damage, concurrent updates
+during slow transport, and draining presentation before VT release. Shared frontend process tests check
 cleanup on shell exit/spawn failure and the child's initial physical PTY size.
 Real device/driver behavior still requires a foreground-VT hardware smoke test.
 

@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"st-go/platform_neutral/api"
 	term "st-go/platform_neutral/stterminal"
 )
 
@@ -54,6 +55,10 @@ func (t *Terminal) paintTerminalOutput(core *term.Term) {
 func (t *Terminal) paint() {
 	if t.closed() || t.termCore == nil || t.termCore.IsPaintPaused() {
 		return
+	}
+	if batch, ok := t.host.(api.PaintBatcher); ok {
+		batch.BeginPaint()
+		defer batch.EndPaint()
 	}
 	defer t.presentTextCursor()
 	full := t.displayRegions.fullDirty

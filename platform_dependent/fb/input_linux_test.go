@@ -333,9 +333,7 @@ func TestRunKeyboardVTSwitchRepaintAndGracefulCleanup(t *testing.T) {
 	ownedVT.Store(1)
 	d.signals <- unix.SIGUSR2
 	awaitFocus(true)
-	d.mu.Lock()
 	got := pixelAt(d, 0, 0)
-	d.mu.Unlock()
 	if got != 0x112233 {
 		t.Fatal("VT acquire lost retained output")
 	}

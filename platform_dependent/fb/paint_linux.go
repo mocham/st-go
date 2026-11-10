@@ -24,35 +24,44 @@ func (d *Driver) Show() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.systemBar != nil {
-		d.paintRect(d.systemBar.bounds)
+		d.invalidate(d.systemBar.bounds)
 	}
 }
 
-// Caller holds d.mu. Compose retained panes, the system bar and the software
-// pointer only in scanout, never into terminal pixels or image/cell metadata.
-func (d *Driver) paintRect(r image.Rectangle) {
-	if d.closed || !d.active {
-		return
-	}
+// Caller holds d.mu. Compose a complete damaged rectangle in ordinary RAM,
+// never directly into visible scanout or the retained glyph/preview buffers.
+func (d *Driver) composeRect(memory []byte, r image.Rectangle) {
 	l := d.screen.layout
 	r = r.Intersect(image.Rect(0, 0, l.width, l.height))
 	// Content is copied in row spans. Layer intersection is determined once
 	// per rectangle, not once for every glyph/background pixel.
-	l.blit(d.screen.memory, r, image.Point{}, d.pixels, l.width)
-	for _, s := range d.surfaces {
-		l.blit(d.screen.memory, r.Intersect(s.bounds), s.bounds.Min, s.pixels, s.bounds.Dx())
+	// A full opaque PDF/list update need not redraw the terminal behind it.
+	// Start at the highest pane covering this entire rectangle, if any.
+	first := -1
+	for i := len(d.surfaces) - 1; i >= 0; i-- {
+		if r.In(d.surfaces[i].bounds) {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		l.blit(memory, r, image.Point{}, d.pixels, l.width)
+		first = 0
+	}
+	for _, s := range d.surfaces[first:] {
+		l.blit(memory, r.Intersect(s.bounds), s.bounds.Min, s.pixels, s.bounds.Dx())
 	}
 	c := d.textCursor
-	l.blit(d.screen.memory, r.Intersect(c.Bounds), c.Bounds.Min, c.Pixels, c.Bounds.Dx())
+	l.blit(memory, r.Intersect(c.Bounds), c.Bounds.Min, c.Pixels, c.Bounds.Dx())
 	if b := d.systemBar; b != nil {
-		l.blit(d.screen.memory, r.Intersect(b.bounds), b.bounds.Min, b.pixels, b.bounds.Dx())
+		l.blit(memory, r.Intersect(b.bounds), b.bounds.Min, b.pixels, b.bounds.Dx())
 	}
 	if d.pointerVisible {
 		clip := r.Intersect(pointerBounds(d.pointer))
 		for y := clip.Min.Y; y < clip.Max.Y; y++ {
 			for x := clip.Min.X; x < clip.Max.X; x++ {
 				if pixel, ok := pointerPixel(x-d.pointer.X, y-d.pointer.Y); ok {
-					l.pixel(d.screen.memory, x, y, pixel)
+					l.pixel(memory, x, y, pixel)
 				}
 			}
 		}
@@ -72,8 +81,8 @@ func (d *Driver) SetTextCursor(cursor api.TextCursor) {
 	d.textCursor.Bounds = cursor.Bounds
 	d.textCursor.Pixels = append(d.textCursor.Pixels[:0], cursor.Pixels...)
 	d.textCursor.Base = append(d.textCursor.Base[:0], cursor.Base...)
-	d.paintRect(old)
-	d.paintRect(cursor.Bounds)
+	d.invalidate(old)
+	d.invalidate(cursor.Bounds)
 }
 func pointerPixel(x, y int) (uint32, bool) {
 	if x < 0 || y < 0 || x >= pointerWidth || y >= pointerHeight {
@@ -100,10 +109,10 @@ func (d *Driver) movePointer(p image.Point, visible bool) {
 	}
 	d.pointer, d.pointerVisible = p, visible
 	if oldVisible {
-		d.paintRect(pointerBounds(old))
+		d.invalidate(pointerBounds(old))
 	}
 	if visible {
-		d.paintRect(pointerBounds(p))
+		d.invalidate(pointerBounds(p))
 	}
 }
 func (d *Driver) Upload(pixels []uint32, stride, x, y, w, h int) {
@@ -123,7 +132,7 @@ func (d *Driver) Upload(pixels []uint32, stride, x, y, w, h int) {
 	for row := r.Min.Y; row < r.Max.Y; row++ {
 		copy(d.pixels[row*l.width+r.Min.X:row*l.width+r.Max.X], pixels[row*stride+r.Min.X:row*stride+r.Max.X])
 	}
-	d.paintRect(r)
+	d.invalidate(r)
 }
 
 type surface struct {
@@ -145,7 +154,7 @@ func (d *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surf
 	s := &surface{driver: d, bounds: bounds}
 	s.fill(background)
 	d.surfaces = append(d.surfaces, s)
-	d.paintRect(bounds)
+	d.invalidate(bounds)
 	return s, nil
 }
 func (s *surface) fill(background uint32) {
@@ -167,8 +176,8 @@ func (s *surface) Configure(bounds image.Rectangle, background uint32) {
 	old := s.bounds
 	s.bounds = bounds
 	s.fill(background)
-	d.paintRect(old)
-	d.paintRect(bounds)
+	d.invalidate(old)
+	d.invalidate(bounds)
 }
 func (s *surface) Present(pixels []uint32, w, h, scrollRows int, reuse bool) {
 	d := s.driver
@@ -178,7 +187,7 @@ func (s *surface) Present(pixels []uint32, w, h, scrollRows int, reuse bool) {
 		return
 	}
 	copy(s.pixels, pixels)
-	d.paintRect(s.bounds)
+	d.invalidate(s.bounds)
 }
 func (s *surface) Expose() bool {
 	d := s.driver
@@ -187,7 +196,7 @@ func (s *surface) Expose() bool {
 	if s.closed || d.closed {
 		return false
 	}
-	d.paintRect(s.bounds)
+	d.invalidate(s.bounds)
 	return true
 }
 func (s *surface) Close() {
@@ -205,5 +214,5 @@ func (s *surface) Close() {
 			break
 		}
 	}
-	d.paintRect(s.bounds)
+	d.invalidate(s.bounds)
 }
