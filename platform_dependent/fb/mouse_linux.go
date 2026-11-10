@@ -4,6 +4,7 @@ package fb
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"image"
 	"path/filepath"
@@ -44,6 +45,10 @@ type mouse struct {
 	queryButtons          func() ([12]bool, error)
 }
 
+var errNotRelativeMouse = errors.New("not a relative mouse (REL_X, REL_Y and BTN_LEFT required)")
+
+type mouseQuery func(uintptr, unsafe.Pointer) error
+
 func hasBit(bits []byte, bit int) bool {
 	if bit < 0 {
 		return false
@@ -76,9 +81,9 @@ func mouseButton(code uint16) byte {
 	}
 	return 0
 }
-func deviceBits(fd int, kind uint16) ([]byte, error) {
+func deviceBits(query mouseQuery, kind uint16) ([]byte, error) {
 	bits := make([]byte, 96)
-	err := ioctlPointer(fd, readRequest('E', 0x20+uintptr(kind), uintptr(len(bits))), unsafe.Pointer(&bits[0]))
+	err := query(readRequest('E', 0x20+uintptr(kind), uintptr(len(bits))), unsafe.Pointer(&bits[0]))
 	return bits, err
 }
 func openMouse(path string) (*mouse, error) {
@@ -92,26 +97,37 @@ func openMouse(path string) (*mouse, error) {
 			unix.Close(fd)
 		}
 	}()
-	var version uint32
-	if err := ioctlPointer(fd, readRequest('E', 1, 4), unsafe.Pointer(&version)); err != nil {
-		return nil, fmt.Errorf("not an evdev device: %w", err)
-	}
-	rel, err := deviceBits(fd, evRelative)
+	m, err := configureMouse(fd, path, func(request uintptr, p unsafe.Pointer) error { return ioctlPointer(fd, request, p) })
 	if err != nil {
 		return nil, err
 	}
-	keys, err := deviceBits(fd, evKey)
+	good = true
+	return m, nil
+}
+
+// Keep the production ioctl/capability path testable, not just synthetic events
+// injected after discovery. Querying a device never reads its event stream.
+func configureMouse(fd int, path string, query mouseQuery) (*mouse, error) {
+	var version uint32
+	if err := query(readRequest('E', 1, 4), unsafe.Pointer(&version)); err != nil {
+		return nil, fmt.Errorf("not an evdev device: %w", err)
+	}
+	rel, err := deviceBits(query, evRelative)
+	if err != nil {
+		return nil, err
+	}
+	keys, err := deviceBits(query, evKey)
 	if err != nil {
 		return nil, err
 	}
 	if !hasBit(rel, relX) || !hasBit(rel, relY) || !hasBit(keys, 0x110) {
-		return nil, fmt.Errorf("not a relative mouse (REL_X, REL_Y and BTN_LEFT required)")
+		return nil, errNotRelativeMouse
 	}
 	m := &mouse{fd: fd, path: path, hiWheel: hasBit(rel, relWheelHi), hiHWheel: hasBit(rel, relHWheelHi)}
 	m.queryButtons = func() ([12]bool, error) {
 		var state [12]bool
 		var bits [96]byte
-		if err := ioctlPointer(fd, readRequest('E', 0x18, uintptr(len(bits))), unsafe.Pointer(&bits[0])); err != nil {
+		if err := query(readRequest('E', 0x18, uintptr(len(bits))), unsafe.Pointer(&bits[0])); err != nil {
 			return state, err
 		}
 		for code := uint16(0x110); code <= 0x116; code++ {
@@ -121,7 +137,6 @@ func openMouse(path string) (*mouse, error) {
 		}
 		return state, nil
 	}
-	good = true
 	return m, nil
 }
 func (m *mouse) grab(grab bool) error {
@@ -184,11 +199,18 @@ func (d *Driver) scanMice(initial bool) error {
 		}
 		m, err := openMouse(path)
 		if err != nil {
+			// Auto discovery used to discard all failures here, making a mouse
+			// permission/ioctl problem indistinguishable from broken input.
+			info := readMouseInfo(path)
+			if !errors.Is(err, errNotRelativeMouse) && (!info.relKnown || info.relative) {
+				d.reportMouseFailure(path, fmt.Sprintf("%q: %v", info.name, err))
+			}
 			if initial && !auto {
 				return fmt.Errorf("mouse %s: %w", path, err)
 			}
 			continue
 		}
+		delete(d.mouseFailures, path)
 		if d.grabMouse && d.isActive() {
 			if err := m.grab(true); err != nil {
 				m.close()
@@ -202,9 +224,20 @@ func (d *Driver) scanMice(initial bool) error {
 		d.mice = append(d.mice, m)
 	}
 	if initial && auto && len(d.mice) == 0 {
-		limits.Report("fb mouse", "no accessible relative mice; keyboard-only until a mouse is discovered")
+		limits.Report("fb mouse", "no accessible relative mice; run st-fb -mouse-list on the host to check device nodes, permissions and capabilities; keyboard-only until a mouse is discovered")
 	}
 	return nil
+}
+
+func (d *Driver) reportMouseFailure(path, detail string) {
+	if d.mouseFailures == nil {
+		d.mouseFailures = make(map[string]string)
+	}
+	if d.mouseFailures[path] == detail {
+		return
+	}
+	d.mouseFailures[path] = detail
+	limits.Report("fb mouse", "%s: %s", path, detail)
 }
 
 func (m *mouse) read(d *Driver) error {

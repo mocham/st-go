@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -30,6 +31,22 @@ func RegisterFlags(fs *flag.FlagSet) api.OpenHost {
 	fs.StringVar(&o.TTY, "tty", "/dev/tty", "active Linux virtual console (not a PTY)")
 	fs.StringVar(&o.Mouse, "mouse", "auto", "evdev mouse paths (comma separated), auto, or none")
 	fs.BoolVar(&o.GrabMouse, "mouse-grab", false, "exclusively grab selected mice while the VT is active")
+	fs.BoolFunc("mouse-list", "list mouse devices, access errors and capabilities without opening the framebuffer", func(value string) error {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return nil
+		}
+		if err := writeMouseList(os.Stdout); err != nil {
+			return err
+		}
+		// Like -help, this diagnostic exits during flag parsing, before fonts,
+		// framebuffer/VT takeover, grabs or child-process startup.
+		os.Exit(0)
+		return nil
+	})
 	return func(window api.WindowOptions) (api.Host, error) { return New(window, o) }
 }
 
@@ -54,6 +71,7 @@ type Driver struct {
 	grabMouse               bool
 	lastScan                time.Time
 	buttonCounts            [12]int
+	mouseFailures           map[string]string
 }
 
 var _ api.Host = (*Driver)(nil)
@@ -304,7 +322,11 @@ func (d *Driver) Run() {
 				continue
 			}
 			m := d.mice[i]
-			if fds[i+1].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0 || m.read(d) != nil {
+			if fds[i+1].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0 {
+				d.reportMouseFailure(m.path, fmt.Sprintf("device disconnected (poll flags %#x)", fds[i+1].Revents))
+				d.removeMouse(i)
+			} else if err := m.read(d); err != nil {
+				d.reportMouseFailure(m.path, fmt.Sprintf("input read/decode failed: %v", err))
 				d.removeMouse(i)
 			}
 		}
