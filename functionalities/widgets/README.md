@@ -18,7 +18,7 @@ clients under those locks. Clients must still serialize their own rendering and
 terminal state. Visible terminal rectangles are expected not to overlap; there
 is no general overlap/blending compositor. The existing framebuffer system bar
 is the deliberate exception: an opaque, pointer-transparent overlay above
-content/caret and below the software pointer, with its original geometry.
+content/caret and below the software pointer, in the bottom-right corner.
 
 Visibility is not focus. Visible widgets may paint; only the focused terminal
 gets keyboard/paste events. Pointer drags retain their original owner and local
@@ -39,6 +39,9 @@ terminal closes the native window. `Run` waits for native console restoration.
 used to obtain it closes first. Window hooks and `PostWindow` serialize optional
 layout/shortcut policy outside widget callback locks; `SetAutoResize` hands
 geometry ownership to that policy without replacing PTYs.
+`WindowBarLayout.PassiveBarBounds` exposes visible pointer-transparent bars for
+optional layout reservations. Changes queue the window resize/layout hook in
+the native event domain, outside widget/client locks.
 
 The frontend exposes `NewTerminalWidget`, `Terminal.Widget`, `StartSession` and
 `Run` for these ownership boundaries. Its raster, mouse state, image atlas, PDF

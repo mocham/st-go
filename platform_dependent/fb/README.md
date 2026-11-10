@@ -82,9 +82,9 @@ display modes or introduce a new DRM/Wayland dependency.
 The software mouse/touchpad pointer uses a **2× scale** (18×32 pixel bounds),
 with its hotspot at the unchanged top-left tip.
 
-A backend-owned bar overlays the **top-right corner**, above terminal and preview
+A backend-owned bar overlays the **bottom-right corner**, above terminal and preview
 drawing and below the mouse pointer. It displays local `YYYY-MM-DD HH:MM:SS` and,
-when readable, `BAT N%` from the first present system battery's `capacity` under
+when readable, a pre-rendered battery icon and `N%` from the first present system battery's `capacity` under
 `/sys/class/power_supply`. It refreshes every **30 seconds**, repaints only its
 old/new area and is restored on VT return. Missing batteries are silently omitted.
 It uses anti-aliased **28 px Monaco** text in soft light green (`#C4DFB5`) on a
@@ -92,7 +92,21 @@ muted dark blue-purple background (`#2D2B46`). The tiny glyph atlas is generated
 from the bundled `Monaco_Linux.ttf` using the existing FreeType build and kept as
 generated Go source; `make st-fb` regenerates it when its inputs change. Drawing
 remains pure Go and needs no system fonts or packages. No terminal rows are
-reserved, and the bar does not change application input or `BAR_DATA`.
+reserved until tabs initialize; then the tab band shares its height, with fixed
+20-cell tab labels to the left so neither clock nor tab controls cover each other.
+The bar does not change application input or `BAR_DATA`.
+
+The same 30-second refresh also checks the ALSA mixer output selector, showing a
+pre-rendered earphone, speaker, or generic audio icon for modes 1, 0, or unknown.
+Clicking the audio icon toggles between modes 0 and 1 through the mixer. No PCM
+device is opened; MP3/video routing is unchanged apart from the requested mixer
+selection.
+Speaker/earphone enumerated controls are discovered by their item labels, not
+by card number. For a numeric or unusually named binary selector, set its exact
+name with `ST_GO_AUDIO_OUTPUT_CONTROL='Output Select'`; optionally constrain the
+card using `ST_GO_AUDIO_OUTPUT_CARD=0`. The named control's 0/1 values follow the
+speaker/earphone mapping above. Unavailable/ambiguous controls remain unknown;
+the indicator is not a physical jack-presence test.
 
 Console input uses **K_MEDIUMRAW**, with snapshots of the kernel's normal,
 Shift, AltGr and Shift+AltGr maps and Unicode accent table. Common modifiers,

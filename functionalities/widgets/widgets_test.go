@@ -115,6 +115,53 @@ func TestBuffersClipTranslateAndRemainIndependent(t *testing.T) {
 	}
 }
 
+func TestPassiveBarLayoutFollowsBoundsVisibilityAndLifetime(t *testing.T) {
+	_, root := newTestHost(t)
+	control := root.(api.WidgetWindow)
+	layout := root.(api.WindowBarLayout)
+	updates := make(chan []image.Rectangle, 16)
+	control.BindWindowHooks(api.WindowHooks{Resize: func(width, height int) {
+		if width != 12 || height != 8 {
+			t.Error("bar notification changed native geometry", width, height)
+		}
+		// Getter is safe inside the policy serialization domain, outside locks.
+		updates <- layout.PassiveBarBounds()
+	}})
+	await := func(want []image.Rectangle) {
+		t.Helper()
+		select {
+		case got := <-updates:
+			if !slices.Equal(got, want) {
+				t.Fatal("incorrect passive reservation", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("passive bar layout notification blocked")
+		}
+	}
+	bar, err := root.NewWidget(api.WidgetOptions{Kind: api.BarWidget, Bounds: image.Rect(8, 5, 12, 8), Passive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	await([]image.Rectangle{bar.Bounds()})
+	bar.SetBounds(image.Rect(6, 5, 12, 8))
+	await([]image.Rectangle{bar.Bounds()})
+	bar.SetVisible(false)
+	await(nil)
+	bar.SetVisible(true)
+	await([]image.Rectangle{bar.Bounds()})
+	bar.Close()
+	await(nil)
+	// Interactive tab controls must not reserve passive overlay space.
+	interactive, err := root.NewWidget(api.WidgetOptions{Kind: api.BarWidget, Bounds: image.Rect(0, 6, 6, 8)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interactive.Close()
+	if got := layout.PassiveBarBounds(); len(got) != 0 {
+		t.Fatal("interactive bar was counted as passive", got)
+	}
+}
+
 func TestFocusPointerCaptureAndHiddenInput(t *testing.T) {
 	n, root := newTestHost(t)
 	root.SetBounds(image.Rect(0, 0, 6, 8))

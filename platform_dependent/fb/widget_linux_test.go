@@ -40,17 +40,17 @@ func TestSystemBarWidgetPreservesOverlayAndRefreshBehavior(t *testing.T) {
 		preview[i] = 0xff557733
 	}
 	view.Present(preview, 960, 40, 0, false)
-	x := bar.Bounds().Min.X
-	if pixelAt(d, x, 0) != systemBarBackground&0xffffff {
+	x, y := bar.Bounds().Min.X, bar.Bounds().Min.Y
+	if pixelAt(d, x, y) != systemBarBackground&0xffffff {
 		t.Fatal("preview covered system bar widget")
 	}
 	bar.SetVisible(false)
-	if pixelAt(d, x, 0) != 0x557733 {
+	if pixelAt(d, x, y) != 0x557733 {
 		t.Fatal("hiding bar did not restore retained preview")
 	}
 	bar.SetVisible(true)
 	d.refreshSystemBar(now.Add(systemBarInterval))
-	if pixelAt(d, x, 0) != systemBarBackground&0xffffff || !slices.Equal(terminal, d.pixels) {
+	if pixelAt(d, x, y) != systemBarBackground&0xffffff || !slices.Equal(terminal, d.pixels) {
 		t.Fatal("widget bar contaminated terminal pixels or failed to refresh")
 	}
 	// Registering the passive bar must not consume one of the existing eight

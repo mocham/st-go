@@ -39,7 +39,7 @@ func (b *Browser) requestTerminalTab(tool, path string) bool {
 		return false
 	}
 	id := hex.EncodeToString(nonce[:])
-	request := api.TabSpawnRequest{Command: []string{tool, path}, Directory: b.dir, Title: displayText(baseName(path)), Detached: true}
+	request := api.TabSpawnRequest{Command: []string{tool, path}, Directory: b.dir, Title: displayText(baseName(path)), Detached: false}
 	pending := pendingTab{tool: tool, path: path, directory: b.dir, name: baseName(path), deadline: time.Now().Add(5 * time.Second)}
 	// Archive extraction directories can disappear on navigation. Stage the
 	// argument outside that archive, then ask st-go to take its own copy before

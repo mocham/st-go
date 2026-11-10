@@ -41,7 +41,7 @@ func TestRuntimeTabFlagsRemoveCapabilities(t *testing.T) {
 	}
 }
 
-func TestWebFileBrowserDetachedTabsAndOriginalPTYExit(t *testing.T) {
+func TestWebFileBrowserFocusedTabsAndOriginalPTYExit(t *testing.T) {
 	terminal, _ := filepath.Abs("BINARIES/st-web")
 	browser, _ := filepath.Abs("BINARIES/file-browser")
 	for _, file := range []string{terminal, browser} {
@@ -107,7 +107,10 @@ done
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	conn.SetReadDeadline(time.Now().Add(15 * time.Second))
-	var hello struct{ Type string }
+	var hello struct {
+		Type      string
+		CellWidth int
+	}
 	if err := websocket.JSON.Receive(conn, &hello); err != nil || hello.Type != "hello" {
 		t.Fatal("web hello", err)
 	}
@@ -158,15 +161,19 @@ done
 	key("ArrowDown", 0)
 	key("Enter", 0)
 	await(ready, file+"|"+dir+"|1")
-	// Detached opening must leave the browser, not the new tool, on keyboard focus.
+	// A successful browser launch must focus the new PTY without sharing input.
+	text("C")
+	await(input, "C")
+	key("PageUp", ControlMask|ShiftMask)
 	text(":printf active > '" + command + "'; printf '%s' \"$PPID\" > '" + pidFile + "'")
 	key("Enter", 0)
 	await(command, "active")
 	// The bottom bar routes native clicks to the new tab; the shortcut returns.
-	send(map[string]any{"type": "press", "button": 1, "x": 600, "y": 590})
-	send(map[string]any{"type": "release", "button": 1, "x": 600, "y": 590})
-	text("C")
-	await(input, "C")
+	x := (terminalTabWidthCells + 1) * hello.CellWidth
+	send(map[string]any{"type": "press", "button": 1, "x": x, "y": 590})
+	send(map[string]any{"type": "release", "button": 1, "x": x, "y": 590})
+	text("D")
+	await(input, "CD")
 	key("PageUp", ControlMask|ShiftMask)
 	pidBytes, err := os.ReadFile(pidFile)
 	if err != nil {
@@ -186,7 +193,7 @@ done
 	}
 	key("PageDown", ControlMask|ShiftMask)
 	text("Z")
-	await(input, "CZ")
+	await(input, "CDZ")
 	select {
 	case <-exited:
 		if exitErr != nil {

@@ -88,11 +88,16 @@ func TestSystemBarLocalDateTimeAndOptionalBattery(t *testing.T) {
 	}
 	writePowerSupply(t, root, "BAT0", map[string]string{"type": "Battery", "capacity": "73"})
 	text := systemBarText(now, root)
-	if text != "2026-11-10 21:34:56  BAT 73%" {
+	if text != "2026-11-10 21:34:56  \x80 73%" {
 		t.Fatal("wrong battery format", text)
 	}
-	for _, ch := range text {
-		if systemBarGlyphs[ch] == nil {
+	for at := 0; at < len(text); at++ {
+		ch := text[at]
+		if ch >= 128 {
+			if systemBarIcons[ch] == nil {
+				t.Fatalf("missing icon glyph %#x", ch)
+			}
+		} else if systemBarGlyphs[ch] == nil {
 			t.Fatalf("missing glyph %q", ch)
 		}
 	}
@@ -155,15 +160,15 @@ func TestSystemBarCompositesAboveApplicationsWithoutChangingStoredPixels(t *test
 	now := time.Date(2026, 11, 10, 12, 34, 56, 0, time.Local)
 	d.refreshSystemBar(now)
 	b := d.systemBar
-	if b.bounds.Max != image.Pt(w, 2*systemBarPadding+systemBarFontCellHeight) || b.bounds.Min.Y != 0 || b.bounds.Min.X <= 0 {
-		t.Fatal("bar is not bounded to the top-right corner", b.bounds)
+	if b.bounds.Max != image.Pt(w, h) || b.bounds.Min.Y != h-2*systemBarPadding-systemBarFontCellHeight || b.bounds.Min.X <= 0 {
+		t.Fatal("bar is not bounded to the bottom-right corner", b.bounds)
 	}
 	// The first character uses the anti-aliased Monaco cell, not the old
 	// block-scaled bitmap alphabet, with padding outside its font metrics.
 	for y := range systemBarFontCellHeight {
 		for x := range systemBarFontCellWidth {
 			want := systemBarGlyphs['2'][y*systemBarFontCellWidth+x] & 0xffffff
-			if pixelAt(d, b.textLeft+x, systemBarPadding+y) != want {
+			if pixelAt(d, b.textLeft+x, b.bounds.Min.Y+systemBarPadding+y) != want {
 				t.Fatal("first digit did not use the Monaco atlas")
 			}
 		}
@@ -230,16 +235,16 @@ func TestSystemBarRefreshIntervalAndShrinkingDamage(t *testing.T) {
 		t.Fatal("system bar refreshed before 30 seconds elapsed")
 	}
 	d.refreshSystemBar(now.Add(30 * time.Second))
-	if !strings.HasSuffix(d.systemBar.text, "BAT 9%") || d.systemBar.bounds.Min.X <= oldBounds.Min.X {
+	if !bytes.HasSuffix([]byte(d.systemBar.text), []byte{systemBarBatteryIcon, ' ', '9', '%'}) || d.systemBar.bounds.Min.X <= oldBounds.Min.X {
 		t.Fatal("system bar did not refresh/shrink on its deadline")
 	}
-	if pixelAt(d, oldBounds.Min.X, 0) != 0x446688 {
+	if pixelAt(d, oldBounds.Min.X, oldBounds.Min.Y) != 0x446688 {
 		t.Fatal("shorter bar did not restore uncovered preview pixels")
 	}
 	oldBounds = d.systemBar.bounds
 	writePowerSupply(t, root, "BAT0", map[string]string{"present": "0"})
 	d.refreshSystemBar(now.Add(60 * time.Second))
-	if strings.Contains(d.systemBar.text, "BAT") || pixelAt(d, oldBounds.Min.X, 0) != 0x446688 {
+	if strings.Contains(d.systemBar.text, "BAT") || pixelAt(d, oldBounds.Min.X, oldBounds.Min.Y) != 0x446688 {
 		t.Fatal("disappearing battery left stale text/background")
 	}
 }
@@ -256,7 +261,7 @@ func TestSystemBarInactiveVTReacquireAndClosedSuppression(t *testing.T) {
 	before := slices.Clone(d.screen.memory)
 	writePowerSupply(t, root, "BAT0", map[string]string{"capacity": "72"})
 	d.refreshSystemBar(now.Add(systemBarInterval))
-	if !bytes.Equal(before, d.screen.memory) || !strings.HasSuffix(d.systemBar.text, "BAT 72%") {
+	if !bytes.Equal(before, d.screen.memory) || !bytes.HasSuffix([]byte(d.systemBar.text), []byte{systemBarBatteryIcon, ' ', '7', '2', '%'}) {
 		t.Fatal("inactive update wrote scanout or lost new system information")
 	}
 	d.console = &console{fd: -1, number: 1, ops: consoleOps{
@@ -294,7 +299,7 @@ func TestSystemBarClipsToSmallScreens(t *testing.T) {
 			d := memoryDriver(t, size.X, size.Y)
 			d.systemBar = &systemBar{powerSupplyPath: t.TempDir()}
 			d.refreshSystemBar(time.Now())
-			if b := d.systemBar.bounds; b.Min.X < 0 || b.Min.Y != 0 || b.Max.X != size.X || b.Max.Y > size.Y {
+			if b := d.systemBar.bounds; b.Min.X < 0 || b.Min.Y < 0 || b.Max != size {
 				t.Fatal("bar escaped display", b)
 			}
 			if _, ok := d.systemBar.pixel(-1, 0); ok {
@@ -314,7 +319,7 @@ func TestSystemBarRefreshesInRunWithoutApplicationDamage(t *testing.T) {
 	d.refreshSystemBar(time.Now())
 	d.active = true
 	d.Show()
-	if pixelAt(d, d.systemBar.bounds.Min.X, 0) != systemBarBackground&0xffffff {
+	if pixelAt(d, d.systemBar.bounds.Min.X, d.systemBar.bounds.Min.Y) != systemBarBackground&0xffffff {
 		t.Fatal("Show did not paint initial bar without application damage")
 	}
 	var pipe [2]int
@@ -363,11 +368,78 @@ func TestSystemBarRefreshesInRunWithoutApplicationDamage(t *testing.T) {
 			}
 		}
 	}
-	awaitBattery("BAT 73%")
+	awaitBattery(string([]byte{systemBarBatteryIcon, ' ', '7', '3', '%'}))
 	writePowerSupply(t, root, "BAT0", map[string]string{"capacity": "72"})
 	// Advance the deadline rather than sleeping for a real 30-second period.
 	d.mu.Lock()
 	d.systemBar.nextRefresh = time.Time{}
 	d.mu.Unlock()
-	awaitBattery("BAT 72%")
+	awaitBattery(string([]byte{systemBarBatteryIcon, ' ', '7', '2', '%'}))
+}
+
+func TestSystemBarAudioClickTogglesSelectedMode(t *testing.T) {
+	d := memoryDriver(t, 960, 64)
+	mode := 1
+	setCalls := 0
+	d.systemBar = &systemBar{
+		powerSupplyPath: t.TempDir(),
+		audioOutput:     func() (int, bool) { return mode, true },
+		setAudioOutput: func(next int) bool {
+			setCalls++
+			if next != 0 {
+				return false
+			}
+			mode = next
+			return true
+		},
+	}
+	d.refreshSystemBar(time.Now())
+	b := d.systemBar
+	d.systemBarClick(b.audioLeft-b.bounds.Min.X, (b.bounds.Dy())/2)
+	if mode != 0 || setCalls != 1 || !d.systemBar.nextRefresh.IsZero() {
+		t.Fatal("audio checker click did not switch earphone to speaker", mode, setCalls)
+	}
+	// The battery/clock side is not an audio control.
+	d.systemBarClick(0, b.bounds.Dy()/2)
+	if setCalls != 1 {
+		t.Fatal("non-audio system-bar click changed ALSA mode")
+	}
+}
+
+func TestSystemBarReadsSpeakerEarphoneAndUnknownWithoutChangingPlayback(t *testing.T) {
+	d := memoryDriver(t, 960, 64)
+	mode, known, calls := 1, true, 0
+	d.systemBar = &systemBar{powerSupplyPath: t.TempDir(), audioOutput: func() (int, bool) {
+		calls++
+		return mode, known
+	}}
+	now := time.Now()
+	d.refreshSystemBar(now)
+	if len(d.systemBar.text) == 0 || d.systemBar.text[len(d.systemBar.text)-1] != systemBarEarphoneIcon || calls != 1 {
+		t.Fatal("selected earphone mode was not shown", d.systemBar.text, calls)
+	}
+	mode = 0
+	d.refreshSystemBar(now.Add(systemBarInterval - time.Nanosecond))
+	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarEarphoneIcon || calls != 1 {
+		t.Fatal("audio checker ignored the refresh interval")
+	}
+	d.refreshSystemBar(now.Add(systemBarInterval))
+	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarSpeakerIcon || calls != 2 {
+		t.Fatal("speaker selector change was not shown", d.systemBar.text, calls)
+	}
+	known = false
+	d.refreshSystemBar(now.Add(2 * systemBarInterval))
+	if d.systemBar.text[len(d.systemBar.text)-1] != systemBarAudioIcon || calls != 3 {
+		t.Fatal("unreadable mixer was misreported as speaker", d.systemBar.text, calls)
+	}
+	for at := 0; at < len(d.systemBar.text); at++ {
+		ch := d.systemBar.text[at]
+		if ch >= 128 {
+			if systemBarIcons[ch] == nil {
+				t.Fatalf("missing audio icon glyph %#x", ch)
+			}
+		} else if systemBarGlyphs[ch] == nil {
+			t.Fatalf("missing audio indicator glyph %q", ch)
+		}
+	}
 }

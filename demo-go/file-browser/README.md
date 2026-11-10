@@ -93,10 +93,11 @@ By default, both browsers open `.pdf` with [zat](../zat/README.md), and text,
 source, and configuration files with [govim](../govim/README.md), when the tool
 is in `PATH`. This includes `.sh`, `.txt`, syntax-highlighted formats, dotfiles,
 and extensionless scripts; extensions are case-insensitive. With supported,
-enabled st-go tabs, the **Go browser** requests a new detached background tab:
+enabled st-go tabs, the **Go browser** requests a new focused tab:
 the first successful open lazily initializes tabs, retains the browser in tab 1,
-and appends the new PTY last. The browser stays interactive and does not hand
-over its PTY. Select a tab by clicking the bottom bar or using
+and appends the new PTY last, selecting it only after a successful launch. The
+browser keeps its PTY, directory, selection, and preview in its own tab. Switch
+back by clicking its fixed-width label in the bottom bar or using
 Ctrl+Shift+PageUp/PageDown; middle-click or Ctrl+Shift+W closes a tab.
 
 Without support (including `make TABS=0` builds, `-no-tabs`, or `-tabs=false`),

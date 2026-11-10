@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 typedef struct alsa_player {
 	snd_pcm_t *pcm;
@@ -144,4 +145,152 @@ void alsa_player_close(void *handle) {
 		}
 		free(player);
 	}
+}
+
+/* --- output-selector inspection and switching ---------------------------- */
+
+int alsa_output_label(const char *label) {
+	char lower[128];
+	size_t i = 0;
+	for (; label[i] && i + 1 < sizeof(lower); ++i)
+		lower[i] = (char)tolower((unsigned char)label[i]);
+	lower[i] = '\0';
+	int speaker = strstr(lower, "speaker") != NULL || strcmp(lower, "spk") == 0;
+	int earphone = strstr(lower, "earphone") != NULL ||
+		strstr(lower, "headphone") != NULL || strstr(lower, "headset") != NULL ||
+		strcmp(lower, "hp") == 0;
+	return speaker == earphone ? -1 : earphone;
+}
+
+static int card_output_mode(int card, const char *requested, int desired) {
+	char device[32];
+	snprintf(device, sizeof(device), "hw:%d", card);
+	snd_ctl_t *ctl = NULL;
+	int flags = desired >= 0 ? SND_CTL_NONBLOCK : SND_CTL_READONLY | SND_CTL_NONBLOCK;
+	if (snd_ctl_open(&ctl, device, flags) < 0)
+		return -1;
+	snd_ctl_elem_list_t *list;
+	snd_ctl_elem_info_t *info;
+	snd_ctl_elem_value_t *value;
+	snd_ctl_elem_id_t *id;
+	snd_ctl_elem_list_alloca(&list);
+	snd_ctl_elem_info_alloca(&info);
+	snd_ctl_elem_value_alloca(&value);
+	snd_ctl_elem_id_alloca(&id);
+	int mode = -1;
+	unsigned int count = 0;
+	if (snd_ctl_elem_list(ctl, list) < 0 || (count = snd_ctl_elem_list_get_count(list)) > 1024)
+		goto done;
+	if (snd_ctl_elem_list_alloc_space(list, count) < 0)
+		goto done;
+	if (snd_ctl_elem_list(ctl, list) < 0)
+		goto free_list;
+	for (unsigned int at = 0; at < snd_ctl_elem_list_get_used(list); ++at) {
+		snd_ctl_elem_list_get_id(list, at, id);
+		if (*requested && strcmp(requested, snd_ctl_elem_id_get_name(id)) != 0)
+			continue;
+		snd_ctl_elem_info_clear(info);
+		snd_ctl_elem_info_set_id(info, id);
+		if (snd_ctl_elem_info(ctl, info) < 0 || !snd_ctl_elem_info_is_readable(info) ||
+			snd_ctl_elem_info_get_count(info) != 1)
+			continue;
+		snd_ctl_elem_value_clear(value);
+		snd_ctl_elem_value_set_id(value, id);
+		if (snd_ctl_elem_read(ctl, value) < 0)
+			continue;
+		snd_ctl_elem_type_t type = snd_ctl_elem_info_get_type(info);
+		if (*requested) {
+			long selected = -1;
+			if (type == SND_CTL_ELEM_TYPE_BOOLEAN)
+				selected = snd_ctl_elem_value_get_boolean(value, 0);
+			else if (type == SND_CTL_ELEM_TYPE_INTEGER &&
+				snd_ctl_elem_info_get_min(info) == 0 && snd_ctl_elem_info_get_max(info) == 1)
+				selected = snd_ctl_elem_value_get_integer(value, 0);
+			else if (type == SND_CTL_ELEM_TYPE_ENUMERATED && snd_ctl_elem_info_get_items(info) == 2)
+				selected = snd_ctl_elem_value_get_enumerated(value, 0);
+			if (selected == 0 || selected == 1) {
+				if (desired >= 0) {
+					if (type == SND_CTL_ELEM_TYPE_ENUMERATED)
+						snd_ctl_elem_value_set_enumerated(value, 0, desired);
+					else if (type == SND_CTL_ELEM_TYPE_BOOLEAN)
+						snd_ctl_elem_value_set_boolean(value, 0, desired);
+					else
+						snd_ctl_elem_value_set_integer(value, 0, desired);
+					mode = snd_ctl_elem_write(ctl, value) < 0 ? -1 : desired;
+				} else {
+					mode = (int)selected;
+				}
+				break;
+			}
+			continue;
+		}
+		if (type != SND_CTL_ELEM_TYPE_ENUMERATED)
+			continue;
+		unsigned int items = snd_ctl_elem_info_get_items(info);
+		if (items > 64)
+			continue;
+		unsigned int selected = snd_ctl_elem_value_get_enumerated(value, 0);
+		int has_speaker = 0, has_earphone = 0, selected_mode = -1, complete = 1;
+		for (unsigned int item = 0; item < items; ++item) {
+			snd_ctl_elem_info_set_item(info, item);
+			if (snd_ctl_elem_info(ctl, info) < 0) {
+				complete = 0;
+				break;
+			}
+			int item_mode = alsa_output_label(snd_ctl_elem_info_get_item_name(info));
+			has_speaker |= item_mode == 0;
+			has_earphone |= item_mode == 1;
+			if (item == selected)
+				selected_mode = item_mode;
+		}
+		if (complete && has_speaker && has_earphone && selected_mode >= 0) {
+			if (desired >= 0) {
+				for (unsigned int item = 0; item < items; ++item) {
+					snd_ctl_elem_info_set_item(info, item);
+					if (snd_ctl_elem_info(ctl, info) < 0 || alsa_output_label(snd_ctl_elem_info_get_item_name(info)) != desired)
+						continue;
+					snd_ctl_elem_value_set_enumerated(value, 0, item);
+					mode = snd_ctl_elem_write(ctl, value) < 0 ? -1 : desired;
+					break;
+				}
+			} else {
+				mode = selected_mode;
+			}
+			break;
+		}
+	}
+free_list:
+	snd_ctl_elem_list_free_space(list);
+done:
+	snd_ctl_close(ctl);
+	return mode;
+}
+
+int alsa_selected_output(int requested_card, const char *control) {
+	if (requested_card >= 0)
+		return card_output_mode(requested_card, control, -1);
+	int card = -1;
+	for (int scanned = 0; scanned < 32; ++scanned) {
+		if (snd_card_next(&card) < 0 || card < 0)
+			break;
+		int mode = card_output_mode(card, control, -1);
+		if (mode >= 0)
+			return mode;
+	}
+	return -1;
+}
+
+int alsa_set_output(int requested_card, const char *control, int mode) {
+	if (mode != 0 && mode != 1)
+		return -1;
+	if (requested_card >= 0)
+		return card_output_mode(requested_card, control, mode) < 0 ? -1 : 0;
+	int card = -1;
+	for (int scanned = 0; scanned < 32; ++scanned) {
+		if (snd_card_next(&card) < 0 || card < 0)
+			break;
+		if (card_output_mode(card, control, mode) >= 0)
+			return 0;
+	}
+	return -1;
 }

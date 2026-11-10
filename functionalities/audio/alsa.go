@@ -8,6 +8,10 @@ extern void alsa_emit_error(const char *msg);
 extern void *alsa_player_open(unsigned int sample_rate, int channels);
 extern int alsa_player_send(void *handle, const void *data, size_t bytes);
 extern void alsa_player_close(void *handle);
+// Selector inspection uses a separate read-only control handle, never PCM.
+extern int alsa_selected_output(int card, const char *control);
+extern int alsa_set_output(int card, const char *control, int mode);
+extern int alsa_output_label(const char *label);
 */
 import "C"
 
@@ -16,6 +20,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -100,4 +106,59 @@ func alsaEmitError(message string) {
 	c := C.CString(message)
 	defer C.free(unsafe.Pointer(c))
 	C.alsa_emit_error(c)
+}
+
+// SelectedOutput reads the ALSA output selector without opening a playback
+// stream or changing mixer/device state. Mode 0 is the speaker, 1 the earphone
+// outlet. Unknown/inaccessible controls never imply that a speaker is selected.
+// Enumerated speaker/earphone controls are discovered automatically. A named
+// binary selector can be supplied through ST_GO_AUDIO_OUTPUT_CONTROL (and an
+// optional numeric ST_GO_AUDIO_OUTPUT_CARD); its values must be 0/1.
+func SelectedOutput() (mode int, known bool) {
+	card, name, ok := outputSelector()
+	if !ok {
+		return 0, false
+	}
+	control := C.CString(name)
+	defer C.free(unsafe.Pointer(control))
+	mode = int(C.alsa_selected_output(C.int(card), control))
+	return mode, mode == 0 || mode == 1
+}
+
+// SetOutput selects speaker (0) or earphone (1) through the same mixer
+// selector used by SelectedOutput. It opens the ALSA control read/write only
+// for this click and does not open or reconfigure a PCM stream.
+func SetOutput(mode int) bool {
+	if mode != 0 && mode != 1 {
+		return false
+	}
+	card, name, ok := outputSelector()
+	if !ok {
+		return false
+	}
+	control := C.CString(name)
+	defer C.free(unsafe.Pointer(control))
+	return C.alsa_set_output(C.int(card), control, C.int(mode)) == 0
+}
+
+func outputSelector() (card int, name string, ok bool) {
+	card = -1
+	if value := os.Getenv("ST_GO_AUDIO_OUTPUT_CARD"); value != "" {
+		var err error
+		card, err = strconv.Atoi(value)
+		if err != nil || card < 0 || card > 31 {
+			return 0, "", false
+		}
+	}
+	name = os.Getenv("ST_GO_AUDIO_OUTPUT_CONTROL")
+	if len(name) > 43 || strings.IndexByte(name, 0) >= 0 {
+		return 0, "", false
+	}
+	return card, name, true
+}
+
+func alsaOutputLabel(label string) int {
+	c := C.CString(label)
+	defer C.free(unsafe.Pointer(c))
+	return int(C.alsa_output_label(c))
 }

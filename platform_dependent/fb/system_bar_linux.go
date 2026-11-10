@@ -3,7 +3,6 @@
 package fb
 
 import (
-	"fmt"
 	"image"
 	"io"
 	"os"
@@ -13,6 +12,13 @@ import (
 	"time"
 
 	"st-go/platform_neutral/api"
+)
+
+const (
+	systemBarBatteryIcon  = byte(0x80)
+	systemBarSpeakerIcon  = byte(0x81)
+	systemBarEarphoneIcon = byte(0x82)
+	systemBarAudioIcon    = byte(0x83)
 )
 
 const (
@@ -32,10 +38,14 @@ type systemBar struct {
 	textLeft        int
 	pixels          []uint32
 	widget          api.Widget
+	audioOutput     func() (mode int, known bool)
+	setAudioOutput  func(mode int) bool
+	audioLeft       int
 }
 
 // AttachWidgets gives the passive bar the same identity, local buffer, and
-// lifetime boundary as a terminal without changing its legacy overlay layout.
+// lifetime boundary as a terminal. Optional policies can share its bottom band
+// through WindowBarLayout without changing the initial full-terminal layout.
 func (d *Driver) AttachWidgets(container api.WidgetContainer) {
 	d.mu.Lock()
 	b := d.systemBar
@@ -46,10 +56,15 @@ func (d *Driver) AttachWidgets(container api.WidgetContainer) {
 	bounds := b.bounds
 	pixels := append([]uint32(nil), b.pixels...)
 	d.mu.Unlock()
-	widget, err := container.NewWidget(api.WidgetOptions{Kind: api.BarWidget, Bounds: bounds, PointerTransparent: true})
+	widget, err := container.NewWidget(api.WidgetOptions{Kind: api.BarWidget, Bounds: bounds, Passive: true})
 	if err != nil {
 		return
 	}
+	widget.Bind(api.Callbacks{PointerPress: func(button byte, _ uint16, x, y int) {
+		if button == 1 {
+			d.systemBarClick(x, y)
+		}
+	}})
 	d.mu.Lock()
 	b.widget = widget
 	d.mu.Unlock()
@@ -66,9 +81,25 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 		return
 	}
 	root := b.powerSupplyPath
+	output := b.audioOutput
 	d.mu.Unlock()
 
 	text := systemBarText(now, root)
+	audioLeft := -1
+	if output != nil {
+		mode, known := output()
+		switch {
+		case !known || mode != 0 && mode != 1:
+			audioLeft = len(text)
+			text += string([]byte{' ', ' ', systemBarAudioIcon})
+		case mode == 1:
+			audioLeft = len(text)
+			text += string([]byte{' ', ' ', systemBarEarphoneIcon})
+		default:
+			audioLeft = len(text)
+			text += string([]byte{' ', ' ', systemBarSpeakerIcon})
+		}
+	}
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()
@@ -83,9 +114,13 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	b.text = text
 	width := 2*systemBarPadding + len(text)*systemBarFontCellWidth
 	l := d.screen.layout
-	b.bounds = image.Rect(max(0, l.width-width), 0, l.width, min(l.height, 2*systemBarPadding+systemBarFontCellHeight))
-	// Keep the right edge (including battery) visible even on a narrow display.
+	b.bounds = image.Rect(max(0, l.width-width), max(0, l.height-2*systemBarPadding-systemBarFontCellHeight), l.width, l.height)
+	// Keep the right edge (including audio output) visible on a narrow display.
 	b.textLeft = l.width - width + systemBarPadding
+	b.audioLeft = -1
+	if audioLeft >= 0 {
+		b.audioLeft = b.textLeft + audioLeft*systemBarFontCellWidth
+	}
 	b.pixels = make([]uint32, b.bounds.Dx()*b.bounds.Dy())
 	for y := b.bounds.Min.Y; y < b.bounds.Max.Y; y++ {
 		for x := b.bounds.Min.X; x < b.bounds.Max.X; x++ {
@@ -111,9 +146,33 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 func systemBarText(now time.Time, powerSupplyPath string) string {
 	text := now.Format("2006-01-02 15:04:05")
 	if percent, ok := batteryPercentage(powerSupplyPath); ok {
-		text += fmt.Sprintf("  BAT %d%%", percent)
+		text += "  " + string([]byte{systemBarBatteryIcon}) + " " + strconv.Itoa(percent) + "%"
 	}
 	return text
+}
+
+func (d *Driver) systemBarClick(x, y int) {
+	d.mu.Lock()
+	b := d.systemBar
+	if d.closed || b == nil || b.audioOutput == nil || b.audioLeft < 0 ||
+		!image.Pt(x+b.bounds.Min.X, y+b.bounds.Min.Y).In(b.bounds) || x+b.bounds.Min.X < b.audioLeft {
+		d.mu.Unlock()
+		return
+	}
+	set := b.setAudioOutput
+	current, known := b.audioOutput()
+	d.mu.Unlock()
+	if set == nil || !known || (current != 0 && current != 1) {
+		return
+	}
+	if !set(1 - current) {
+		return
+	}
+	// The input callback runs in the native event serialization domain. Defer
+	// the repaint to the normal loop so widget callbacks cannot re-enter it.
+	d.mu.Lock()
+	b.nextRefresh = time.Time{}
+	d.mu.Unlock()
 }
 
 // Use the first readable, present system battery in stable name order. Supply
@@ -158,13 +217,16 @@ func (b *systemBar) pixel(x, y int) (uint32, bool) {
 	if b == nil || !image.Pt(x, y).In(b.bounds) {
 		return 0, false
 	}
-	x, y = x-b.textLeft, y-systemBarPadding
+	x, y = x-b.textLeft, y-b.bounds.Min.Y-systemBarPadding
 	if x >= 0 && y >= 0 && y < systemBarFontCellHeight {
 		at, col := x/systemBarFontCellWidth, x%systemBarFontCellWidth
 		if at < len(b.text) {
 			ch := b.text[at]
 			if ch < 128 && systemBarGlyphs[ch] != nil {
 				return systemBarGlyphs[ch][y*systemBarFontCellWidth+col], true
+			}
+			if glyph := systemBarIcons[ch]; glyph != nil {
+				return glyph[y*systemBarFontCellWidth+col], true
 			}
 		}
 	}

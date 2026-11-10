@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+	"st-go/audio"
 	"st-go/limits"
 	"st-go/platform_neutral/api"
 )
@@ -101,7 +102,7 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("fb %s: %w", o.Device, err)
 	}
-	d := &Driver{window: window, screen: f, pointer: image.Pt(f.layout.width/2, f.layout.height/2), systemBar: &systemBar{powerSupplyPath: "/sys/class/power_supply"}, done: make(chan struct{}), signals: make(chan os.Signal, 16), clipboard: make(map[byte]string), mousePaths: o.Mouse, grabMouse: o.GrabMouse}
+	d := &Driver{window: window, screen: f, pointer: image.Pt(f.layout.width/2, f.layout.height/2), systemBar: &systemBar{powerSupplyPath: "/sys/class/power_supply", audioOutput: audio.SelectedOutput, setAudioOutput: audio.SetOutput}, done: make(chan struct{}), signals: make(chan os.Signal, 16), clipboard: make(map[byte]string), mousePaths: o.Mouse, grabMouse: o.GrabMouse}
 	defer func() {
 		if err != nil {
 			d.cleanup()

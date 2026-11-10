@@ -99,6 +99,7 @@ func (w *Window) NewWidget(options api.WidgetOptions) (api.Widget, error) {
 			native.SetVisible(h.visible)
 		}
 	}
+	h.notifyBarLayout()
 	if _, ok := w.native.(api.NativeVideoHost); ok {
 		return &videoHost{Host: h}, nil
 	}

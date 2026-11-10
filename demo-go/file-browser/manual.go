@@ -92,9 +92,9 @@ MOUSE
 
 HINTS
   With the default opener, .pdf uses zat and text/source/config files use govim
-  when available in PATH. Supported st-go hosts open them in detached
-  background tabs; the first open creates the tab bar and keeps this browser
-  in tab 1. Click the bar or use Ctrl+Shift+PageUp/PageDown to switch tabs.
+  when available in PATH. Supported st-go hosts open them in new focused
+  tabs after successful launch; the first open creates the tab bar and keeps
+  this browser in tab 1. Click the bar or use Ctrl+Shift+PageUp/PageDown to return.
   Middle-click a tab or Ctrl+Shift+W closes it. Without tab support (or with
   st-go -no-tabs / -tabs=false), tools run in this terminal; exit to return
   to the same browser location on every backend. Custom openers and audio/video

@@ -16,6 +16,49 @@ import (
 
 var systemBarGlyphs = loadSystemBarGlyphs()
 
+// These small monochrome symbols are deliberately stored as cell patterns,
+// rather than relying on a font's private-use glyph coverage. They therefore
+// remain available on every framebuffer image and cannot degrade to '?'.
+var systemBarIcons = loadSystemBarIcons()
+
+var systemBarIconPatterns = map[byte][]string{
+	systemBarBatteryIcon: {
+		"  #####  ", " ######## ", "##      #", "## #### #", "## #### #", "## #### #", "## #### #", "##      #", " ######## ", "  #####  ",
+	},
+	systemBarSpeakerIcon: {
+		"    ##   ", "   ###   ", "  ####   ", "######## ", "######## ", "  ####   ", "   ###   ", "    ##   ", "  ##  ## ", " ##    ##",
+	},
+	systemBarEarphoneIcon: {
+		"  ##  ## ", " ##    ##", "##      #", "##      #", "##      #", "##      #", " ##    ##", "  ###### ", "    ##   ", "    ##   ",
+	},
+	systemBarAudioIcon: {
+		"   ####  ", "  ##  ## ", " ##    ##", "##      #", "##      #", " ##    ##", "  ##  ## ", "   ####  ", "    ##   ", "    ##   ",
+	},
+}
+
+func loadSystemBarIcons() map[byte][]uint32 {
+	icons := make(map[byte][]uint32, len(systemBarIconPatterns))
+	for kind, pattern := range systemBarIconPatterns {
+		glyph := make([]uint32, systemBarFontCellWidth*systemBarFontCellHeight)
+		for i := range glyph {
+			glyph[i] = systemBarBackground
+		}
+		for y, row := range pattern {
+			if y >= systemBarFontCellHeight {
+				break
+			}
+			for x, pixel := range row {
+				if pixel != '#' || x >= systemBarFontCellWidth {
+					continue
+				}
+				glyph[y*systemBarFontCellWidth+x] = systemBarForeground
+			}
+		}
+		icons[kind] = glyph
+	}
+	return icons
+}
+
 func loadSystemBarGlyphs() [128][]uint32 {
 	packed, err := base64.StdEncoding.DecodeString(systemBarFontAlphaBase64)
 	if err != nil {

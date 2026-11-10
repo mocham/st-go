@@ -16,7 +16,8 @@ type WidgetOptions struct {
 	Kind               WidgetKind
 	Bounds             image.Rectangle // window pixels; widget APIs use local pixels.
 	AutoResize         bool            // follow the native client size.
-	PointerTransparent bool            // preserve passive status-bar behavior.
+	PointerTransparent bool            // clicks pass through this widget.
+	Passive            bool            // reserve layout space for this bar; it may still handle input
 	Hidden             bool            // start without presenting or receiving input.
 }
 
@@ -68,7 +69,8 @@ type WidgetSurfaceHost interface {
 type WidgetAttacher interface{ AttachWidgets(WidgetContainer) }
 
 // WindowHooks run in the native event domain, outside widget callback locks.
-// Policies can consume window shortcuts and lay out widgets after native resize.
+// Policies can consume window shortcuts and lay out widgets after native resize
+// or a passive bar's layout changes.
 type WindowHooks struct {
 	Resize   func(width, height int)
 	KeyPress func(key uint, modifiers uint16) bool
@@ -80,6 +82,13 @@ type WidgetWindow interface {
 	SetAutoResize(bool)
 	PostWindow(func()) bool
 	RunWindow()
+}
+
+// WindowBarLayout exposes visible, pointer-transparent bar rectangles in window
+// pixels. Optional layout policies can share their bottom band with native
+// status widgets without depending on a backend or covering its controls.
+type WindowBarLayout interface {
+	PassiveBarBounds() []image.Rectangle
 }
 
 // WidgetSurfaceFactory avoids mapping even a blank surface for a background

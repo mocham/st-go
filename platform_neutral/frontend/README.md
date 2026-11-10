@@ -37,11 +37,21 @@ the optional `terminal_tabs` build tag. `-no-tabs` or `-tabs=false` disables
 requests and removes the advertised capability; `make TABS=0 st st-web st-fb`
 omits the implementation entirely. Switching `TABS` rebuilds existing binaries.
 
-The Go file browser's default govim/zat openers request a **detached background
-tab**. The first successful request creates a bottom tab bar, keeps the original
-terminal in tab 1, and appends the new PTY as the last tab without stealing focus.
-The framebuffer's top-right system bar is unchanged. Failed exec leaves the
-original layout intact. Once initialized, the tab bar stays even with one tab.
+The Go file browser's default govim/zat openers request a **new focused tab**.
+The first successful request creates a bottom tab bar, keeps the original
+terminal in tab 1, and appends/selects the new PTY as the last tab. The browser
+keeps its own PTY; switching back restores its location and preview. Other
+clients can still request background tabs with `detached:true`. Failed exec
+leaves the original layout and focus intact. Once initialized, the tab bar stays
+even with one tab.
+
+Tab labels have a fixed **20-cell width**, rather than stretching across the
+window. Long titles are clipped, and overflow keeps the active tab visible.
+On framebuffer, the bottom band shares space with the bottom-right system bar:
+tabs stop before its left edge, and the band is tall enough for its Monaco text.
+Battery/audio indicator changes automatically update that reservation. A window
+too narrow to fit any tab beside the system bar rejects the initial request,
+allowing the browser's existing same-terminal fallback.
 
 - Click a tab to select it; wheel over the bar or **Ctrl+Shift+PageUp/PageDown**
   switches tabs. Middle-click a tab or **Ctrl+Shift+W** closes it.

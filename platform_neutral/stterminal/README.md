@@ -99,12 +99,12 @@ to the old opener even if environment metadata was stale, since it cannot have
 started a process. The browser uses a fresh request ID for the subsequent spawn.
 
 ```json
-{"command":["/path/to/govim","/path/to/note.txt"],"directory":"/path/to","title":"note.txt","detached":true}
+{"command":["/path/to/govim","/path/to/note.txt"],"directory":"/path/to","title":"note.txt","detached":false}
 ```
 
 The first successful spawn moves the existing terminal into tab 1 and appends
 the new terminal to the last tab. `detached:true` leaves focus on the current tab;
-false selects the new tab. No tab UI appears on a failed spawn. The child gets
+false selects the new tab (the Go browser's default). No tab UI appears on a failed spawn. The child gets
 its own PTY/core, private media state, and fresh capabilities. Optional
 `copy_file:N` copies the regular file at argv index N into terminal-owned private
 storage and substitutes its path before exec. This lets archive clients clean

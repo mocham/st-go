@@ -212,6 +212,34 @@ func (h *Host) WindowBounds() image.Rectangle {
 	return image.Rect(0, 0, h.window.width, h.window.height)
 }
 
+func (h *Host) PassiveBarBounds() []image.Rectangle {
+	w := h.window
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var bounds []image.Rectangle
+	for _, bar := range w.widgets {
+		if bar.options.Kind == api.BarWidget && bar.options.Passive && bar.visible && !bar.closed {
+			bounds = append(bounds, bar.options.Bounds)
+		}
+	}
+	return bounds
+}
+
+func (h *Host) notifyBarLayout() {
+	if h.options.Kind != api.BarWidget || !h.options.Passive {
+		return
+	}
+	w := h.window
+	w.post(func() {
+		w.mu.Lock()
+		resize, width, height := w.hooks.Resize, w.width, w.height
+		w.mu.Unlock()
+		if resize != nil {
+			resize(width, height)
+		}
+	})
+}
+
 func (h *Host) Upload(pixels []uint32, stride, x, y, width, height int) {
 	w := h.window
 	w.paintMu.Lock()
@@ -313,6 +341,7 @@ func (h *Host) Close() {
 			w.close()
 		}
 		close(h.done)
+		h.notifyBarLayout()
 	})
 }
 

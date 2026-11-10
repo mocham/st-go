@@ -43,11 +43,11 @@ func browserTabRequest(t *testing.T, f *fbTest) (string, api.TabSpawnRequest) {
 			return true
 		}
 		return false
-	}, "detached tab request")
+	}, "focused tab request")
 	return id, request
 }
 
-func TestBrowserRequestsDetachedTabAndKeepsItsInput(t *testing.T) {
+func TestBrowserRequestsFocusedTabAndKeepsItsPTY(t *testing.T) {
 	for _, backend := range []string{"x11", "fb", "web"} {
 		t.Run(backend, func(t *testing.T) {
 			dir, tools := t.TempDir(), documentToolTestPath(t)
@@ -60,7 +60,7 @@ func TestBrowserRequestsDetachedTabAndKeepsItsInput(t *testing.T) {
 			before := len(f.output())
 			f.send("\x1b[B\r")
 			id, request := browserTabRequest(t, f)
-			if !request.Detached || request.Directory != dir || len(request.Command) != 2 || request.Command[0] != filepath.Join(tools, "govim") || request.Command[1] != filepath.Join(dir, name) {
+			if request.Detached || request.Directory != dir || len(request.Command) != 2 || request.Command[0] != filepath.Join(tools, "govim") || request.Command[1] != filepath.Join(dir, name) {
 				t.Fatal("incorrect literal request", request)
 			}
 			if strings.Contains(f.output()[before:], "\x1b[?1049l") || strings.Contains(f.output()[before:], "place bottom-left") {
@@ -74,7 +74,7 @@ func TestBrowserRequestsDetachedTabAndKeepsItsInput(t *testing.T) {
 			// Unknown/late replies in modal path entry are drained, not typed into it.
 			f.send("/")
 			f.send("\x1bPtab-spawn " + id + " accepted 3\x1b\\\x03r")
-			waitContains(t, f, "Refreshed", "browser input after detached spawn")
+			waitContains(t, f, "Refreshed", "browser input after focused spawn")
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
 				t.Fatal("accepted request fell back locally")
 			}

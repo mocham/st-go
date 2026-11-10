@@ -175,9 +175,9 @@ func TestTabsInitializeLazilyAppendDetachedAndKeepIndependentPTYs(t *testing.T) 
 func TestFailedTabSpawnDoesNotInitializeOrResize(t *testing.T) {
 	root, m, replies := tabTestTerminal(t)
 	bounds := root.Widget().Bounds()
-	id := spawnTestTab(t, root, api.TabSpawnRequest{Command: []string{"/nonexistent/st-go-tab-test"}, Directory: t.TempDir(), Detached: true})
+	id := spawnTestTab(t, root, api.TabSpawnRequest{Command: []string{"/nonexistent/st-go-tab-test"}, Directory: t.TempDir(), Detached: false})
 	tabWindow(t, m, func() {
-		if m.bar != nil || len(m.entries) != 1 || root.Widget().Bounds() != bounds {
+		if m.bar != nil || len(m.entries) != 1 || root.Widget().Bounds() != bounds || m.active != 0 || !root.Widget().Visible() {
 			t.Error("failed spawn initialized tabs")
 		}
 	})
@@ -186,6 +186,84 @@ func TestFailedTabSpawnDoesNotInitializeOrResize(t *testing.T) {
 	if !strings.Contains(replies.String(), "tab-spawn "+id+" error ") {
 		t.Fatal("failed exec was not rejected", replies.String())
 	}
+}
+
+func TestTabsFocusSuccessfulLaunchAndKeepFixedWidthLabels(t *testing.T) {
+	root, m, _ := tabTestTerminal(t)
+	request := api.TabSpawnRequest{Command: []string{"/bin/bash", "-c", "IFS= read -r key"}, Directory: t.TempDir(), Title: "document"}
+	spawnTestTab(t, root, request)
+	tabWindow(t, m, func() {
+		if m.active != 1 || root.Widget().Visible() || !m.entries[1].widget.Visible() {
+			t.Error("successful launch did not select its new PTY")
+		}
+		m.resize(500, 100)
+		width := terminalTabWidthCells * m.renderer.cw
+		if len(m.hits) != 2 || m.hits[0].right != width || m.hits[1].left != width || m.hits[1].right != 2*width {
+			t.Error("tab labels stretched to fill the window", m.hits)
+		}
+	})
+	spawnTestTab(t, root, request)
+	tabWindow(t, m, func() {
+		m.resize(500, 100)
+		width := terminalTabWidthCells * m.renderer.cw
+		if m.active != 2 || len(m.hits) != 3 {
+			t.Error("new tab not appended and selected", m.active, m.hits)
+			return
+		}
+		for i, hit := range m.hits {
+			if hit.left != i*width || hit.right != (i+1)*width {
+				t.Error("appending a tab changed previous tab widths", m.hits)
+			}
+		}
+		m.resize(50, 50)
+		if len(m.hits) != 1 || m.hits[0].index != m.active || m.hits[0].right > 50 {
+			t.Error("narrow bar lost or overflowed the active tab", m.hits)
+		}
+		m.resize(500, 100)
+		m.click(1, 499)
+		if m.active != 2 {
+			t.Error("unused bar space selected a nonexistent tab")
+		}
+		m.click(4, 499)
+		if m.active != 1 {
+			t.Error("wheel navigation ignored unused bar space")
+		}
+	})
+}
+
+func TestTabsShareBottomBandWithPassiveSystemBar(t *testing.T) {
+	root, m, _ := tabTestTerminal(t)
+	var passive api.Widget
+	tabWindow(t, m, func() {
+		bounds := m.control.WindowBounds()
+		var err error
+		passive, err = m.container.NewWidget(api.WidgetOptions{Kind: api.BarWidget, Bounds: image.Rect(bounds.Dx()-60, bounds.Dy()-24, bounds.Dx(), bounds.Dy()), Passive: true})
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	if passive == nil {
+		t.Fatal("passive bar creation failed")
+	}
+	spawnTestTab(t, root, api.TabSpawnRequest{Command: []string{"/bin/bash", "-c", "IFS= read -r key"}, Directory: t.TempDir()})
+	check := func() {
+		t.Helper()
+		if m.bar.Bounds().Overlaps(passive.Bounds()) || m.bar.Bounds().Max.X != passive.Bounds().Min.X || m.bar.Bounds().Min.Y != passive.Bounds().Min.Y {
+			t.Error("tabs did not share the system bar's band", m.bar.Bounds(), passive.Bounds())
+		}
+		if m.entries[m.active].widget.Bounds().Max.Y != m.bar.Bounds().Min.Y {
+			t.Error("terminal content overlaps bottom chrome")
+		}
+	}
+	tabWindow(t, m, check)
+	tabWindow(t, m, func() { b := passive.Bounds(); b.Min.X -= 20; passive.SetBounds(b) })
+	tabWindow(t, m, check) // the passive bar change must relayout in the event domain.
+	tabWindow(t, m, func() { passive.SetVisible(false) })
+	tabWindow(t, m, func() {
+		if m.bar.Bounds().Max.X != m.control.WindowBounds().Dx() || m.bar.Bounds().Dy() != m.renderer.ch+4 {
+			t.Error("hidden system bar still reserved tab space", m.bar.Bounds())
+		}
+	})
 }
 
 func TestTabTemporaryFileHandoffAndSynchronizedActivation(t *testing.T) {

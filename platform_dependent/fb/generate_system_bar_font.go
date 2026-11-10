@@ -34,7 +34,7 @@ import (
 
 const (
 	fontSize = 28
-	alphabet = " %-0123456789:ABT"
+	alphabet = " %?-0123456789:ABDEKPRSTU"
 )
 
 func main() {

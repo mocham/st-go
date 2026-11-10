@@ -46,6 +46,7 @@ func (h *Host) SetBounds(bounds image.Rectangle) {
 			c.Resize(bounds.Dx(), bounds.Dy())
 		}
 	})
+	h.notifyBarLayout()
 }
 
 func (h *Host) SetVisible(visible bool) {
@@ -110,6 +111,7 @@ func (h *Host) SetVisible(visible bool) {
 			}
 		})
 	}
+	h.notifyBarLayout()
 }
 
 func (h *Host) FocusWidget() {

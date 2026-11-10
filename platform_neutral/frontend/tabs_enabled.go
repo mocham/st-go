@@ -19,6 +19,7 @@ import (
 
 const tabsCompiled = true
 const maxTerminalTabs = 8
+const terminalTabWidthCells = 20
 const tabRasterBudget = 256 << 20 // aggregate working + committed terminal rasters
 
 type terminalTab struct {
@@ -239,8 +240,17 @@ func (m *terminalTabs) createTab(origin *Terminal, request api.TabSpawnRequest) 
 }
 
 func (m *terminalTabs) rectangles(width, height int) (image.Rectangle, image.Rectangle) {
-	barHeight := min(m.renderer.ch+4, max(0, height-1))
-	return image.Rect(0, 0, width, height-barHeight), image.Rect(0, height-barHeight, width, height)
+	barHeight, barWidth := m.renderer.ch+4, width
+	if layout, ok := m.control.(api.WindowBarLayout); ok {
+		for _, passive := range layout.PassiveBarBounds() {
+			if passive.Max == image.Pt(width, height) {
+				barHeight = max(barHeight, passive.Dy())
+				barWidth = min(barWidth, max(0, passive.Min.X))
+			}
+		}
+	}
+	barHeight = min(barHeight, max(0, height-1))
+	return image.Rect(0, 0, width, height-barHeight), image.Rect(0, height-barHeight, barWidth, height)
 }
 
 func (m *terminalTabs) resize(width, height int) {
@@ -263,6 +273,7 @@ func (m *terminalTabs) resize(width, height int) {
 	}
 	if bar.Empty() {
 		m.bar.SetVisible(false)
+		m.hits = nil
 		return
 	}
 	m.bar.SetBounds(bar)
@@ -308,6 +319,19 @@ func (m *terminalTabs) keyPress(key uint, mods uint16) bool {
 }
 
 func (m *terminalTabs) click(button byte, x int) {
+	if len(m.entries) == 0 {
+		return
+	}
+	// Fixed-width tabs leave unused bar space; wheel navigation still works
+	// over that space, but clicks must never select/close an invisible label.
+	switch button {
+	case 4:
+		m.selectTab((m.active + len(m.entries) - 1) % len(m.entries))
+		return
+	case 5:
+		m.selectTab((m.active + 1) % len(m.entries))
+		return
+	}
 	for _, hit := range m.hits {
 		if x < hit.left || x >= hit.right {
 			continue
@@ -317,10 +341,6 @@ func (m *terminalTabs) click(button byte, x int) {
 			m.selectTab(hit.index)
 		case 2:
 			m.entries[hit.index].terminal.closeSession()
-		case 4:
-			m.selectTab((m.active + len(m.entries) - 1) % len(m.entries))
-		case 5:
-			m.selectTab((m.active + 1) % len(m.entries))
 		}
 		return
 	}
@@ -401,16 +421,18 @@ func (m *terminalTabs) paintBar() {
 	cell := max(1, m.renderer.cw)
 	available := w / cell
 	if available < 1 {
+		m.bar.Upload(pixels, w, 0, 0, w, h)
 		return
 	}
+	textY := max(0, (h-m.renderer.ch)/2)
 	count := len(m.entries)
 	start := 0
 	// Keep the active tab reachable even when the bar cannot show every label.
-	shown := min(count, max(1, available/8))
+	shown := min(count, max(1, available/terminalTabWidthCells))
 	if m.active >= shown {
 		start = m.active - shown + 1
 	}
-	width := max(1, available/shown)
+	width := terminalTabWidthCells
 	x := 0
 	for i := start; i < min(count, start+shown); i++ {
 		bg := uint32(0xff2d2b46)
@@ -426,17 +448,17 @@ func (m *terminalTabs) paintBar() {
 			}
 		}
 		label := strconv.Itoa(i+1) + " " + m.entries[i].title
-		label = tabLabel(label, max(1, width-1))
+		label = tabLabel(label, max(0, (end-x)/cell-1))
 		px := x
 		for _, ch := range label {
 			stride, glyph := m.renderer.glyphPixels(ch, fg, bg, term.CellWidth(ch) > 1)
 			if stride < 1 {
 				continue
 			}
-			for y := 0; y < min(m.renderer.ch, h-2); y++ {
+			for y := 0; y < min(m.renderer.ch, h-textY); y++ {
 				n := min(stride, end-px)
 				if n > 0 {
-					copy(pixels[(y+2)*w+px:(y+2)*w+px+n], glyph[y*stride:y*stride+n])
+					copy(pixels[(y+textY)*w+px:(y+textY)*w+px+n], glyph[y*stride:y*stride+n])
 				}
 			}
 			px += stride
