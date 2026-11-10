@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"st-go/config"
+	"st-go/platform_neutral/api"
 )
 
 // ResolveShell mirrors st's execsh precedence:
@@ -65,7 +66,7 @@ func stChildEnv(cfg *config.Config) []string {
 	}
 
 	env := os.Environ()
-	drop := []string{"COLUMNS", "LINES", "TERMCAP", "ST_GO_EXECUTABLE", "ST_GO_GEOMETRY_TOKEN"}
+	drop := []string{"COLUMNS", "LINES", "TERMCAP", "ST_GO_EXECUTABLE", "ST_GO_GEOMETRY_TOKEN", "ST_GO_BACKEND", "ST_GO_NATIVE_VIDEO", "ST_GO_NATIVE_VIDEO_TOKEN"}
 	for _, icon := range iconEnv {
 		drop = append(drop, icon.name)
 	}
@@ -82,9 +83,25 @@ func stChildEnv(cfg *config.Config) []string {
 		"TERM="+cfg.Termname,
 		"ST_GO_EXECUTABLE="+runningExecutable(),
 		"ST_GO_GEOMETRY_TOKEN="+cfg.GeometryToken,
+		"ST_GO_NATIVE_VIDEO_TOKEN="+cfg.NativeVideoToken,
 	)
 	for _, icon := range iconEnv {
 		env = append(env, icon.name+"="+icon.value)
+	}
+	return env
+}
+
+func backendChildEnv(env []string, host api.Host) []string {
+	backend := "unknown"
+	if identity, ok := host.(api.BackendIdentity); ok {
+		switch name := identity.BackendName(); name {
+		case "x11", "fb", "web":
+			backend = name
+		}
+	}
+	env = append(envWithout(env, "ST_GO_BACKEND", "ST_GO_NATIVE_VIDEO"), "ST_GO_BACKEND="+backend)
+	if _, ok := host.(api.NativeVideoHost); ok {
+		env = append(env, "ST_GO_NATIVE_VIDEO=1")
 	}
 	return env
 }

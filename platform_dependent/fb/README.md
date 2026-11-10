@@ -98,6 +98,24 @@ the display, clear held input, release mouse grabs, and repaint retained output
 on return. A changed framebuffer layout on return closes safely rather than
 using stale geometry/mappings. Do not change modes with `fbset` while running.
 
+### Native video handoff
+
+The browser's authenticated `native-video` DCS request uses a narrow optional
+neutral API, not a client-owned X/VT connection or a general shell-exec channel.
+Only fixed mpv DRM/decoder options, regular media/config paths, the selected ALSA
+PCM and a bounded software-volume value are accepted. The host derives
+`/dev/ttyN` from the kernel-validated console number and checks foreground/active
+ownership again before handing it over.
+
+During playback st-fb stops console/evdev reads and scanout writes, releases grabs,
+restores translated keyboard/termios and `VT_AUTO`, and launches mpv with that
+real controlling VT and its own foreground group. mpv can install its VT switcher
+and manage DRM master while switching consoles. Exit, startup failure, stopped
+players and host shutdown all return through foreground/mode recovery. A changed
+fbdev mode fails closed; returning while another VT is active retains output
+without writing it, and repaint waits for reacquisition. Keyboard/mouse state is
+flushed/reset before resuming. No permissions are changed and no new VT is taken.
+
 SIGKILL, a native crash and power loss cannot guarantee restoration. Keep another
 console/SSH recovery path available when first testing hardware. To recover a
 stuck console, restore its keyboard mode with `kbd_mode -a -C /dev/ttyN` or

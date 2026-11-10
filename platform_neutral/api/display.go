@@ -76,6 +76,10 @@ type Host interface {
 }
 type OpenHost func(WindowOptions) (Host, error)
 
+// BackendIdentity supplies launch metadata, not native resources or operations.
+// Unknown hosts must not implicitly inherit an enclosing terminal's backend.
+type BackendIdentity interface{ BackendName() string }
+
 // GeometrySupport lets hosts without desktop window placement ignore geometry
 // requests without arming the terminal's click-to-restore interception.
 type GeometrySupport interface{ SupportsWindowGeometry() bool }

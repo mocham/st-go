@@ -118,6 +118,7 @@ func (d *Driver) URL() string {
 func (d *Driver) Bind(c api.Callbacks)          { d.callbacks = c }
 func (d *Driver) Show()                         { fmt.Printf("Web terminal: %s\n", d.URL()) }
 func (d *Driver) SetupKeys()                    {}
+func (d *Driver) BackendName() string           { return "web" }
 func (d *Driver) SetTitle(string)               {}
 func (d *Driver) SetIconTitle(string)           {}
 func (d *Driver) SupportsWindowGeometry() bool  { return false }

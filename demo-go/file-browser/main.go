@@ -14,14 +14,20 @@ func usage() {
 
 Options:
   -a, --hidden       include hidden entries
-  -o, --open CODE    run CODE on a file double-click or Enter
+  -o, --open CODE    legacy custom opener (X11 only)
+  --open-for PLATFORM CODE
+                    register an opener for x11, fb, web, or all (repeatable)
   -h, --help         show this help
 
 CODE is evaluated by ` + "`bash -c`" + ` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
 By default, .pdf opens in zat and text/source/config files in govim when available in PATH.
 These tools use this terminal; exiting returns to the browser. Otherwise the
-existing external opener is used. Explicit opener settings take precedence.
+external fallbacks are used on X11 only. Matching explicit openers take precedence.
+ST_FILE_BROWSER_OPEN_X11, _FB, _WEB, or _ALL register environment openers.
+Legacy ST_FILE_BROWSER_OPEN is X11-only. ST_GO_BACKEND identifies the terminal.
+Framebuffer video uses mpv --vo=drm with --audio-device=alsa/plughw:1,0 by default.
+There is no default X11/web video player; matching custom openers still override.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
 scroll, [ and ] change PDF or rendered document pages, / enters a path, : runs a shell command
@@ -54,11 +60,34 @@ func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool,
 				return showHidden, openCmd, customOpen, startDir, true, 2
 			}
 			i++
-			openCmd = args[i]
-			customOpen = true
+			if openPlatformMatches("x11") {
+				openCmd = args[i]
+				customOpen = true
+			}
 		case strings.HasPrefix(a, "--open="):
-			openCmd = strings.TrimPrefix(a, "--open=")
-			customOpen = true
+			if openPlatformMatches("x11") {
+				openCmd = strings.TrimPrefix(a, "--open=")
+				customOpen = true
+			}
+		case a == "--open-for" || strings.HasPrefix(a, "--open-for="):
+			platform := strings.TrimPrefix(a, "--open-for=")
+			if a == "--open-for" {
+				if i+2 >= len(args) {
+					fmt.Fprintln(os.Stderr, "file-browser: --open-for requires PLATFORM and shell code")
+					return showHidden, openCmd, customOpen, startDir, true, 2
+				}
+				i++
+				platform = args[i]
+			}
+			platform = strings.ToLower(platform)
+			if !validOpenPlatform(platform) || i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "file-browser: --open-for requires x11, fb, web, or all and shell code")
+				return showHidden, openCmd, customOpen, startDir, true, 2
+			}
+			i++
+			if openPlatformMatches(platform) {
+				openCmd, customOpen = args[i], true
+			}
 		case a == "-h" || a == "--help":
 			usage()
 			return showHidden, openCmd, customOpen, startDir, true, 0
@@ -87,6 +116,9 @@ func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool,
 }
 
 func run() int {
+	if len(os.Args) == 3 && os.Args[1] == "--native-video" {
+		return runNativeVideoHelper(os.Args[2])
+	}
 	showHidden, openCmd, customOpen, startDir, done, code := parseArgs(os.Args[1:])
 	if done {
 		return code

@@ -407,6 +407,8 @@ func (t *Driver) ClientSize() (width, height int, err error) {
 	return int(rep.Width), int(rep.Height), nil
 }
 
+func (t *Driver) BackendName() string { return "x11" }
+
 func (t *Driver) SetTitle(s string) {
 	if s == "" {
 		return

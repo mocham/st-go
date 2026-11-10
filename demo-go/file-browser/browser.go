@@ -203,7 +203,7 @@ case ${FILE,,} in
 esac`
 
 func defaultOpenCommand() (string, bool) {
-	if v, ok := os.LookupEnv("ST_FILE_BROWSER_OPEN"); ok {
+	if v, ok := registeredOpenCommand(); ok {
 		return v, true
 	}
 	return defaultOpenCmd, false
@@ -267,13 +267,10 @@ func (b *Browser) setup() {
 	b.geometryToken = os.Getenv("ST_GO_GEOMETRY_TOKEN")
 	b.dirLabel = b.dir
 	b.mp3Cache = map[string]mp3CacheEntry{}
-	// Materialize the embedded alsa.conf before any libasound call.
-	if b.cacheDir != "" {
-		_ = writeALSAConfig(b.cacheDir)
-	}
 	if b.cacheDir == "" {
 		b.cacheDir, _ = os.MkdirTemp("", "st-go-browser.")
 	}
+	// Do not override the working MP3 player's inherited/system ALSA config.
 	b.previewLink = filepath.Join(b.cacheDir, "content")
 	b.documentPreviewer = newPreviewDocumentRenderer(b.cacheDir)
 	b.geometryTag = fmt.Sprintf("file-browser-%d", os.Getpid())
@@ -1021,16 +1018,25 @@ func (b *Browser) openPath(path string, minimize int) {
 		b.status = "External opening is disabled"
 	} else {
 		if !b.customOpen {
+			if b.openDefaultVideo(path) {
+				return
+			}
 			if tool := terminalDocumentTool(path); tool != "" {
 				b.runTerminalTool(tool, path)
 				return
 			}
+			if backend := browserBackend(); backend != "x11" {
+				b.status = "No opener registered for backend " + backend
+				b.drawStatus()
+				b.flush()
+				return
+			}
 		}
-		if minimize != 0 {
+		if minimize != 0 && browserBackend() == "x11" {
 			b.windowDCS(fmt.Sprintf("place bottom-left 0px 0px 24%% 8%% restore %s", b.geometryTag))
 		}
 		cmd := exec.Command("bash", "-c", b.openCmd)
-		cmd.Env = append(os.Environ(), "FILE="+path, "NAME="+name, "BROWSER_DIR="+b.dir)
+		cmd.Env = append(os.Environ(), "FILE="+path, "NAME="+name, "BROWSER_DIR="+b.dir, "ST_GO_BACKEND="+browserBackend())
 		// nil Stdin/Stdout/Stderr map to /dev/null, matching the shell redirect.
 		_ = cmd.Start()
 		b.status = "Opened " + displayText(name)

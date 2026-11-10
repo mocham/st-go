@@ -73,6 +73,9 @@ type Driver struct {
 	lastScan                time.Time
 	buttonCounts            [12]int
 	mouseFailures           map[string]string
+	nativeJobs              chan nativeVideoJob
+	nativeBusy              bool
+	nativeOps               *nativeVideoOps
 }
 
 var _ api.Host = (*Driver)(nil)
@@ -145,6 +148,7 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 }
 
 func (d *Driver) Bind(c api.Callbacks)          { d.callbacks = c }
+func (d *Driver) BackendName() string           { return "fb" }
 func (d *Driver) SetupKeys()                    {}
 func (d *Driver) SetTitle(string)               {}
 func (d *Driver) SetIconTitle(string)           {}
@@ -266,6 +270,19 @@ func (d *Driver) Run() {
 				cb.Close()
 			}
 			cb.Unlock()
+			continue
+		default:
+		}
+		d.mu.Lock()
+		jobs := d.nativeJobs
+		d.mu.Unlock()
+		select {
+		case job := <-jobs:
+			err := d.runNativeVideo(job.request)
+			d.mu.Lock()
+			d.nativeBusy = false
+			d.mu.Unlock()
+			job.done(err)
 			continue
 		default:
 		}

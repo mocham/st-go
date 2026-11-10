@@ -29,6 +29,35 @@ func TestWriteALSAConfig(t *testing.T) {
 	}
 }
 
+func TestBrowserSetupPreservesWorkingALSAConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "provided-alsa.conf")
+	data := []byte("# supplied working config\n")
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, config := range []string{"", path} {
+		t.Run(config, func(t *testing.T) {
+			t.Setenv("ALSA_CONFIG_PATH", config)
+			b := &Browser{}
+			b.setup()
+			if b.cacheDir == "" {
+				t.Fatal("browser cache directory was not created")
+			}
+			t.Cleanup(func() { os.RemoveAll(b.cacheDir) })
+			if os.Getenv("ALSA_CONFIG_PATH") != config {
+				t.Fatal("browser replaced the MP3 player's ALSA config")
+			}
+			if _, err := os.Stat(filepath.Join(b.cacheDir, "alsa.conf")); !os.IsNotExist(err) {
+				t.Fatal("MP3 startup materialized an unexpected ALSA config")
+			}
+		})
+	}
+	actual, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(actual, data) {
+		t.Fatal("supplied ALSA config was overwritten", err)
+	}
+}
+
 // TestALSAErrorLogging verifies ALSA error messages (SNDERR) are written to
 // the log file under the cache dir instead of leaking onto the terminal.
 func TestALSAErrorLogging(t *testing.T) {
@@ -66,5 +95,14 @@ func TestOpenALSA(t *testing.T) {
 	defer p.close()
 	if err := p.send(make([]byte, 4096)); err != nil {
 		t.Fatalf("send: %v", err)
+	}
+}
+
+func TestVideoRespectsProvidedALSAConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "given.conf")
+	t.Setenv("ALSA_CONFIG_PATH", path)
+	got, err := videoALSAConfig(t.TempDir())
+	if err != nil || got != path || os.Getenv("ALSA_CONFIG_PATH") != path {
+		t.Fatal("video replaced the MP3 configuration", got, err)
 	}
 }

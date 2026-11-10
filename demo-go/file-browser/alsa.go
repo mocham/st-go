@@ -9,6 +9,7 @@ extern void alsa_emit_error(const char *msg);
 extern void *alsa_player_open(unsigned int sample_rate, int channels);
 extern int alsa_player_send(void *handle, const void *data, size_t bytes);
 extern void alsa_player_close(void *handle);
+extern const char *snd_config_topdir(void);
 */
 import "C"
 
@@ -23,11 +24,25 @@ import (
 //go:embed alsa.conf
 var alsaConfData []byte
 
-// alsaConfPath is where the embedded ALSA configuration is materialized so
-// the statically linked libasound can find it (no system alsa.conf exists for
-// a static binary). It lives under the browser's cache dir, which is removed
-// on exit.
+// alsaConfPath records an explicitly materialized embedded fallback. Normal
+// MP3 startup does not force it over inherited/system configuration.
 var alsaConfPath string
+
+// Video uses the same supplied/default config as MP3. The embedded fallback is
+// materialized only in the separate video helper, never over MP3's environment.
+func videoALSAConfig(cacheDir string) (string, error) {
+	if path := os.Getenv("ALSA_CONFIG_PATH"); path != "" {
+		return filepath.Abs(path)
+	}
+	path := filepath.Join(C.GoString(C.snd_config_topdir()), "alsa.conf")
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		return filepath.Abs(path)
+	}
+	if err := writeALSAConfig(cacheDir); err != nil {
+		return "", err
+	}
+	return alsaConfPath, nil
+}
 
 // writeALSAConfig materializes the embedded alsa.conf, points ALSA_CONFIG_PATH
 // at it, and installs the ALSA error logger (SNDERR -> alsa.log under the cache

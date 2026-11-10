@@ -93,7 +93,7 @@ func editorTextFile(path string) bool {
 
 // The browser must stop reading the PTY while a document tool owns it. Leave
 // the alternate screen rather than nesting it: zat and govim use it themselves.
-func (b *Browser) runTerminalTool(tool, path string) {
+func (b *Browser) runTerminalTool(tool, path string, options ...string) {
 	selected := ""
 	if b.idx >= 0 && b.idx < len(b.files) {
 		selected = b.files[b.idx]
@@ -104,7 +104,7 @@ func (b *Browser) runTerminalTool(tool, path string) {
 	if savedTermios != nil {
 		_ = unix.IoctlSetTermios(b.fd, unix.TCSETS, savedTermios)
 	}
-	cmd := exec.Command(tool, path)
+	cmd := exec.Command(tool, append(options, path)...)
 	cmd.Dir = b.dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := cmd.Start()
@@ -159,9 +159,13 @@ func (b *Browser) runTerminalTool(tool, path string) {
 			break
 		}
 	}
-	b.status = filepath.Base(tool) + " finished"
+	label := filepath.Base(tool)
+	if len(options) > 0 && options[0] == "--native-video" {
+		label = "mpv"
+	}
+	b.status = label + " finished"
 	if err != nil {
-		b.status = filepath.Base(tool) + ": " + displayText(err.Error())
+		b.status = label + ": " + displayText(err.Error())
 	}
 	b.renderAll()
 }

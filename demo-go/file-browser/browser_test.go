@@ -188,7 +188,11 @@ func lastHeaderPath(s string) string {
 
 // testEnv returns the browser environment with extra vars appended.
 func testEnv(extra ...string) []string {
-	return append(os.Environ(), extra...)
+	env := os.Environ()
+	for _, name := range []string{"ST_GO_BACKEND", "ST_GO_NATIVE_VIDEO", "ST_GO_NATIVE_VIDEO_TOKEN", "ST_FILE_BROWSER_OPEN_X11", "ST_FILE_BROWSER_OPEN_FB", "ST_FILE_BROWSER_OPEN_WEB", "ST_FILE_BROWSER_OPEN_ALL"} {
+		env = envWithout(env, name)
+	}
+	return append(append(env, "ST_GO_BACKEND=x11"), extra...)
 }
 
 func writeFiles(t *testing.T, dir string, names ...string) {

@@ -91,12 +91,18 @@ MOUSE
 HINTS
   With the default opener, .pdf uses zat and text/source/config files use govim
   when available in PATH. They run in this terminal; exit the tool
-  to return to the same browser location. Otherwise the existing
-  external opener is used. --open and ST_FILE_BROWSER_OPEN override
-  this dispatch (an empty value disables opening).
+  to return to the same browser location on every backend. Desktop
+  fallbacks are X11-only. Register custom code with --open-for PLATFORM CODE
+  or ST_FILE_BROWSER_OPEN_X11 / _FB / _WEB / _ALL. Matching empty values
+  disable opening. Legacy --open and ST_FILE_BROWSER_OPEN are X11-only.
+  Framebuffer videos hand the real VT to mpv --vo=drm via the native helper.
+  Video defaults to alsa/plughw:1,0; ALSA_PCM_CARD / ALSA_PCM_DEVICE
+  override video. ST_FILE_BROWSER_VOLUME sets mpv's volume (default 33, 0..100).
+  MP3's working PCM output/config and global mixer levels are left unchanged.
+  X11/web have no default video player. Custom platform handlers still win.
   Double-clicking an externally opened file collapses the terminal
   to a bottom strip; clicking the strip restores it. Filenames are sanitized before
   drawing, so names with spaces, quotes, or control characters are
-  handled safely. Override openers and icons with --open,
+  handled safely. Override openers and icons with --open-for,
   ST_FILE_BROWSER_OPEN, ST_FILE_BROWSER_ICON_*, and the terminal
   config file_browser section.`

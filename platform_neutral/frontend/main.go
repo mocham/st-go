@@ -213,6 +213,9 @@ func main() {
 		log.Fatalf("display: %v", err)
 	}
 	defer t.Close()
+	if _, ok := t.host.(api.NativeVideoHost); ok {
+		cfg.NativeVideoToken = newGeometryToken()
+	}
 	t.loadInputConfig(cfg)
 	if vimMode {
 		t.lockTitle = true
@@ -273,6 +276,7 @@ func main() {
 		}
 		cmdline = []string{prog}
 	}
+	env = backendChildEnv(env, t.host)
 	if childDir != "" {
 		env = append(envWithout(env, "PWD"), "PWD="+childDir)
 	}

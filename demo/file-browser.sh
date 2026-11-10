@@ -2,7 +2,7 @@
 # A pane-based file browser for st-go's built-in text, image, and PDF display.
 #
 # Usage:
-#   file-browser.sh [--hidden] [--open SHELL_CODE] [directory]
+#   file-browser.sh [--hidden] [--open-for PLATFORM SHELL_CODE] [directory]
 #
 # SHELL_CODE is run by `bash -c` with FILE, NAME, and BROWSER_DIR exported.
 # This permits functions and command sequences, for example:
@@ -10,12 +10,14 @@
 
 set -u
 
-if [[ -v ST_FILE_BROWSER_OPEN ]]; then
-	OPEN_CMD=$ST_FILE_BROWSER_OPEN
-	CUSTOM_OPEN=1
-else
-	CUSTOM_OPEN=0
-	OPEN_CMD='
+BACKEND=${ST_GO_BACKEND:-unknown}
+BACKEND=${BACKEND,,}
+case $BACKEND in
+	x11|fb|web) ;;
+	*) BACKEND=unknown ;;
+esac
+CUSTOM_OPEN=0
+OPEN_CMD='
 editor=${ST_GO_EXECUTABLE:-st}
 case ${FILE,,} in
   *.txt|*.md|*.markdown|*.html|*.htm|*.css|*.tex|*.bib|*.bbl|*.py|*.c|*.h|*.cc|*.cpp|*.cxx|*.go|*.rs|*.java|*.js|*.jsx|*.ts|*.tsx|*.sh|*.bash|*.zsh|*.yml|*.yaml|*.json|*.toml|*.ini|*.conf|*.xml|*.csv|*.log|*.rst)
@@ -25,6 +27,16 @@ case ${FILE,,} in
     xdg-open "$FILE"
     ;;
 esac'
+OPEN_ENV=ST_FILE_BROWSER_OPEN_${BACKEND^^}
+if [[ $BACKEND != unknown && -v $OPEN_ENV ]]; then
+	OPEN_CMD=${!OPEN_ENV}
+	CUSTOM_OPEN=1
+elif [[ -v ST_FILE_BROWSER_OPEN_ALL ]]; then
+	OPEN_CMD=$ST_FILE_BROWSER_OPEN_ALL
+	CUSTOM_OPEN=1
+elif [[ $BACKEND == x11 && -v ST_FILE_BROWSER_OPEN ]]; then
+	OPEN_CMD=$ST_FILE_BROWSER_OPEN
+	CUSTOM_OPEN=1
 fi
 SHOW_HIDDEN=${ST_FILE_BROWSER_HIDDEN:-0}
 START_DIR=
@@ -40,14 +52,20 @@ Usage: file-browser.sh [options] [directory]
 
 Options:
   -a, --hidden       include hidden entries
-  -o, --open CODE    run CODE on a file double-click or Enter
+  -o, --open CODE    legacy custom opener (X11 only)
+  --open-for PLATFORM CODE
+                    register an opener for x11, fb, web, or all (repeatable)
   -h, --help         show this help
 
 CODE is evaluated by `bash -c` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
 By default, .pdf opens in zat and text/source/config files in govim when available in PATH.
 These tools use this terminal; exiting returns to the browser. Otherwise the
-existing external opener is used. Explicit opener settings take precedence.
+external fallbacks are used on X11 only. Matching explicit openers take precedence.
+ST_FILE_BROWSER_OPEN_X11, _FB, _WEB, or _ALL register environment openers.
+Legacy ST_FILE_BROWSER_OPEN is X11-only. ST_GO_BACKEND identifies the terminal.
+Framebuffer video uses mpv --vo=drm with --audio-device=alsa/plughw:1,0 by default.
+There is no default X11/web video player; matching custom openers still override.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
 scroll, [ and ] change PDF pages, / enters a path, : runs a shell command
@@ -68,10 +86,31 @@ while (($#)); do
 				printf '%s\n' 'file-browser.sh: --open requires shell code' >&2
 				exit 2
 			fi
-			OPEN_CMD=$1
-			CUSTOM_OPEN=1
+			if [[ $BACKEND == x11 ]]; then OPEN_CMD=$1; CUSTOM_OPEN=1; fi
 			;;
-		--open=*) OPEN_CMD=${1#*=}; CUSTOM_OPEN=1 ;;
+		--open=*) if [[ $BACKEND == x11 ]]; then OPEN_CMD=${1#*=}; CUSTOM_OPEN=1; fi ;;
+		--open-for|--open-for=*)
+			if [[ $1 == --open-for ]]; then
+				shift
+				if (($# < 2)); then
+					printf '%s\n' 'file-browser.sh: --open-for requires PLATFORM and shell code' >&2
+					exit 2
+				fi
+				OPEN_PLATFORM=${1,,}
+			else
+				OPEN_PLATFORM=${1#*=}; OPEN_PLATFORM=${OPEN_PLATFORM,,}
+			fi
+			shift
+			case $OPEN_PLATFORM in
+				x11|fb|web|all) ;;
+				*) printf '%s\n' 'file-browser.sh: --open-for platform must be x11, fb, web, or all' >&2; exit 2 ;;
+			esac
+			if (($# == 0)); then
+				printf '%s\n' 'file-browser.sh: --open-for requires shell code' >&2
+				exit 2
+			fi
+			if [[ $OPEN_PLATFORM == all || $OPEN_PLATFORM == "$BACKEND" ]]; then OPEN_CMD=$1; CUSTOM_OPEN=1; fi
+			;;
 		-h|--help) usage; exit 0 ;;
 		--)
 			shift
@@ -810,6 +849,23 @@ open_path() {
 		STATUS='External opening is disabled'
 	else
 		if ((!CUSTOM_OPEN)); then
+			if is_video_file "$path"; then
+				if [[ $BACKEND == fb ]]; then
+					if executable=$(type -P -- mpv) && [[ -x $executable && ! -d $executable ]]; then
+						if native_video_helper; then
+							run_terminal_tool "$REPLY" "$path" --native-video
+							return
+						fi
+						STATUS='Native video helper unavailable'
+					else
+						STATUS='mpv not found'
+					fi
+				else
+					STATUS="No video player for $BACKEND"
+				fi
+				draw_status
+				return
+			fi
 			case ${path,,} in
 				*.pdf) tool=zat ;;
 				*) if is_editor_text_file "$path"; then tool=govim; fi ;;
@@ -818,11 +874,16 @@ open_path() {
 				run_terminal_tool "$executable" "$path"
 				return
 			fi
+			if [[ $BACKEND != x11 ]]; then
+				STATUS="No opener registered for backend $BACKEND"
+				draw_status
+				return
+			fi
 		fi
-		if ((minimize)); then
+		if ((minimize)) && [[ $BACKEND == x11 ]]; then
 			window_dcs place bottom-left 0px 0px 24% 8% restore "$GEOMETRY_TAG"
 		fi
-		FILE=$path NAME=$name BROWSER_DIR=$DIR \
+		FILE=$path NAME=$name BROWSER_DIR=$DIR ST_GO_BACKEND=$BACKEND \
 			bash -c "$OPEN_CMD" </dev/null >/dev/null 2>&1 &
 		display_text "$name"
 		STATUS="Opened $REPLY"
@@ -830,15 +891,41 @@ open_path() {
 	draw_status
 }
 
+is_video_file() {
+	case ${1,,} in
+		*.mp4|*.mkv|*.webm|*.avi|*.mov|*.mpeg|*.mpg|*.m4v|*.ogv|*.3gp|*.mts|*.m2ts|*.vob) return 0 ;;
+	esac
+	local mime
+	mime=$(file --mime-type -b -- "$1" 2>/dev/null) || return 1
+	[[ $mime == video/* ]]
+}
+
+native_video_helper() {
+	[[ ${ST_GO_NATIVE_VIDEO:-} == 1 && -n ${ST_GO_NATIVE_VIDEO_TOKEN:-} ]] || return 1
+	browser_helper
+}
+
+browser_helper() {
+	local beside=${ST_GO_EXECUTABLE:-}
+	if [[ $beside == */* ]]; then
+		beside=${beside%/*}/file-browser
+		if [[ -x $beside && ! -d $beside ]]; then REPLY=$beside; return 0; fi
+	fi
+	REPLY=$(type -P -- file-browser) && [[ -x $REPLY && ! -d $REPLY ]]
+}
+
 run_terminal_tool() {
 	local executable=$1 path=$2 mode result selected= i
+	shift 2
+	local label=${executable##*/}
+	[[ ${1:-} != --native-video ]] || label=mpv
 	((IDX >= 0)) && selected=${FILES[$IDX]}
 	# Resolve relative PATH entries before changing the child's directory.
 	[[ $executable == /* ]] || executable=$PWD/$executable
 	mode=$(stty -g 2>/dev/null) || mode=
 	TOOL_ACTIVE=1
 	printf '\033[?1006l\033[?1000l\033[?25h\033[0m\033[?1049l'
-	(cd -- "$DIR" && "$executable" "$path")
+	(cd -- "$DIR" && "$executable" "$@" "$path")
 	result=$?
 	TOOL_ACTIVE=0
 	[[ -z $mode ]] || stty "$mode" 2>/dev/null
@@ -849,8 +936,8 @@ run_terminal_tool() {
 	build_list
 	((IDX >= ${#FILES[@]})) && IDX=$((${#FILES[@]} - 1))
 	for i in "${!FILES[@]}"; do [[ ${FILES[$i]} == "$selected" ]] && { IDX=$i; break; }; done
-	STATUS="${executable##*/} finished"
-	((result == 0)) || STATUS="${executable##*/} exited with status $result"
+	STATUS="$label finished"
+	((result == 0)) || STATUS="$label exited with status $result"
 	render_all
 }
 
@@ -1355,13 +1442,19 @@ MOUSE
 HINTS
   With the default opener, .pdf uses zat and text/source/config files use govim
   when available in PATH. They run in this terminal; exit the tool
-  to return to the same browser location. Otherwise the existing
-  external opener is used. --open and ST_FILE_BROWSER_OPEN override
-  this dispatch (an empty value disables opening).
+  to return to the same browser location on every backend. Desktop
+  fallbacks are X11-only. Register custom code with --open-for PLATFORM CODE
+  or ST_FILE_BROWSER_OPEN_X11 / _FB / _WEB / _ALL. Matching empty values
+  disable opening. Legacy --open and ST_FILE_BROWSER_OPEN are X11-only.
+  Framebuffer videos hand the real VT to mpv --vo=drm via the native helper.
+  Video defaults to alsa/plughw:1,0; ALSA_PCM_CARD / ALSA_PCM_DEVICE
+  override video. ST_FILE_BROWSER_VOLUME sets mpv's volume (default 33, 0..100).
+  MP3's working PCM output/config and global mixer levels are left unchanged.
+  X11/web have no default video player. Custom platform handlers still win.
   Double-clicking an externally opened file collapses the terminal
   to a bottom strip; clicking the strip restores it. Filenames are sanitized before
   drawing, so names with spaces, quotes, or control characters are
-  handled safely. Override openers and icons with --open,
+  handled safely. Override openers and icons with --open-for,
   ST_FILE_BROWSER_OPEN, ST_FILE_BROWSER_ICON_*, and the terminal
   config file_browser section.
 MANUAL

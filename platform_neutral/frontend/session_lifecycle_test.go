@@ -23,6 +23,7 @@ type lifecycleHost struct {
 
 func (h *lifecycleHost) Bind(c api.Callbacks)                     { h.callbacks = c }
 func (h *lifecycleHost) Show()                                    {}
+func (h *lifecycleHost) BackendName() string                      { return "fb" }
 func (h *lifecycleHost) SetupKeys()                               {}
 func (h *lifecycleHost) Upload([]uint32, int, int, int, int, int) {}
 func (h *lifecycleHost) ClientSize() (int, int, error)            { return 482, 282, nil }
@@ -37,7 +38,7 @@ func TestSessionLifecycleHelper(t *testing.T) {
 		return
 	}
 	flag.CommandLine = flag.NewFlagSet("session-helper", flag.ExitOnError)
-	command := []string{"/bin/sh", "-c", "stty size > \"$ST_TEST_LIFECYCLE_SIZE\""}
+	command := []string{"/bin/sh", "-c", "stty size > \"$ST_TEST_LIFECYCLE_SIZE\"\nprintf '%s' \"$ST_GO_BACKEND\" > \"$ST_TEST_LIFECYCLE_BACKEND\""}
 	if os.Getenv("ST_TEST_LIFECYCLE_BAD_SPAWN") == "1" {
 		command = []string{"/nonexistent/st-go-test-program"}
 	}
@@ -58,8 +59,9 @@ func TestSessionExitAndSpawnFailureRestoreHost(t *testing.T) {
 			dir := t.TempDir()
 			marker := filepath.Join(dir, "restored")
 			size := filepath.Join(dir, "size")
+			backend := filepath.Join(dir, "backend")
 			cmd := exec.Command(os.Args[0], "-test.run=^TestSessionLifecycleHelper$")
-			cmd.Env = append(os.Environ(), "ST_TEST_LIFECYCLE_MARKER="+marker, "ST_TEST_LIFECYCLE_SIZE="+size)
+			cmd.Env = append(os.Environ(), "ST_TEST_LIFECYCLE_MARKER="+marker, "ST_TEST_LIFECYCLE_SIZE="+size, "ST_TEST_LIFECYCLE_BACKEND="+backend, "ST_GO_BACKEND=x11")
 			if badSpawn {
 				cmd.Env = append(cmd.Env, "ST_TEST_LIFECYCLE_BAD_SPAWN=1")
 			}
@@ -89,6 +91,10 @@ func TestSessionExitAndSpawnFailureRestoreHost(t *testing.T) {
 				data, err := os.ReadFile(size)
 				if err != nil || string(data) != "10 30\n" {
 					t.Fatalf("child's initial size=%q, %v", data, err)
+				}
+				data, err = os.ReadFile(backend)
+				if err != nil || string(data) != "fb" {
+					t.Fatalf("child inherited stale backend identity: %q, %v", data, err)
 				}
 			}
 		})

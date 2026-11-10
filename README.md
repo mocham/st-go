@@ -661,10 +661,12 @@ them in a partial terminal config:
 The resolved values are exported to the browser. A one-shot
 `ST_FILE_BROWSER_ICON_PDF=X` environment variable takes precedence over JSON.
 
-The external opener is shell code rather than a command-plus-one-argument. Set
-it with `--open CODE` or `ST_FILE_BROWSER_OPEN`; `FILE`, `NAME`, and
-`BROWSER_DIR` are exported to `bash -c`, so dispatch functions and command
-sequences are supported:
+The external opener is trusted shell code rather than a command-plus-one-argument.
+Register it with `--open-for PLATFORM CODE` or `ST_FILE_BROWSER_OPEN_X11`,
+`ST_FILE_BROWSER_OPEN_FB`, `ST_FILE_BROWSER_OPEN_WEB`, or `ST_FILE_BROWSER_OPEN_ALL`.
+Platforms are `x11`, `fb`, `web`, and the explicit wildcard `all`.
+`FILE`, `NAME`, `BROWSER_DIR`, and `ST_GO_BACKEND` are exported to `bash -c`, so
+dispatch functions and command sequences are supported without interpolating paths.
 
 By default, both browsers open `.pdf` with `zat` and text/source/config files
 (including `.sh`, `.txt`, syntax-highlighted formats, dotfiles and extensionless
@@ -673,16 +675,63 @@ when the corresponding tool is in `$PATH` (extensions are case-insensitive).
 The tool runs in the **same terminal**, and exiting it restores the browser's
 directory, selection, and preview. Enter, `o`, double-click, and path entry all
 use this dispatch; the window is not collapsed for these in-terminal tools.
-Explicit `--open` or `ST_FILE_BROWSER_OPEN` settings take precedence, including
-an empty setting to disable opening.
+These built-in terminal routes remain available on every backend. A matching
+custom opener takes precedence, including an empty setting to disable opening.
+Backend-specific environment values beat `_ALL`, then legacy settings; the last
+matching CLI option wins over environment values. Registrations for other
+backends are ignored and do not suppress native tools.
 
-If the tool is unavailable, text, markup, configuration, shell, and source-code
+**Legacy `--open CODE` and `ST_FILE_BROWSER_OPEN` are X11-only.** The terminal
+exports its actual host as `ST_GO_BACKEND=x11|fb|web`, replacing inherited values.
+An unset/empty or unknown backend never enables legacy handlers or desktop
+fallbacks; the browsers do not infer X11 from inherited desktop environment
+variables. Restart rebuilt terminals to receive the backend metadata.
+
+On X11, if the tool is unavailable, text, markup, configuration, shell, and source-code
 extensions fall back to the exact st-go executable that launched the browser:
 `$ST_GO_EXECUTABLE vim "$FILE"`. Other formats use `xdg-open` in the Bash browser
-and `bar external "$FILE"` in the Go browser.
+and `bar external "$FILE"` in the Go browser. Framebuffer/web instead report
+that no opener is registered; they do not launch desktop fallbacks, even when
+`DISPLAY` or `WAYLAND_DISPLAY` is inherited. Browser-native directory/archive,
+database and audio handling is unchanged.
+
+**Video:** framebuffer sessions default to foreground
+`mpv --vo=drm --hwdec=auto-copy --ao=alsa --audio-device=alsa/plughw:1,0 --volume=33 -- "$FILE"`
+(MP4, MKV, WebM and other video formats). A capability-authenticated DCS request
+asks st-fb to hand the **detected real VT** to mpv, not the browser's PTY. The host
+pauses scanout and input, releases mouse grabs/console modes, and gives mpv its own
+foreground process group on that VT. This lets mpv handle Ctrl-Alt-Fn and DRM
+release/acquisition itself. After exit/failure, st-fb restores console ownership,
+validates the framebuffer mode and repaints retained output. It never takes over
+a different VT or paints over another active console.
+
+Both browsers use the Go `file-browser --native-video FILE` client helper, located
+beside the terminal executable or in `PATH` for Bash (`make file-browser`). The
+helper communicates only through terminal text; only the framebuffer backend
+owns native console handles. Restart rebuilt terminals to receive the new native
+video capability. There is no fallback to launching DRM mpv directly on a PTY.
+
+Framebuffer video defaults directly to **`alsa/plughw:1,0`** (card 1, device 0),
+without probing or opening the MP3 player's PCM. mpv/ALSA handle format and rate
+conversion; no sample format, channel count, or sample rate is forced. Override video with
+`ALSA_PCM_CARD` (or `ALSA_CARD`) and `ALSA_PCM_DEVICE`, or an explicit
+`ST_FILE_BROWSER_ALSA_DEVICE=plughw:Generic_1,0`. These video settings do not change
+the MP3 open/write path or global mixer levels. The video helper respects an inherited
+ALSA configuration or ALSA's own default config path; its embedded
+`demo-go/file-browser/alsa.conf` is only a missing-system-config fallback in that
+separate process. `auto-copy` probes available hardware decoders and
+copies decoded frames back for the software-frame DRM output; unsupported
+hardware/codecs fall back to software decoding. mpv needs DRM and ALSA support
+and access to the DRM/audio devices; no permissions or packages are changed.
+**No default X11 or web video player is launched**, including desktop fallbacks.
+Matching platform-specific custom openers still take precedence.
+
+Video defaults to mpv's own **33%** volume; use `ST_FILE_BROWSER_VOLUME=0..100`
+to override. This does not write the ALSA Master/PCM controls. The built-in MP3
+player and arbitrary custom handlers keep their existing volume behavior.
 
 ```sh
-./BINARIES/st -e ./demo/file-browser.sh --open '
+./BINARIES/st -e ./demo/file-browser.sh --open-for x11 '
   open_file() {
     case $FILE in
       *.pdf) zathura "$FILE" ;;
@@ -692,6 +741,10 @@ and `bar external "$FILE"` in the Go browser.
   }
   open_file
 ' /some/path
+
+# Register a separate framebuffer handler, or explicitly allow one on all backends:
+ST_FILE_BROWSER_OPEN_FB='my-fb-handler "$FILE"' ./BINARIES/st-fb -e ./BINARIES/file-browser
+./BINARIES/st-web -e ./demo/file-browser.sh --open-for all 'printf "%s\n" "$FILE" >> "$HOME/opened-files.log"'
 ```
 
 Text, image, PDF, and directory selections redraw only the fixed preview

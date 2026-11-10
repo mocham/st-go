@@ -6,14 +6,19 @@ import (
 	"testing"
 
 	"st-go/config"
+	"st-go/platform_neutral/api"
 )
 
 func TestStChildEnvExportsFileBrowserIcons(t *testing.T) {
 	t.Setenv("ST_GO_FILE_BROWSER_ICON_DIRECTORY", "inherited")
 	t.Setenv("ST_GO_EXECUTABLE", "/stale/st")
+	t.Setenv("ST_GO_BACKEND", "inherited-backend")
+	t.Setenv("ST_GO_NATIVE_VIDEO", "forged")
+	t.Setenv("ST_GO_NATIVE_VIDEO_TOKEN", "stale")
 	t.Setenv("ST_FILE_BROWSER_ICON_DIRECTORY", "user override")
 	cfg := config.Default()
 	cfg.GeometryToken = "geometry-secret"
+	cfg.NativeVideoToken = "fresh-native-secret"
 	cfg.FileBrowser.Icons.Directory = "configured"
 
 	env := stChildEnv(cfg)
@@ -47,5 +52,48 @@ func TestStChildEnvExportsFileBrowserIcons(t *testing.T) {
 	}
 	if got := values["ST_GO_GEOMETRY_TOKEN"]; got != "geometry-secret" {
 		t.Fatalf("ST_GO_GEOMETRY_TOKEN = %q", got)
+	}
+	if _, ok := values["ST_GO_BACKEND"]; ok {
+		t.Fatal("backend must be supplied by the actual host, not inherited")
+	}
+	if _, ok := values["ST_GO_NATIVE_VIDEO"]; ok {
+		t.Fatal("inherited native-video support was not removed")
+	}
+	if values["ST_GO_NATIVE_VIDEO_TOKEN"] != "fresh-native-secret" {
+		t.Fatal("native video capability was not replaced")
+	}
+}
+
+type namedBackendHost struct {
+	api.Host
+	name string
+}
+
+func (h namedBackendHost) BackendName() string { return h.name }
+
+func TestBackendChildEnvironmentReplacesInheritedIdentity(t *testing.T) {
+	for _, name := range []string{"x11", "fb", "web", "unrecognized"} {
+		t.Run(name, func(t *testing.T) {
+			env := backendChildEnv([]string{"ST_GO_BACKEND=x11", "KEEP=yes", "ST_GO_BACKEND=web"}, namedBackendHost{name: name})
+			want := name
+			if name == "unrecognized" {
+				want = "unknown"
+			}
+			count := 0
+			for _, entry := range env {
+				if strings.HasPrefix(entry, "ST_GO_BACKEND=") {
+					count++
+					if entry != "ST_GO_BACKEND="+want {
+						t.Fatal("wrong backend identity", entry)
+					}
+				}
+			}
+			if count != 1 || env[0] != "KEEP=yes" {
+				t.Fatal("backend environment was duplicated/lost unrelated values", env)
+			}
+		})
+	}
+	if env := backendChildEnv([]string{"ST_GO_BACKEND=x11"}, nil); len(env) != 1 || env[0] != "ST_GO_BACKEND=unknown" {
+		t.Fatal("unidentified host inherited desktop privileges", env)
 	}
 }

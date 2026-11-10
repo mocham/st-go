@@ -1435,7 +1435,7 @@ func TestFBMouseDoubleClickOpener(t *testing.T) {
 	ptyutil.SetWinSize(master, 24, 80)
 	opener := `open_file() { printf '%s|%s' "$NAME" "$FILE" > "$BROWSER_DIR/.opened"; }; open_file`
 	cmd := exec.Command("bash", "demo/file-browser.sh", "--open", opener, dir)
-	cmd.Env = append(os.Environ(), "ST_FILE_BROWSER_DOUBLE_CLICK_MS=350")
+	cmd.Env = append(os.Environ(), "ST_FILE_BROWSER_DOUBLE_CLICK_MS=350", "ST_GO_BACKEND=x11")
 	cmd.Stdin = slave
 	cmd.Stdout = slave
 	cmd.Stderr = os.Stderr
@@ -1525,6 +1525,7 @@ func TestFBDefaultTextOpenerUsesRunningSt(t *testing.T) {
 	ptyutil.SetWinSize(master, 24, 80)
 	cmd := exec.Command("bash", "demo/file-browser.sh", dir)
 	cmd.Env = append(envWithout(os.Environ(), "ST_FILE_BROWSER_OPEN"),
+		"ST_GO_BACKEND=x11",
 		"ST_GO_EXECUTABLE="+fakeSt,
 		"ST_FILE_BROWSER_DOUBLE_CLICK_MS=350",
 		"MARKER="+marker)
@@ -1568,7 +1569,7 @@ func startFileBrowserTest(t *testing.T, dir, opener string) (*os.File, *exec.Cmd
 	ptyutil.SetWinSize(master, 24, 80)
 	marker := filepath.Join(dir, ".path-opened")
 	cmd := exec.Command("bash", "demo/file-browser.sh", "--open", opener, dir)
-	cmd.Env = append(os.Environ(), "MARKER="+marker, "LC_ALL=C")
+	cmd.Env = append(os.Environ(), "MARKER="+marker, "LC_ALL=C", "ST_GO_BACKEND=x11")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, os.Stderr
 	if err := cmd.Start(); err != nil {
 		master.Close()
