@@ -22,6 +22,7 @@ type Config struct {
 	GeometryToken    string `json:"-"`
 	NativeVideoToken string `json:"-"`
 	NativeAudioToken string `json:"-"`
+	TabSpawnToken    string `json:"-"`
 
 	Font                string   `json:"font"`
 	Borderpx            int      `json:"borderpx"`

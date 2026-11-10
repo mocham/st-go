@@ -26,6 +26,7 @@ require (
 	st-go/ptyutil v0.0.0
 	st-go/term v0.0.0
 	st-go/terminfo v0.0.0
+	st-go/tui v0.0.0
 	st-go/widgets v0.0.0
 )
 

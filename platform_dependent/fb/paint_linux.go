@@ -163,6 +163,9 @@ func (d *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surf
 	return d.NewWidgetSurface(api.TerminalWidget, bounds, background)
 }
 func (d *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, background uint32) (api.Surface, error) {
+	return d.NewWidgetSurfaceVisible(kind, bounds, background, true)
+}
+func (d *Driver) NewWidgetSurfaceVisible(kind api.WidgetKind, bounds image.Rectangle, background uint32, visible bool) (api.Surface, error) {
 	if _, ok := limits.RGBA("fb surface", bounds.Dx(), bounds.Dy()); !ok {
 		return nil, fmt.Errorf("invalid surface bounds")
 	}
@@ -177,10 +180,12 @@ func (d *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, b
 	if d.closed || (kind == api.TerminalWidget && previews >= 8) {
 		return nil, fmt.Errorf("framebuffer closed or surface limit reached")
 	}
-	s := &surface{driver: d, bounds: bounds, kind: kind}
+	s := &surface{driver: d, bounds: bounds, kind: kind, hidden: !visible}
 	s.fill(background)
 	d.surfaces = append(d.surfaces, s)
-	d.invalidate(bounds)
+	if visible {
+		d.invalidate(bounds)
+	}
 	return s, nil
 }
 func (s *surface) fill(background uint32) {

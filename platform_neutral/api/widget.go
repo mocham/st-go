@@ -17,6 +17,7 @@ type WidgetOptions struct {
 	Bounds             image.Rectangle // window pixels; widget APIs use local pixels.
 	AutoResize         bool            // follow the native client size.
 	PointerTransparent bool            // preserve passive status-bar behavior.
+	Hidden             bool            // start without presenting or receiving input.
 }
 
 // Widget is a scoped host: Close releases only this widget. The native window
@@ -65,3 +66,24 @@ type WidgetSurfaceHost interface {
 // WidgetAttacher registers backend-owned widgets after the window's routing
 // layer exists. In particular, only framebuffer hosts register a system bar.
 type WidgetAttacher interface{ AttachWidgets(WidgetContainer) }
+
+// WindowHooks run in the native event domain, outside widget callback locks.
+// Policies can consume window shortcuts and lay out widgets after native resize.
+type WindowHooks struct {
+	Resize   func(width, height int)
+	KeyPress func(key uint, modifiers uint16) bool
+}
+
+type WidgetWindow interface {
+	WindowBounds() image.Rectangle
+	BindWindowHooks(WindowHooks)
+	SetAutoResize(bool)
+	PostWindow(func()) bool
+	RunWindow()
+}
+
+// WidgetSurfaceFactory avoids mapping even a blank surface for a background
+// PTY, and preserves bar/content ordering from its first presentation.
+type WidgetSurfaceFactory interface {
+	NewWidgetSurfaceVisible(kind WidgetKind, bounds image.Rectangle, background uint32, visible bool) (Surface, error)
+}

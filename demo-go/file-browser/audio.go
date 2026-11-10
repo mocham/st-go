@@ -47,8 +47,8 @@ func (b *Browser) stopPlayback() {
 	b.playback, b.playbackStarting = "", false
 }
 
-// ESC P has already been consumed. Drain every framed reply, including late
-// completions after leaving the audio viewer, so its payload is never input.
+// ESC P has already been consumed. Drain every framed audio/tab reply, including
+// late completions after leaving a viewer, so its payload is never user input.
 func (b *Browser) readAudioReply() {
 	var control []byte
 	deadline := time.Now().Add(time.Second)
@@ -58,6 +58,9 @@ func (b *Browser) readAudioReply() {
 			return
 		}
 		if ch == '\\' && len(control) > 0 && control[len(control)-1] == 0x1b {
+			if b.acceptTabReply(string(control[:len(control)-1])) {
+				return
+			}
 			reply, ok := audioprotocol.ParseReply(string(control[:len(control)-1]))
 			if !ok || reply.ID != b.playback {
 				return

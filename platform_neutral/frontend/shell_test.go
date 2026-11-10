@@ -17,6 +17,8 @@ func TestStChildEnvExportsFileBrowserIcons(t *testing.T) {
 	t.Setenv("ST_GO_NATIVE_VIDEO_TOKEN", "stale")
 	t.Setenv("ST_GO_NATIVE_AUDIO", "forged")
 	t.Setenv("ST_GO_NATIVE_AUDIO_TOKEN", "stale")
+	t.Setenv("ST_GO_TABS", "1")
+	t.Setenv("ST_GO_TAB_TOKEN", "stale")
 	t.Setenv("ST_FILE_BROWSER_ICON_DIRECTORY", "user override")
 	cfg := config.Default()
 	cfg.GeometryToken = "geometry-secret"
@@ -67,6 +69,14 @@ func TestStChildEnvExportsFileBrowserIcons(t *testing.T) {
 	}
 	if values["ST_GO_NATIVE_AUDIO_TOKEN"] != "fresh-audio-secret" || values["ST_GO_NATIVE_AUDIO"] != "1" {
 		t.Fatal("native audio capability was not replaced")
+	}
+	if values["ST_GO_TABS"] != "" || values["ST_GO_TAB_TOKEN"] != "" {
+		t.Fatal("disabled tabs inherited a stale capability")
+	}
+	cfg.TabSpawnToken = "fresh-tab-secret"
+	joined := strings.Join(stChildEnv(cfg), "\n")
+	if !strings.Contains(joined, "ST_GO_TABS=1\n") || !strings.Contains(joined, "ST_GO_TAB_TOKEN=fresh-tab-secret") {
+		t.Fatal("enabled tab capability missing")
 	}
 }
 

@@ -51,6 +51,12 @@ func (w *Window) callbacks() api.Callbacks {
 			}
 		},
 		KeyPress: func(key uint, mods uint16) {
+			w.mu.Lock()
+			intercept := w.hooks.KeyPress
+			w.mu.Unlock()
+			if intercept != nil && intercept(key, mods) {
+				return
+			}
 			w.withFocus(func(c api.Callbacks) {
 				if c.KeyPress != nil {
 					c.KeyPress(key, mods)
@@ -175,6 +181,7 @@ func (w *Window) resize(width, height int) {
 	w.paintMu.Lock()
 	w.mu.Lock()
 	w.width, w.height = width, height
+	resize := w.hooks.Resize
 	var follow []*Host
 	for _, h := range w.widgets {
 		if h.options.AutoResize && !h.closed {
@@ -185,5 +192,8 @@ func (w *Window) resize(width, height int) {
 	w.paintMu.Unlock()
 	for _, h := range follow {
 		h.SetBounds(image.Rect(0, 0, width, height))
+	}
+	if resize != nil {
+		resize(width, height)
 	}
 }

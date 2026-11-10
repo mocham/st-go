@@ -92,10 +92,27 @@ filenames into shell code.
 By default, both browsers open `.pdf` with [zat](../zat/README.md), and text,
 source, and configuration files with [govim](../govim/README.md), when the tool
 is in `PATH`. This includes `.sh`, `.txt`, syntax-highlighted formats, dotfiles,
-and extensionless scripts; extensions are case-insensitive. Tools run in the
-**same terminal**; exiting restores the directory, selection, and preview.
+and extensionless scripts; extensions are case-insensitive. With supported,
+enabled st-go tabs, the **Go browser** requests a new detached background tab:
+the first successful open lazily initializes tabs, retains the browser in tab 1,
+and appends the new PTY last. The browser stays interactive and does not hand
+over its PTY. Select a tab by clicking the bottom bar or using
+Ctrl+Shift+PageUp/PageDown; middle-click or Ctrl+Shift+W closes a tab.
+
+Without support (including `make TABS=0` builds, `-no-tabs`, or `-tabs=false`),
+the Go browser falls back to the original **same terminal** tool invocation;
+exiting restores the directory, selection, and preview. The Bash browser keeps
+that original behavior. Explicit negative spawn replies also use the old opener.
+An unconfirmed request is not retried locally, preventing duplicate processes;
+the initial read-only support probe can safely time out and use the old opener.
+Late replies are drained, including while a path prompt/manual is open. Archive
+files are handed to terminal-owned storage before acceptance, so browser exit
+cannot invalidate the detached tool's file.
+Edited host-owned copies are retained (their directory is recorded in st-go's
+bounded diagnostic log); edits are not written back into the archive itself.
 Enter, `o`, double-click, and path entry share dispatch, without collapsing the
-window for in-terminal tools.
+window for document tools. Custom openers, the command prompt, and native
+audio/video routes are unchanged.
 
 Built-in terminal routes remain available on every backend. A matching custom
 opener takes precedence, including an empty setting to disable opening.

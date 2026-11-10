@@ -107,6 +107,9 @@ func (t *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surf
 	return t.NewWidgetSurface(api.TerminalWidget, bounds, background)
 }
 func (t *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, background uint32) (api.Surface, error) {
+	return t.NewWidgetSurfaceVisible(kind, bounds, background, true)
+}
+func (t *Driver) NewWidgetSurfaceVisible(kind api.WidgetKind, bounds image.Rectangle, background uint32, visible bool) (api.Surface, error) {
 	win, err := xproto.NewWindowId(t.conn)
 	if err != nil {
 		return nil, err
@@ -115,13 +118,15 @@ func (t *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, b
 	if err != nil {
 		return nil, err
 	}
-	p := &Surface{driver: t, window: win, gc: gc, bounds: bounds, kind: kind}
+	p := &Surface{driver: t, window: win, gc: gc, bounds: bounds, kind: kind, hidden: !visible}
 	// Keep pointer propagation and the existing isolated-preview drawable.
 	xproto.CreateWindow(t.conn, 0, win, t.win, int16(bounds.Min.X), int16(bounds.Min.Y),
 		uint16(bounds.Dx()), uint16(bounds.Dy()), 0, xproto.WindowClassInputOutput, 0,
 		xproto.CwBackPixel|xproto.CwEventMask, []uint32{background & 0xffffff, xproto.EventMaskExposure})
 	xproto.CreateGC(t.conn, gc, xproto.Drawable(win), xproto.GcGraphicsExposures, []uint32{0})
-	xproto.MapWindow(t.conn, win)
+	if visible {
+		xproto.MapWindow(t.conn, win)
+	}
 	t.surfaceMu.Lock()
 	if t.surfaces == nil {
 		t.surfaces = make(map[xproto.Window]*Surface)

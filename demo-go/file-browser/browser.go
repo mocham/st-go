@@ -80,16 +80,20 @@ type Browser struct {
 	navigation          navigation.Panel
 
 	// browsing state
-	dir        string
-	dirLabel   string // path shown in the header (the archive while inside it)
-	files      []string
-	idx        int
-	viewTop    int
-	page       int
-	status     string
-	showHidden bool
-	openCmd    string
-	customOpen bool
+	dir             string
+	dirLabel        string // path shown in the header (the archive while inside it)
+	files           []string
+	idx             int
+	viewTop         int
+	page            int
+	status          string
+	showHidden      bool
+	openCmd         string
+	customOpen      bool
+	pendingTabs     map[string]pendingTab
+	tabFallbacks    []pendingTab
+	tabsVerified    bool
+	tabsUnavailable bool
 
 	// lazy archive browsing: archiveStack holds each open archive level;
 	// archiveReturn* records the real directory to return to when the stack
@@ -1036,7 +1040,9 @@ func (b *Browser) openPath(path string, minimize int) {
 				return
 			}
 			if tool := terminalDocumentTool(path); tool != "" {
-				b.runTerminalTool(tool, path)
+				if !b.requestTerminalTab(tool, path) {
+					b.runTerminalTool(tool, path)
+				}
 				return
 			}
 			if backend := browserBackend(); backend != "x11" {
@@ -1174,6 +1180,11 @@ func (b *Browser) resetClick() {
 // runShellCommand runs a : prompt command in the foreground after leaving the
 // alternate screen, then restores the UI (mirrors ranger-style shell escapes).
 func (b *Browser) runShellCommand(code string) {
+	if len(b.pendingTabs) > 0 {
+		b.status = "Tab request pending; command not run"
+		b.renderAll()
+		return
+	}
 	if strings.TrimSpace(code) == "" {
 		b.status = "Nothing to run"
 		b.renderAll()
@@ -1583,6 +1594,7 @@ func (b *Browser) loop() {
 // handleSignal processes pending signals in the loop's goroutine so prompt
 // state is never accessed from the signal handler.
 func (b *Browser) processPendingSignals() {
+	b.pollTabRequests()
 	for {
 		select {
 		case sig := <-b.sigCh:

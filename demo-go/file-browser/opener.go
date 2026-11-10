@@ -94,6 +94,18 @@ func editorTextFile(path string) bool {
 // The browser must stop reading the PTY while a document tool owns it. Leave
 // the alternate screen rather than nesting it: zat and govim use it themselves.
 func (b *Browser) runTerminalTool(tool, path string, options ...string) {
+	b.runTerminalToolIn(b.dir, tool, path, options...)
+}
+
+func (b *Browser) runTerminalToolIn(directory, tool, path string, options ...string) {
+	if len(b.pendingTabs) > 0 {
+		// Do not give another program this PTY while an executable spawn's
+		// acknowledgement can still arrive on its input stream.
+		b.status = "Wait for the pending tab request"
+		b.drawStatus()
+		b.flush()
+		return
+	}
 	selected := ""
 	if b.idx >= 0 && b.idx < len(b.files) {
 		selected = b.files[b.idx]
@@ -105,7 +117,7 @@ func (b *Browser) runTerminalTool(tool, path string, options ...string) {
 		_ = unix.IoctlSetTermios(b.fd, unix.TCSETS, savedTermios)
 	}
 	cmd := exec.Command(tool, append(options, path)...)
-	cmd.Dir = b.dir
+	cmd.Dir = directory
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	err := cmd.Start()
 	if err == nil {

@@ -167,6 +167,7 @@ func TestPreviewVisibilityAndClippingFollowOwner(t *testing.T) {
 	}
 	generation, _ := root.(api.WidgetPresentation).PresentationState()
 	root.SetVisible(true)
+	frames = native.frames // activation restores only the previously committed preview
 	if s.(api.GuardedSurface).PresentIfCurrent(generation, make([]uint32, 8), 4, 2, 0, false) || native.frames != frames {
 		t.Fatal("stale preview painted after reactivation")
 	}

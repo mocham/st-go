@@ -179,7 +179,7 @@ func (h *Host) invoke(call func(api.Callbacks)) {
 
 func (h *Host) Run() {
 	w := h.window
-	w.runOnce.Do(func() { go func() { defer close(w.nativeDone); w.native.Run(); w.close() }() })
+	w.start()
 	select {
 	case <-h.done:
 	case <-w.done:
@@ -189,6 +189,27 @@ func (h *Host) Run() {
 	if w.closed.Load() {
 		<-w.nativeDone
 	}
+}
+
+func (w *Window) start() {
+	w.runOnce.Do(func() { go func() { defer close(w.nativeDone); w.native.Run(); w.close() }() })
+}
+func (h *Host) RunWindow()                       { h.window.start(); <-h.window.nativeDone }
+func (h *Host) PostWindow(operation func()) bool { return h.window.post(operation) }
+func (h *Host) BindWindowHooks(hooks api.WindowHooks) {
+	h.window.mu.Lock()
+	h.window.hooks = hooks
+	h.window.mu.Unlock()
+}
+func (h *Host) SetAutoResize(on bool) {
+	h.window.mu.Lock()
+	h.options.AutoResize = on
+	h.window.mu.Unlock()
+}
+func (h *Host) WindowBounds() image.Rectangle {
+	h.window.mu.Lock()
+	defer h.window.mu.Unlock()
+	return image.Rect(0, 0, h.window.width, h.window.height)
 }
 
 func (h *Host) Upload(pixels []uint32, stride, x, y, width, height int) {

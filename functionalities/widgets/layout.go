@@ -88,7 +88,7 @@ func (h *Host) SetVisible(visible bool) {
 			painter.SetTextCursor(api.TextCursor{})
 		}
 	}
-	if h.bar == nil {
+	if h.bar == nil && !visible {
 		w.eraseLocked(bounds)
 	}
 	w.repaintLocked()

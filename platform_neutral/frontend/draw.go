@@ -18,7 +18,11 @@ func (t *Terminal) ensureFramebuffer(w, h int) bool {
 	if len(t.framebuf) >= w*h && t.fbW == w && t.fbH == h {
 		return true
 	}
-	t.framebuf = make([]uint32, size/4)
+	pixels := make([]uint32, size/4)
+	for y := 0; y < min(h, t.fbH); y++ {
+		copy(pixels[y*w:y*w+min(w, t.fbW)], t.framebuf[y*t.fbW:y*t.fbW+min(w, t.fbW)])
+	}
+	t.framebuf = pixels
 	t.fbW, t.fbH = w, h
 	return true
 }

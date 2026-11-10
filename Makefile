@@ -55,7 +55,11 @@ TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 # SQLite is only used by the full terminal. Omit it from reduced builds and
 # disable runtime extension loading so the static binary has no dlopen
 # dependency from SQLite.
-FULL_GO_TAGS = webpcache sqlite_omit_load_extension alsa_static
+TABS ?= 1
+TAB_GO_TAGS = $(if $(filter 1,$(TABS)),terminal_tabs,)
+FULL_GO_TAGS = webpcache sqlite_omit_load_extension alsa_static $(TAB_GO_TAGS)
+TERMINAL_NAMES = st st-web st-fb st-pdf st-stb st-min
+TERMINAL_PROFILE = $(OUTPUT_DIR)/.terminal-profile
 
 # Sources that affect the Go file-browser demo, including the sibling
 # latexpdf module and semantic-HTML renderer. Audio is terminal-owned.
@@ -69,7 +73,7 @@ TUI_READLINE_SRC = $(wildcard functionalities/tui/readline/*.go)
 STTERMINAL_SRC = $(wildcard term/*.go platform_neutral/stterminal/*.go)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 	       $(wildcard platform_neutral/api/*.go) \
-	       $(wildcard demo-go/file-browser/*.conf functionalities/tui/audio/*.go functionalities/tui/preview/*.go) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
+	       $(wildcard demo-go/file-browser/*.conf functionalities/tui/audio/*.go functionalities/tui/tabs/*.go functionalities/tui/preview/*.go) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
 GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go demo-go/vimtex/*.vim functionalities/ptyutil/*.go functionalities/limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go functionalities/limits/*.go functionalities/pdfmeta/*.go) \
@@ -178,7 +182,8 @@ ALSA_LIB     = third_party/alsa/lib/libasound.a
 SND_C        = functionalities/audio/alsa_snd.c
 SND_O        = third_party/alsa/snd.o
 
-all: $(BIN)
+# Build every terminal profile/backend, demo, and native helper.
+all: $(BINARY_PATHS)
 
 # --- FreeType2 static archive ------------------------------------------
 # Fetched only when missing. Configured WITHOUT zlib/libpng/brotli/bzip2 so
@@ -416,6 +421,15 @@ GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard functionalities/conf
 # distributable Go binaries, including their stack-trace/debug metadata.
 $(BINARY_PATHS): Makefile $(MODULE_META) | $(OUTPUT_DIR)
 
+# A profile switch must rebuild existing binaries in either direction without
+# forcing downloads or rebuilding native libraries.
+$(TERMINAL_PROFILE): terminal-profile-force | $(OUTPUT_DIR)
+	@if [ "$$(cat "$@" 2>/dev/null)" != "$(FULL_GO_TAGS)" ]; then printf '%s' '$(FULL_GO_TAGS)' > "$@"; fi
+
+$(addprefix $(OUTPUT_DIR)/,$(TERMINAL_NAMES)): $(TERMINAL_PROFILE)
+
+terminal-profile-force:
+
 # Sound-device ownership belongs to the terminal, on every display backend.
 $(addprefix $(OUTPUT_DIR)/,st st-web st-fb st-pdf st-stb st-min): $(ALSA_LIB) $(SND_O)
 
@@ -443,13 +457,13 @@ $(OUTPUT_DIR)/st-fb: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $
 	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
-	go build -trimpath -tags 'alsa_static' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
+	go build -trimpath -tags 'alsa_static $(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -trimpath -tags 'alsa_static' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
+	go build -trimpath -tags 'alsa_static $(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -trimpath -tags 'alsa_static' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
+	go build -trimpath -tags 'alsa_static $(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
 
 # --- Go file-browser demo --------------------------------------------------
 # Independent TUI module. TeX/Markdown previews are vector PDFs from latexpdf;
@@ -507,7 +521,7 @@ install: st
 # are tested explicitly: Go's ./... pattern never crosses module boundaries.
 TEST_EXTRA = $(FULL_EXTRA)
 
-test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(WEBP_ANIM_O) st-web st-fb test-modules
+test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 # Integrated native profile, including real isolated CJK helper tests.
@@ -552,4 +566,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-modules test-tui test-web-browser test-webp-x11 test-zat-x11 $(BINARY_NAMES) pinyin-assets pinyin-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-web-browser test-webp-x11 test-zat-x11 $(BINARY_NAMES) pinyin-assets pinyin-force terminal-profile-force

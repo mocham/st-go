@@ -37,6 +37,8 @@ type Terminal struct {
 	msel                              mouseSel
 	buttons                           uint
 	session                           *ptySession
+	tabs                              terminalTabManager
+	sessionCleanup                    func(error)
 	cols, rows, windowCols            int
 	cw, ch, baseline, borderpx        int
 	ratio                             float64
@@ -204,6 +206,9 @@ func (t *Terminal) setTitle(s string) {
 	}
 	t.title = s
 	t.host.SetTitle(s)
+	if t.tabs != nil {
+		t.tabs.titleChanged(t.Widget().ID(), s)
+	}
 }
 func (t *Terminal) SetMode(set bool, mode uint) { t.setWinMode(set, mode) }
 func (t *Terminal) SetPointerMotion(on bool)    {}
@@ -259,6 +264,9 @@ func (t *Terminal) Close() {
 	}
 	if t.host != nil {
 		t.host.Close()
+	}
+	if t.tabs != nil {
+		t.tabs.terminalClosed(t.Widget().ID())
 	}
 }
 func expandHome(p string) string {

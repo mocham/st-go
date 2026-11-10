@@ -67,7 +67,8 @@ The widget adapter routes native callbacks to each client's own lock. Terminal
 rasters, mouse state, image/PDF atlases and PTY lifecycle are instance-owned;
 only the process font bundle/glyph cache is shared and serialized. The default
 layout remains one terminal plus the framebuffer's existing passive system bar.
-No terminal-level tabs or new layout controls are implemented.
+The optional `terminal_tabs` frontend policy initializes a bottom tab bar only
+after a successful application spawn request. See [lazy terminal tabs](frontend/README.md#lazy-terminal-tabs).
 
 The separation preserves timers, terminal protocols, configuration/key bindings, and feature boundaries, without
 introducing a universal native event model. The web host accepts committed UTF-8

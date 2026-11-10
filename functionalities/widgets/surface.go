@@ -16,6 +16,7 @@ type surface struct {
 	background     uint32
 	hidden, closed bool
 	nativeBounds   image.Rectangle
+	committed      Buffer
 }
 
 func (h *Host) NewSurface(bounds image.Rectangle, background uint32) (api.Surface, error) {
@@ -30,7 +31,14 @@ func (h *Host) NewSurface(bounds image.Rectangle, background uint32) (api.Surfac
 	if r.Empty() {
 		return nil, fmt.Errorf("surface outside widget")
 	}
-	native, err := w.native.NewSurface(r, background)
+	visible := h.Visible()
+	var native api.Surface
+	var err error
+	if factory, ok := w.native.(api.WidgetSurfaceFactory); ok {
+		native, err = factory.NewWidgetSurfaceVisible(api.TerminalWidget, r, background, visible)
+	} else {
+		native, err = w.native.NewSurface(r, background)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +46,6 @@ func (h *Host) NewSurface(bounds image.Rectangle, background uint32) (api.Surfac
 	s.nativeBounds = r
 	w.mu.Lock()
 	w.surfaces[native] = s
-	visible := h.visible
 	w.mu.Unlock()
 	s.setVisibleLocked(visible)
 	return s, nil
@@ -64,6 +71,9 @@ func (s *surface) Configure(bounds image.Rectangle, background uint32) {
 	s.configureLocked()
 }
 func (s *surface) configureLocked() {
+	if len(s.committed.Pixels) > 0 {
+		s.committed.Resize(s.bounds.Dx(), s.bounds.Dy())
+	}
 	r := s.windowBounds()
 	if r.Empty() {
 		s.setVisibleLocked(false)
@@ -77,6 +87,9 @@ func (s *surface) setVisibleLocked(visible bool) {
 	s.hidden = !visible
 	if native, ok := s.native.(api.SurfaceVisibility); ok {
 		native.SetVisible(visible)
+	}
+	if visible {
+		s.restoreLocked()
 	}
 }
 func (s *surface) Present(pixels []uint32, width, height, scrollRows int, reuse bool) {
@@ -105,6 +118,10 @@ func (s *surface) presentLocked(pixels []uint32, width, height, scrollRows int, 
 	if r.Empty() {
 		return false
 	}
+	if !s.committed.Resize(width, height) {
+		return false
+	}
+	s.committed.Copy(pixels, width, image.Rect(0, 0, width, height), image.Point{})
 	if r.Dx() == width && r.Dy() == height {
 		s.native.Present(pixels, width, height, scrollRows, reuse)
 		return true
@@ -118,6 +135,23 @@ func (s *surface) presentLocked(pixels []uint32, width, height, scrollRows int, 
 	clipped.Copy(pixels, width, source, image.Point{})
 	s.native.Present(clipped.Pixels, r.Dx(), r.Dy(), 0, false)
 	return true
+}
+
+func (s *surface) restoreLocked() {
+	if s.closed || s.hidden || len(s.committed.Pixels) == 0 {
+		return
+	}
+	r := s.windowBounds()
+	if r.Empty() {
+		return
+	}
+	source := r.Sub(s.owner.Bounds().Min).Sub(s.bounds.Min)
+	var clipped Buffer
+	if !clipped.Resize(r.Dx(), r.Dy()) {
+		return
+	}
+	clipped.Copy(s.committed.Pixels, s.committed.Width, source, image.Point{})
+	s.native.Present(clipped.Pixels, clipped.Width, clipped.Height, 0, false)
 }
 func (s *surface) Expose() bool {
 	w := s.owner.window
@@ -136,6 +170,7 @@ func (s *surface) closeLocked() {
 		return
 	}
 	s.closed = true
+	s.committed = Buffer{}
 	w := s.owner.window
 	w.mu.Lock()
 	delete(w.surfaces, s.native)

@@ -23,6 +23,7 @@ type ptySession struct {
 	master *os.File
 	child  *exec.Cmd
 	once   sync.Once
+	exited chan struct{} // child reaped and terminal-owned file cleanup finished
 }
 
 func (s *ptySession) close() {
@@ -46,6 +47,9 @@ func (t *Terminal) StartSession(options SessionOptions) error {
 		t.attachTerm(term.NewTerm(t.cfg, t))
 		t.termCore.Tresize(t.cols, t.rows)
 	}
+	if options.Directory != "" {
+		t.termCore.SetWorkingDirectory(options.Directory)
+	}
 	t.loadInputConfig(t.cfg)
 	t.setupKeys()
 	master, slave, err := ptyutil.Open()
@@ -66,19 +70,38 @@ func (t *Terminal) StartSession(options SessionOptions) error {
 		master.Close()
 		return err
 	}
-	t.session = &ptySession{master: master, child: child}
+	t.session = &ptySession{master: master, child: child, exited: make(chan struct{})}
+	session := t.session
 	t.termCore.SetWriter(func(data []byte) { _, _ = master.Write(data) })
 	t.ttyResize = func(rows, cols int) { _ = ptyutil.SetWinSizePixels(master, rows, cols, cols*t.cw, rows*t.ch) }
 	t.termCore.Redraw()
-	go func() { _ = child.Wait(); t.closeSession() }()
-	go t.readSession(t.session, t.termCore)
+	go func() {
+		waitErr := child.Wait()
+		// Revoke PTY I/O before waiting for the terminal lock. A dead child
+		// must not leave a parser/protocol writer holding that lock forever.
+		session.close()
+		if t.sessionCleanup != nil {
+			t.sessionCleanup(waitErr)
+		}
+		close(session.exited)
+		t.closeSession()
+	}()
+	go t.readSession(session, t.termCore)
 	return nil
 }
 
 // Keep draining background PTYs and sending protocol replies. Visibility only
 // controls event routing/presentation, never terminal parsing or child progress.
 func (t *Terminal) readSession(session *ptySession, core *term.Term) {
-	defer t.closeSession()
+	defer func() {
+		// Slave EOF commonly races Wait by a few scheduler ticks. Prefer its
+		// real exit status over killing an already normally exiting editor.
+		select {
+		case <-session.exited:
+		case <-time.After(100 * time.Millisecond):
+		}
+		t.closeSession()
+	}()
 	buf := make([]byte, 8192)
 	var pending []byte
 	master := session.master

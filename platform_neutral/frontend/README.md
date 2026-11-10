@@ -30,6 +30,37 @@ The same frontend supports [X11](../../platform_dependent/x11/README.md),
 options, clipboard behavior, and native ownership restrictions are documented
 with each backend.
 
+## Lazy terminal tabs
+
+st-go starts with one full-client PTY and **no tab bar**. Make builds include
+the optional `terminal_tabs` build tag. `-no-tabs` or `-tabs=false` disables
+requests and removes the advertised capability; `make TABS=0 st st-web st-fb`
+omits the implementation entirely. Switching `TABS` rebuilds existing binaries.
+
+The Go file browser's default govim/zat openers request a **detached background
+tab**. The first successful request creates a bottom tab bar, keeps the original
+terminal in tab 1, and appends the new PTY as the last tab without stealing focus.
+The framebuffer's top-right system bar is unchanged. Failed exec leaves the
+original layout intact. Once initialized, the tab bar stays even with one tab.
+
+- Click a tab to select it; wheel over the bar or **Ctrl+Shift+PageUp/PageDown**
+  switches tabs. Middle-click a tab or **Ctrl+Shift+W** closes it.
+- Background PTYs keep draining output and answering protocols, but do not
+  receive keyboard/paste/mouse input or present pixels. Each retains its own
+  images/PDFs and last committed synchronized-output frame.
+- Child EOF, exit or crash closes only its tab. A surviving tab becomes active;
+  closing tab 1 does not exit st-go while another tab remains. There is no
+  automatic restart. Closing the last tab restores native display/input state.
+  Terminal-owned temporary file copies are retained on abnormal exit for
+  recovery rather than being deleted underneath an editor's journal.
+- Admission is limited to eight tabs and a 256 MiB aggregate terminal-raster
+  estimate at spawn time. Existing per-resource codec/cache limits still apply;
+  this is not a process-wide RSS limit.
+
+Requests and acknowledgements use the authenticated
+[tab-spawn protocol](../stterminal/README.md#terminal-tab-spawn), shared by all
+three backends. No client-owned native window/display connection is involved.
+
 `st vim [vim-options] <file>` treats the final argument as the file and passes
 preceding arguments to Vim. It uses the file's directory as the child working
 directory, passes its basename after `--`, and sets the initial title to

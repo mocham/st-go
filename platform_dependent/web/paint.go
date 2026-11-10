@@ -105,6 +105,9 @@ func (d *Driver) NewSurface(bounds image.Rectangle, background uint32) (api.Surf
 	return d.NewWidgetSurface(api.TerminalWidget, bounds, background)
 }
 func (d *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, background uint32) (api.Surface, error) {
+	return d.NewWidgetSurfaceVisible(kind, bounds, background, true)
+}
+func (d *Driver) NewWidgetSurfaceVisible(kind api.WidgetKind, bounds image.Rectangle, background uint32, visible bool) (api.Surface, error) {
 	if _, ok := limits.RGBA("web surface", bounds.Dx(), bounds.Dy()); !ok {
 		return nil, fmt.Errorf("invalid surface dimensions")
 	}
@@ -119,10 +122,12 @@ func (d *Driver) NewWidgetSurface(kind api.WidgetKind, bounds image.Rectangle, b
 	if kind == api.TerminalWidget && previews >= 8 {
 		return nil, fmt.Errorf("web surface limit reached")
 	}
-	s := &surface{driver: d, bounds: bounds, kind: kind}
+	s := &surface{driver: d, bounds: bounds, kind: kind, hidden: !visible}
 	s.fill(background)
 	d.surfaces = append(d.surfaces, s)
-	d.damage(bounds)
+	if visible {
+		d.damage(bounds)
+	}
 	return s, nil
 }
 

@@ -92,8 +92,13 @@ MOUSE
 
 HINTS
   With the default opener, .pdf uses zat and text/source/config files use govim
-  when available in PATH. They run in this terminal; exit the tool
-  to return to the same browser location on every backend. Desktop
+  when available in PATH. Supported st-go hosts open them in detached
+  background tabs; the first open creates the tab bar and keeps this browser
+  in tab 1. Click the bar or use Ctrl+Shift+PageUp/PageDown to switch tabs.
+  Middle-click a tab or Ctrl+Shift+W closes it. Without tab support (or with
+  st-go -no-tabs / -tabs=false), tools run in this terminal; exit to return
+  to the same browser location on every backend. Custom openers and audio/video
+  keep their existing routes. Desktop
   fallbacks are X11-only. Register custom code with --open-for PLATFORM CODE
   or ST_FILE_BROWSER_OPEN_X11 / _FB / _WEB / _ALL. Matching empty values
   disable opening. Legacy --open and ST_FILE_BROWSER_OPEN are X11-only.

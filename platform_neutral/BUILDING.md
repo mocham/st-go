@@ -13,7 +13,8 @@ index](README.md) for architecture, usage, protocols, and backend guides.
 ## Build
 
 ```sh
-make            # full X11 terminal: BINARIES/st
+make            # same as make all: every terminal, demo, and native helper
+make st         # full X11 terminal: BINARIES/st
 make st-min     # text-only X11 terminal
 make st-web     # embedded HTTP server and browser client
 make st-fb      # Linux virtual-console framebuffer terminal
@@ -36,6 +37,12 @@ The default backend is X11. `backend_web` selects the web backend and
 `backend_fb` selects framebuffer; use only one backend tag at a time. Both use
 the full media profile. The [source layout](README.md#layout) separates the
 terminal engine and shared frontend from backend-owned event and painting code.
+
+Make's terminal targets include `terminal_tabs` by default, but tabs initialize
+only on the first successful application request, never at startup. Use
+`make TABS=0 st st-web st-fb` to omit support, or `-no-tabs` / `-tabs=false` to
+disable it at runtime. Direct Go builds must include `terminal_tabs` explicitly
+to enable the feature. See [tab behavior and controls](frontend/README.md#lazy-terminal-tabs).
 
 ## Self-contained binaries and libraries
 

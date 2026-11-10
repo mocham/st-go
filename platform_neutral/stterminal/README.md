@@ -77,6 +77,59 @@ These requests obey `allowgeometryops`, enabled in the default configuration.
 Broader OSC window operations use `allowwindowops`, disabled by default.
 Web/framebuffer do not implement desktop window placement or collapse/restore.
 
+### Terminal tab spawn
+
+Supported/enabled hosts export `ST_GO_TABS=1` and a per-PTY `ST_GO_TAB_TOKEN`.
+An unsupported build or `-no-tabs` / `-tabs=false` exports neither. Clients must
+not infer support from the backend name, executable name, or an inherited token.
+
+```text
+DCS tab-spawn auth TOKEN REQUEST_ID BASE64_JSON ST
+```
+
+`REQUEST_ID` is 32 hexadecimal digits. The payload is unpadded standard base64
+of strict JSON (unknown fields/trailing JSON are rejected), at most 32768 encoded
+bytes. `command` is literal argv, not shell code; `directory` is absolute.
+Authentication is separate from window-geometry/clipboard permissions.
+
+Before its first executable request the Go browser sends the same frame with
+`{"probe":true}`. A supported host replies `DCS tab-spawn REQUEST_ID supported 1 ST`
+without creating widgets, PTYs or a tab bar. A probe timeout can safely fall back
+to the old opener even if environment metadata was stale, since it cannot have
+started a process. The browser uses a fresh request ID for the subsequent spawn.
+
+```json
+{"command":["/path/to/govim","/path/to/note.txt"],"directory":"/path/to","title":"note.txt","detached":true}
+```
+
+The first successful spawn moves the existing terminal into tab 1 and appends
+the new terminal to the last tab. `detached:true` leaves focus on the current tab;
+false selects the new tab. No tab UI appears on a failed spawn. The child gets
+its own PTY/core, private media state, and fresh capabilities. Optional
+`copy_file:N` copies the regular file at argv index N into terminal-owned private
+storage and substitutes its path before exec. This lets archive clients clean
+their temporary extraction files after acknowledgement; the host-owned copy is
+removed after normal child exit only if unchanged. Edited copies and abnormal
+exits/forced closes retain the file for recovery, with its private directory recorded in the bounded
+[diagnostic log](../frontend/README.md#resource-limits-and-error-logs).
+
+Replies return to the requesting PTY, never whichever tab is focused later:
+
+```text
+DCS tab-spawn REQUEST_ID accepted WIDGET_ID ST
+DCS tab-spawn REQUEST_ID error BASE64_MESSAGE ST
+```
+
+Acceptance follows successful exec startup. An error means no child was started,
+so a client can safely use its old local opener. Recent duplicate request IDs
+per requester are acknowledged without spawning again (256 retained outcomes).
+A timeout is ambiguous: do not retry by launching locally, since a child may
+already exist. The Go browser keeps the request pending and drains late replies
+in all its input modes, rather than inserting their bytes as user input.
+
+Reusable client encoder/parser: `st-go/tui/tabs`. See
+[host controls and lifecycle](../frontend/README.md#lazy-terminal-tabs).
+
 ### Independent display regions
 
 The terminal can reserve a right-hand preview beside its main grid, or a

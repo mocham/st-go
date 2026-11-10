@@ -27,6 +27,7 @@ type Window struct {
 	nativeDone           chan struct{}
 	operations           chan func()
 	runOnce              sync.Once
+	hooks                api.WindowHooks
 }
 
 // Wrap creates the single, full-client terminal widget used by today's layout.
@@ -60,7 +61,7 @@ func (w *Window) NewWidget(options api.WidgetOptions) (api.Widget, error) {
 	if options.Bounds.Empty() || options.Kind > api.BarWidget {
 		return nil, fmt.Errorf("invalid widget options")
 	}
-	h := &Host{window: w, options: options, visible: true, done: make(chan struct{})}
+	h := &Host{window: w, options: options, visible: !options.Hidden, done: make(chan struct{})}
 	if !h.buffer.Resize(options.Bounds.Dx(), options.Bounds.Dy()) {
 		return nil, fmt.Errorf("invalid widget size")
 	}
@@ -75,7 +76,9 @@ func (w *Window) NewWidget(options api.WidgetOptions) (api.Widget, error) {
 	w.mu.Unlock()
 	if options.Kind == api.BarWidget {
 		var err error
-		if native, ok := w.native.(api.WidgetSurfaceHost); ok {
+		if native, ok := w.native.(api.WidgetSurfaceFactory); ok {
+			h.bar, err = native.NewWidgetSurfaceVisible(api.BarWidget, options.Bounds, 0xff000000, h.visible)
+		} else if native, ok := w.native.(api.WidgetSurfaceHost); ok {
 			h.bar, err = native.NewWidgetSurface(api.BarWidget, options.Bounds, 0xff000000)
 		} else {
 			h.bar, err = w.native.NewSurface(options.Bounds, 0xff000000)
@@ -91,6 +94,9 @@ func (w *Window) NewWidget(options api.WidgetOptions) (api.Widget, error) {
 			}
 			w.mu.Unlock()
 			return nil, err
+		}
+		if native, ok := h.bar.(api.SurfaceVisibility); ok {
+			native.SetVisible(h.visible)
 		}
 	}
 	if _, ok := w.native.(api.NativeVideoHost); ok {

@@ -91,6 +91,10 @@ func (b *Browser) handlePromptKey(k byte) {
 		}
 	case 0x1b:
 		next, st := b.in.readByte(50 * time.Millisecond)
+		if st == inData && next == 'P' {
+			b.readAudioReply()
+			return
+		}
 		if st == inData && (next == '[' || next == 'O') {
 			first, st2 := b.in.readByte(50 * time.Millisecond)
 			if st2 == inData {
@@ -642,6 +646,10 @@ func (b *Browser) manualMode() {
 				b.manualActive = false
 			case 0x1b:
 				next, st2 := b.in.readByte(50 * time.Millisecond)
+				if st2 == inData && next == 'P' {
+					b.readAudioReply()
+					continue
+				}
 				if st2 == inData && next == '[' {
 					first, st3 := b.in.readByte(50 * time.Millisecond)
 					if st3 == inData {

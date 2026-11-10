@@ -22,7 +22,10 @@ Options:
 CODE is evaluated by ` + "`bash -c`" + ` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
 By default, .pdf opens in zat and text/source/config files in govim when available in PATH.
-These tools use this terminal; exiting returns to the browser. Otherwise the
+Supported st-go hosts open them in detached background tabs, initializing the
+tab bar lazily. Without tab support, they use this terminal and return on exit.
+Ctrl+Shift+PageUp/PageDown switches tabs; Ctrl+Shift+W closes the current tab.
+Otherwise the
 external fallbacks are used on X11 only. Matching explicit openers take precedence.
 ST_FILE_BROWSER_OPEN_X11, _FB, _WEB, or _ALL register environment openers.
 Legacy ST_FILE_BROWSER_OPEN is X11-only. ST_GO_BACKEND identifies the terminal.

@@ -62,6 +62,10 @@ func main() {
 	flag.StringVar(&directory, "dir", "", "working directory for the terminal session")
 	var installTerminfo bool
 	flag.BoolVar(&installTerminfo, "install-terminfo", false, "generate and install st-256color, then exit")
+	var allowTabs bool
+	flag.BoolVar(&allowTabs, "tabs", tabsCompiled, "allow applications to initialize terminal tabs lazily")
+	var noTabs bool
+	flag.BoolVar(&noTabs, "no-tabs", false, "disable terminal tab requests")
 
 	// -e consumes ALL remaining arguments as the command + its args
 	// (st: `goto run; opt_cmd = argv`). Split the args at -e.
@@ -215,6 +219,7 @@ func main() {
 	if _, ok := t.host.(api.NativeVideoHost); ok {
 		cfg.NativeVideoToken = newGeometryToken()
 	}
+	configureTerminalTabs(t, allowTabs && !noTabs)
 	t.loadInputConfig(cfg)
 	if vimMode {
 		t.lockTitle = true
@@ -267,7 +272,11 @@ func main() {
 		t.Close()
 		log.Fatalf("spawn: %v", err)
 	}
-	t.run()
+	if t.tabs != nil {
+		t.tabs.run(t)
+	} else {
+		t.run()
+	}
 }
 
 func durationMilliseconds(ms float64) time.Duration {
