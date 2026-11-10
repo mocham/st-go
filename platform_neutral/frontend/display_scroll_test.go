@@ -275,10 +275,20 @@ func TestRasterViewerInitialChoiceRendersOnce(t *testing.T) {
 			trm := regionTestTerminal(t)
 			trm.writeTerminalOutput(trm.termCore, []byte("\x1bPregion stack 1\x1b\\"))
 			trm.displayRegions.jobs = make(chan regionJob, 2)
+			oldPixels := make([]uint32, trm.secondaryPixels().Dx()*trm.secondaryPixels().Dy())
+			oldRequest := &term.RegionImage{Path: "old.png", Viewer: true, Options: term.ImageDecodeOptions{FitWidth: true}}
+			oldSurface := trm.displayRegions.secondary
+			oldSurface.request = oldRequest
+			oldSurface.bitmap = regionBitmap{pixels: oldPixels, width: trm.secondaryPixels().Dx(), height: trm.secondaryPixels().Dy(), contentHeight: trm.secondaryPixels().Dy(), sourceWidth: 40, sourceHeight: 20}
+			oldSurface.sourceWidth, oldSurface.sourceHeight, oldSurface.viewWidth = 40, 20, trm.secondaryPixels().Dx()
 			if err := trm.OpenRegion(term.SecondaryRegion, test.req); err != nil {
 				t.Fatal(err)
 			}
 			job := <-trm.displayRegions.jobs
+			frame, ok := trm.regionFrame()
+			if !ok || frame.surface.request == nil || frame.surface.request.Path != "old.png" || len(frame.surface.bitmap.pixels) == 0 || &frame.surface.bitmap.pixels[0] != &oldPixels[0] {
+				t.Fatal("pending replacement did not preserve the committed viewer frame")
+			}
 			source := &scrollImage{width: 20, height: 40, rgba: make([]byte, 20*40*4)}
 			bitmap, err := source.renderJob(job)
 			if err != nil {
@@ -288,6 +298,9 @@ func TestRasterViewerInitialChoiceRendersOnce(t *testing.T) {
 				t.Fatalf("first render width = %d, want %d", bitmap.width, want)
 			}
 			trm.acceptRegionImage(job, bitmap, nil)
+			if trm.displayRegions.secondary.viewerPrevious != nil {
+				t.Fatal("committed replacement retained the previous viewer frame")
+			}
 			select {
 			case extra := <-trm.displayRegions.jobs:
 				t.Fatalf("accepted first render queued a second job: %+v", extra)

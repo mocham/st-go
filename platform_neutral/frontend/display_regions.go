@@ -67,7 +67,8 @@ type regionSurface struct {
 	sourceHeight          int
 	dragX, dragY          int
 	dragging              bool
-	search                *pdfMatches // immutable painter snapshot
+	viewerPrevious        *regionSurface // committed frame retained while a replacement decodes
+	search                *pdfMatches    // immutable painter snapshot
 	pendingSearch         *regionSearch
 	searchAnchored        bool // selected occurrence remains current at short-page boundaries
 }
@@ -298,6 +299,11 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 	initialPage := request.Continuous && request.Options.Page > 0 && !request.KeepPage
 	request.KeepPage = false
 	if request.Viewer {
+		if surface.viewerPrevious == nil && len(surface.bitmap.pixels) > 0 {
+			previous := *surface
+			previous.viewerPrevious = nil
+			surface.viewerPrevious = &previous
+		}
 		surface.scrollY, surface.targetY = 0, 0
 		surface.seekPosition, surface.seekPage = nil, nil
 		surface.pan, surface.sourceWidth, surface.sourceHeight = 0, 0, 0
@@ -315,6 +321,7 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 			surface.imageMode = imageOriginal
 		}
 	} else if !request.Continuous || surface.request == nil || !surface.request.Continuous {
+		surface.viewerPrevious = nil
 		surface.scrollY, surface.targetY = 0, 0
 		surface.seekPosition = nil
 		surface.seekPage = nil
@@ -359,6 +366,7 @@ func (t *Terminal) ClearRegion(id term.RegionID) error {
 	surface.scrollY, surface.targetY = 0, 0
 	surface.pan, surface.sourceWidth, surface.sourceHeight = 0, 0, 0
 	surface.dragging = false
+	surface.viewerPrevious = nil
 	surface.seekPosition = nil
 	surface.seekPage = nil
 	surface.loading, surface.scrollFailed = false, false
@@ -647,6 +655,7 @@ func (t *Terminal) acceptRegionImage(job regionJob, bitmap regionBitmap, err err
 	surface.scrollFailed = false
 	surface.bitmap = bitmap
 	if surface.request != nil && surface.request.Viewer {
+		surface.viewerPrevious = nil
 		surface.sourceWidth, surface.sourceHeight = bitmap.sourceWidth, bitmap.sourceHeight
 		surface.viewWidth = bitmap.width
 		r := t.displayRegions.viewport

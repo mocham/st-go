@@ -205,7 +205,11 @@ func (t *Terminal) regionFrame() (regionFrame, bool) {
 		return regionFrame{}, false
 	}
 	s.secondary.dirty = false
-	return regionFrame{surface: *s.secondary, pane: s.pane, viewport: s.viewport, background: s.background, epoch: s.layoutEpoch, presentation: generation}, true
+	surface := *s.secondary
+	if surface.viewerPrevious != nil {
+		surface = *surface.viewerPrevious
+	}
+	return regionFrame{surface: surface, pane: s.pane, viewport: s.viewport, background: s.background, epoch: s.layoutEpoch, presentation: generation}, true
 }
 
 // Called with Terminal.mu at PTY batch boundaries. Region hooks also sample
