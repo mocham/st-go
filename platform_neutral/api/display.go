@@ -16,13 +16,15 @@ type Rect struct{ X, Y, Width, Height int }
 
 // Callbacks are discrete host operations, not a universal native-event model.
 // The backend calls them inside Lock/Unlock; timers use the same serialization
-// domain. Paste is text already retrieved from the native clipboard.
+// domain. Text is committed UTF-8 (e.g. browser IME input), not clipboard paste;
+// Paste is text already retrieved from the native clipboard.
 type Callbacks struct {
 	Lock, Unlock                 func()
 	Closed                       func() bool
 	Expose                       func()
 	ExposeSurface                func(Surface)
 	KeyPress                     func(key uint, modifiers uint16)
+	Text                         func(string)
 	PointerPress, PointerRelease func(button byte, modifiers uint16, x, y int)
 	PointerMotion                func(modifiers uint16, x, y int)
 	Resize                       func(width, height int)
@@ -73,3 +75,7 @@ type Host interface {
 	Painter
 }
 type OpenHost func(WindowOptions) (Host, error)
+
+// GeometrySupport lets hosts without desktop window placement ignore geometry
+// requests without arming the terminal's click-to-restore interception.
+type GeometrySupport interface{ SupportsWindowGeometry() bool }

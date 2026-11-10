@@ -45,7 +45,7 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 	for _, path := range append(append([]string{}, artifacts...),
 		"third_party/stb/stb_image.h", "third_party_wrapper/stb_image.c",
 		"third_party_wrapper/webp_anim.c", "third_party_wrapper/alsa_snd.c",
-		"third_party_wrapper/pdf_bridge.cpp", "pdf_bridge.h", "go.mod", "go.sum", "st", "file-browser") {
+		"third_party_wrapper/pdf_bridge.cpp", "pdf_bridge.h", "go.mod", "go.sum", "Monaco_Linux.ttf", "st", "file-browser") {
 		write(path, nil, old)
 	}
 	// Simulate a checkout or an unrelated edit making Makefile newer than all
@@ -73,6 +73,7 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 		question(artifact, 0)
 	}
 	question("st", 1)
+	question("st-web", 1)
 	question("file-browser", 1)
 	// Real native dependencies still invalidate their consumers.
 	write("third_party/jpeg/lib/libjpeg.a", nil, old.Add(30*time.Minute))

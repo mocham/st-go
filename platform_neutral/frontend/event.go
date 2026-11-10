@@ -70,7 +70,7 @@ func (t *Terminal) toggleBlink() {
 
 func (t *Terminal) eventCallbacks() api.Callbacks {
 	return api.Callbacks{Lock: t.mu.Lock, Unlock: t.mu.Unlock, Closed: t.closed,
-		Expose: t.expose, ExposeSurface: t.exposeRegion, KeyPress: t.keyPress,
+		Expose: t.expose, ExposeSurface: t.exposeRegion, KeyPress: t.keyPress, Text: t.textInput,
 		PointerPress: t.pointerPress, PointerRelease: t.pointerRelease, PointerMotion: t.pointerMotion,
 		Resize: t.resize, Focus: t.focus, Close: t.Close,
 		Paste:      func(text string) { t.pasteToTTY(replaceNewlines(text)) },

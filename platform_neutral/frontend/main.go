@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -59,6 +60,8 @@ func main() {
 	flag.BoolVar(&noAlt, "a", false, "disable the alternate screen buffer")
 	var fixed bool
 	flag.BoolVar(&fixed, "i", false, "keep the window at a fixed size")
+	var directory string
+	flag.StringVar(&directory, "dir", "", "working directory for the terminal session")
 	var installTerminfo bool
 	flag.BoolVar(&installTerminfo, "install-terminfo", false, "generate and install st-256color, then exit")
 
@@ -111,6 +114,16 @@ func main() {
 		cfg.AllowAltScreen = false
 	}
 	childDir := ""
+	if directory != "" {
+		childDir, err = filepath.Abs(directory)
+		if err != nil {
+			log.Fatalf("directory: %v", err)
+		}
+		info, statErr := os.Stat(childDir)
+		if statErr != nil || !info.IsDir() {
+			log.Fatalf("directory %q is not available", directory)
+		}
+	}
 	if vimMode {
 		spec, err := buildVimLaunch(vimOptions, vimFile)
 		if err != nil {
@@ -197,7 +210,7 @@ func main() {
 
 	t, err := NewTerminalOpts(cfg, ratio, gx, gy, geomMask, title, instanceName, className, fixed)
 	if err != nil {
-		log.Fatalf("x11: %v", err)
+		log.Fatalf("display: %v", err)
 	}
 	defer t.Close()
 	t.loadInputConfig(cfg)
@@ -214,6 +227,9 @@ func main() {
 	}
 
 	core := term.NewTerm(cfg, t)
+	if childDir != "" {
+		core.SetWorkingDirectory(childDir)
+	}
 	t.attachTerm(core)
 	t.setupKeys()
 	t.mu.Lock()
@@ -242,9 +258,6 @@ func main() {
 		// st's execsh: prog = args[0], execvp(prog, args)
 		cmdline = cmdArgs
 		env = stChildEnv(cfg)
-		if childDir != "" {
-			env = append(envWithout(env, "PWD"), "PWD="+childDir)
-		}
 	} else {
 		var prog string
 		prog, env, err = ResolveShell(cfg, "")
@@ -252,6 +265,9 @@ func main() {
 			log.Fatalf("shell: %v", err)
 		}
 		cmdline = []string{prog}
+	}
+	if childDir != "" {
+		env = append(envWithout(env, "PWD"), "PWD="+childDir)
 	}
 	child, err := ptyutil.StartDir(slave, cmdline, env, childDir)
 	if err != nil {

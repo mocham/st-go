@@ -447,6 +447,10 @@ func NewTerm(cfg *config.Config, hooks Hooks) *Term {
 	return t
 }
 
+// SetWorkingDirectory supplies the initial base for relative display resources.
+// It does not change the process directory; later DCS setpwd commands still win.
+func (t *Term) SetWorkingDirectory(directory string) { t.pwd = directory }
+
 // win.h wrapper functions forwarded to hooks (called from core).
 func (t *Term) xbell()     { t.hooks.Bell() }
 func (t *Term) xclipcopy() { t.hooks.ClipCopy() }

@@ -40,7 +40,7 @@ STB_URL     = https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
-BINARY_NAMES = st st-min st-stb st-pdf file-browser gols vimtex zat govim govim-pinyind
+BINARY_NAMES = st st-min st-stb st-pdf st-web file-browser gols vimtex zat govim govim-pinyind
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 CFG         = config/config.json
 PREFIX     ?= /usr/local
@@ -403,8 +403,9 @@ WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:lib
 # --gc-sections drops unreferenced functions from function-sections objects.
 GC_EXTRA   = -Wl,--gc-sections
 
-PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go)
+PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go platform_dependent/web/assets/*)
 GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard config/*.go) $(PLATFORM_SRC) \
+	  go.mod go.sum Monaco_Linux.ttf \
 	  $(wildcard pdfmeta/*.go) \
 	  $(wildcard limits/*.go) \
           $(wildcard config/*.json) $(wildcard ptyutil/*.go) $(wildcard terminfo/*.go) \
@@ -425,6 +426,10 @@ pinyin-force:
 
 $(OUTPUT_DIR)/st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
+
+# Embedded HTTP/canvas client; terminal, fonts and media decoders stay native.
+$(OUTPUT_DIR)/st-web: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
+	go build -trimpath -tags 'backend_web netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
 	go build -trimpath -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
@@ -494,8 +499,12 @@ install: st
 # are needed because the Go file-browser package uses cgo.
 TEST_EXTRA = $(FULL_EXTRA) $(ALSA_EXTRA)
 
-test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O) govim-pinyind
+test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(ALSA_LIB) $(SND_O) $(WEBP_ANIM_O) govim-pinyind st-web
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
+
+# Optional live canvas check using installed Chromium and Node's built-in CDP.
+test-web-browser: st-web
+	node platform_dependent/web/testdata/browser-smoke.mjs
 
 # End-to-end animated-WebP playback through the built browser, PTY, terminal
 # timer and X framebuffer. Point DISPLAY at an isolated X server.
@@ -522,4 +531,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-webp-x11 test-zat-x11 $(BINARY_NAMES) pinyin-assets pinyin-force
+.PHONY: all install uninstall clean distclean test test-web-browser test-webp-x11 test-zat-x11 $(BINARY_NAMES) pinyin-assets pinyin-force

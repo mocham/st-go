@@ -1,8 +1,10 @@
 # First-round platform split
 
-This is a relocation and thin-adapter refactor, not a new frontend framework or
+The first round was a relocation and thin-adapter refactor, not a new frontend framework or
 a new backend. All clients still use the terminal's existing ANSI/OSC/DCS text
-protocol; its behavior and the existing build target names are unchanged.
+protocol; its behavior and the existing X11 build target names are unchanged.
+The subsequent [web backend](../platform_dependent/web/README.md) implements
+the same contracts with an embedded server/browser client (`make st-web`).
 
 ## Layout
 
@@ -21,6 +23,8 @@ protocol; its behavior and the existing build target names are unchanged.
   and X pixel/pane presentation. These use the same request ordering, pixel
   format, dirty uploads and preview backing-pixmap strategy as before.
 * **`../main.go`**: executable wiring, including the original embedded font.
+  `backend_x11.go` selects X11 by default; `backend_web.go` selects web with
+  `backend_web`. Neither backend is imported by neutral production code.
 
 The root **`term/`** package is a type-alias/forwarding compatibility shim, not a
 second engine. Existing demo/client imports continue to work. Shared public
@@ -30,7 +34,7 @@ in this first pass to avoid unrelated import churn.
 ## Dependencies and ownership
 
 ```text
-main -> frontend -> neutral api contracts <- X11 implementation
+main -> frontend -> neutral api contracts <- X11 or web implementation
              |
              +--> stterminal
 ```
@@ -44,7 +48,10 @@ production code; explicitly native integration tests may import XGB.
 
 This pass deliberately preserves the existing locks, global raster/cache state,
 timers, terminal protocols, configuration/key bindings, and feature boundaries.
-It does not add backend selection, new capabilities, or a universal event model.
+The original split did not add backend selection or a universal event model.
+The web follow-up adds committed UTF-8 input alongside existing key/paste
+callbacks and an optional geometry-support check; unsupported desktop geometry
+must not arm click-to-restore interception in a browser.
 
 Here **platform-neutral means display-backend-neutral**. The relocated host
 still uses Linux PTYs/signals and native FreeType/Poppler/WebP support. Making it
@@ -53,7 +60,8 @@ itself does not require those native media libraries.
 
 In particular, a `js/wasm` build of the engine still encounters the existing
 Linux-specific nonblocking-file helpers in `limits`/`config`. This split does
-not introduce replacements for those host services or claim browser support.
+not introduce replacements for those host services. The web backend keeps the
+engine, PTY and native codecs on the Linux server; it is not a Wasm port.
 
 ## Verification
 
@@ -61,6 +69,7 @@ not introduce replacements for those host services or claim browser support.
 go test ./platform_neutral/api ./platform_neutral/stterminal ./term
 make test
 make st
+make st-web
 ```
 
 The full suite still requires the Makefile's existing static native link items.

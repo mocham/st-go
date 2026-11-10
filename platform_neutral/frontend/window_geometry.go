@@ -17,6 +17,9 @@ func (t *Terminal) WindowGeometry(req term.WindowGeometryRequest) {
 	if t.host == nil {
 		return
 	}
+	if host, ok := t.host.(api.GeometrySupport); ok && !host.SupportsWindowGeometry() {
+		return
+	}
 	switch req.Action {
 	case term.GeometryRemember:
 		r, err := t.currentWindowRect()

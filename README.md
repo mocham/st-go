@@ -3,7 +3,8 @@
 **st-go** is a from-scratch Go implementation of the suckless [st](https://st.suckless.org/)
 terminal emulator. The terminal core is a faithful port of `st`'s escape-sequence
 parser and screen model, and the X11 frontend is built on the pure-Go
-[`xgb`](https://github.com/BurntSushi/xgb) library.
+[`xgb`](https://github.com/BurntSushi/xgb) library. An optional
+[web backend](#web-backend) serves the same terminal through an embedded browser client.
 
 ## Features
 
@@ -37,6 +38,7 @@ parser and screen model, and the X11 frontend is built on the pure-Go
 - XIM-free keyboard handling with a full Linux-console keymap
 - Inline image display via a DCS display DSL (stb_image / libwebp decoders)
 - PDF display via static Poppler/Splash, including embedded JPEG images
+- Self-contained HTTP/canvas backend with server-side PTY, fonts and media decoding
 - JSON configuration (`config.json`)
 
 ## Resource limits and error logs
@@ -345,13 +347,14 @@ PDF rendering and caching stay in st-go. See the demo's
 
 Source layout: [`platform_neutral/`](platform_neutral/README.md) contains the
 terminal engine (`stterminal`), shared host logic and uniform APIs;
-[`platform_dependent/`](platform_dependent/README.md) contains the X11 event and
-painting implementation. `main.go` wires them together. Existing client
-protocols and build targets are unchanged.
+[`platform_dependent/`](platform_dependent/README.md) contains the X11 and web
+event/painting implementations. `main.go` and backend-tagged wiring select one
+backend at build time. Existing client protocols and X11 targets are unchanged.
 
 ```sh
 make          # builds ./BINARIES/st (full: all feature libraries) — see targets below
 make st-min   # minimal: text-only terminal
+make st-web   # self-contained HTTP server and browser client (full media support)
 make test     # run the test suite (links the full feature set)
 make install  # installs to $(BINDIR), default /usr/local/bin
 make clean    # removes all built binaries
@@ -380,7 +383,7 @@ not a dynamic executable
 
 ## Build targets
 
-The same Go source builds several binaries that differ only in which
+The X11 targets build from the same Go source and differ in which
 third-party C libraries are linked. When a decoder is dropped, a **dummy
 object** (a no-op stub) is linked in its place, so the affected feature does
 nothing instead of crashing. The full build also enables its SQLite WebP cache
@@ -392,6 +395,9 @@ with a build tag; reduced builds omit SQLite entirely.
 | `st-stb` | + stb_image            | PNG/JPEG/GIF/BMP/TGA       | ~8.6 MB |
 | `st-pdf` | + stb_image + poppler  | raster images + PDF        | ~14.6 MB|
 | `st`     | + stb_image + webp + poppler + SQLite | all of the above + WebP | ~16.5 MB |
+
+`st-web` uses the full media profile with the web backend instead of X11;
+its HTML, JavaScript, CSS and fonts are embedded in `BINARIES/st-web`.
 
 ### `st-min` — the minimal build
 
@@ -446,10 +452,48 @@ the stub objects live in `third_party_wrapper/dummy-{stb,webp,pdf}.c`. See
 ./BINARIES/st -v                         # print version (st 0.9.2)
 ./BINARIES/st -install-terminfo          # generate/install ~/.terminfo/s/st-256color
 ./BINARIES/st -config /path/config.json  # alternate config file
+./BINARIES/st -dir /path/to/project     # start the PTY in this directory
 ./BINARIES/st -t auto-gtex -e bash       # title/class/instance for WM tiling
 ./BINARIES/st vim notes.md               # gvim-like terminal Vim window
 ./BINARIES/st vim -c 'set number' notes.md
 ```
+
+### Web backend
+
+```sh
+make st-web
+./BINARIES/st-web -port 8080 -dir /path/to/project
+# Optional explicit command; terminal flags must precede -e:
+./BINARIES/st-web -port 8080 -dir /path/to/project -e /bin/bash
+```
+
+Open the **complete random session URL printed by the server**, such as
+`http://127.0.0.1:8080/t/<token>/`, in a modern browser. No npm build, CDN,
+X server, or separate web-asset directory is needed. `-port 0` chooses an
+available port; `-listen` defaults to `127.0.0.1` and accepts a bind IP.
+The directory is on the **server**, and is the initial PTY/relative-preview
+directory, not a browser file picker, static-file root, or sandbox.
+
+One server runs one terminal session with one attached browser at a time.
+Closing/reloading the browser leaves the PTY running; reconnecting receives its
+current pixels. Exiting the shell stops the server; Ctrl-C in the server's
+launching terminal stops it too. Browser resizing updates the PTY dimensions.
+Keyboard/IME input, mouse reporting, selections, bracketed paste, images/PDFs,
+and retained preview panes still use the existing terminal engine and text
+protocols. Terminal titles, icon titles, `BAR_DATA`, and desktop window-placement
+requests are ignored. Nothing bypasses the terminal to communicate with demos.
+
+Select with the mouse (Shift overrides application mouse reporting), then use
+**Copy** or Ctrl-Shift-C. Use native Ctrl-Shift-V or the **Paste** button.
+Clipboard API access depends on browser permissions and a secure context
+(loopback HTTP qualifies); denied OSC 52 clipboard reads fail rather than
+blocking input. Clipboard-read authorization remains disabled by default.
+
+**Security:** the URL is a bearer credential granting shell access as the server
+user. Keep it private. The server checks Host/Origin and binds loopback by
+default, but provides HTTP, not TLS or multi-user authentication. Prefer an SSH
+tunnel for remote use; do not expose it to untrusted networks with
+`-listen 0.0.0.0`. See [backend notes](platform_dependent/web/README.md).
 
 Configuration lookup is `-config <file>`, then `st.json` beside the executable
 (the name written by `make install`), then legacy `config.json` beside it,

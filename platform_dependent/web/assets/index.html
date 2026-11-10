@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>st-go web terminal</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="client.js" defer></script>
+</head>
+<body>
+  <header>
+    <strong>st-go</strong>
+    <span id="status" role="status">Connecting…</span>
+    <button id="copy" type="button" disabled>Copy</button>
+    <button id="paste" type="button">Paste</button>
+    <button id="escape" type="button">Esc</button>
+    <button id="tab" type="button">Tab</button>
+  </header>
+  <main id="viewport">
+    <canvas id="screen" aria-label="Server-rendered terminal"></canvas>
+    <textarea id="input" aria-label="Terminal input" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+  </main>
+</body>
+</html>

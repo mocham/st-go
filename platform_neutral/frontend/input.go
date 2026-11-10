@@ -248,6 +248,12 @@ func addFunctionKeys() []keyDef {
 
 // fallback: composed string (XLookupString equivalent).
 // When Ctrl is held, translate Latin-1 keysyms to control bytes per Xlib.
+func (t *Terminal) textInput(text string) {
+	if t.termCore.WinMode()&term.ModeKbdLock == 0 {
+		t.termCore.WriteToTTY([]byte(text), true)
+	}
+}
+
 func (t *Terminal) keyPress(ks uint, modifiers uint16) {
 	// st: DECSET 2 locks the keyboard.
 	if t.termCore.WinMode()&term.ModeKbdLock != 0 {

@@ -26,7 +26,7 @@ require (
 
 require (
 	github.com/mocham/GoLS/latexpdf v0.0.0
-	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/net v0.60.0
 )
 
 replace github.com/mocham/GoLS/latexpdf => ./latexpdf
