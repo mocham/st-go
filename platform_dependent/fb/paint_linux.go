@@ -10,8 +10,16 @@ import (
 	"st-go/platform_neutral/api"
 )
 
-// Caller holds d.mu. Compose retained panes and the software pointer only in
-// scanout, never into the terminal's stored pixels or image/cell metadata.
+func (d *Driver) Show() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.systemBar != nil {
+		d.paintRect(d.systemBar.bounds)
+	}
+}
+
+// Caller holds d.mu. Compose retained panes, the system bar and the software
+// pointer only in scanout, never into terminal pixels or image/cell metadata.
 func (d *Driver) paintRect(r image.Rectangle) {
 	if d.closed || !d.active {
 		return
@@ -25,6 +33,9 @@ func (d *Driver) paintRect(r image.Rectangle) {
 				if image.Pt(x, y).In(s.bounds) {
 					pixel = s.pixels[(y-s.bounds.Min.Y)*s.bounds.Dx()+x-s.bounds.Min.X]
 				}
+			}
+			if b := d.systemBar; b != nil && image.Pt(x, y).In(b.bounds) {
+				pixel, _ = b.pixel(x, y)
 			}
 			if d.pointerVisible {
 				if value, ok := pointerPixel(x-d.pointer.X, y-d.pointer.Y); ok {

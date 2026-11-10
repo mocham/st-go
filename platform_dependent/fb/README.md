@@ -50,6 +50,18 @@ surfaces are composited over terminal pixels, so a terminal erase cannot erase
 a retained preview. The software mouse pointer is another presentation overlay:
 moving it repaints only its old/new rectangles, never modifying terminal cells.
 
+A backend-owned bar overlays the **top-right corner**, above terminal and preview
+drawing and below the mouse pointer. It displays local `YYYY-MM-DD HH:MM:SS` and,
+when readable, `BAT N%` from the first present system battery's `capacity` under
+`/sys/class/power_supply`. It refreshes every **30 seconds**, repaints only its
+old/new area and is restored on VT return. Missing batteries are silently omitted.
+It uses anti-aliased **28 px Monaco** text in soft light green (`#C4DFB5`) on a
+muted dark blue-purple background (`#2D2B46`). The tiny glyph atlas is generated
+from the bundled `Monaco_Linux.ttf` using the existing FreeType build and kept as
+generated Go source; `make st-fb` regenerates it when its inputs change. Drawing
+remains pure Go and needs no system fonts or packages. No terminal rows are
+reserved, and the bar does not change application input or `BAR_DATA`.
+
 Console input uses **K_MEDIUMRAW**, with snapshots of the kernel's normal,
 Shift, AltGr and Shift+AltGr maps and Unicode accent table. Common modifiers,
 Caps/Num Lock, function/navigation keys, UTF-8 characters, basic dead-key/Compose

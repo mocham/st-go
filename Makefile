@@ -432,7 +432,11 @@ $(OUTPUT_DIR)/st-web: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) 
 	go build -trimpath -tags 'backend_web netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 # Linux console fbdev/evdev host, with the existing full software media renderer.
-$(OUTPUT_DIR)/st-fb: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
+FB_STATUS_FONT = platform_dependent/fb/system_bar_font_generated.go
+$(FB_STATUS_FONT): Monaco_Linux.ttf platform_dependent/fb/generate_system_bar_font.go third_party_wrapper/ff2.h third_party_wrapper/plugin-ff2.c $(FT_A)
+	CGO_ENABLED=1 go run platform_dependent/fb/generate_system_bar_font.go -font Monaco_Linux.ttf -output $@
+
+$(OUTPUT_DIR)/st-fb: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(FB_STATUS_FONT) $(GO_SRC)
 	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)

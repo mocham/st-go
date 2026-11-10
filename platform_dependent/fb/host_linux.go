@@ -62,6 +62,7 @@ type Driver struct {
 	clipboard               map[byte]string
 	pointer                 image.Point
 	pointerVisible          bool
+	systemBar               *systemBar
 	active, closed, running bool
 	restorePixels           bool
 	done                    chan struct{}
@@ -90,7 +91,7 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("fb %s: %w", o.Device, err)
 	}
-	d := &Driver{window: window, screen: f, pointer: image.Pt(f.layout.width/2, f.layout.height/2), done: make(chan struct{}), signals: make(chan os.Signal, 16), clipboard: make(map[byte]string), mousePaths: o.Mouse, grabMouse: o.GrabMouse}
+	d := &Driver{window: window, screen: f, pointer: image.Pt(f.layout.width/2, f.layout.height/2), systemBar: &systemBar{powerSupplyPath: "/sys/class/power_supply"}, done: make(chan struct{}), signals: make(chan os.Signal, 16), clipboard: make(map[byte]string), mousePaths: o.Mouse, grabMouse: o.GrabMouse}
 	defer func() {
 		if err != nil {
 			d.cleanup()
@@ -126,6 +127,7 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 	if err = d.scanMice(true); err != nil {
 		return nil, err
 	}
+	d.refreshSystemBar(time.Now())
 	signal.Notify(d.signals, unix.SIGINT, unix.SIGTERM, unix.SIGHUP, unix.SIGQUIT, unix.SIGUSR1, unix.SIGUSR2)
 	if err = d.console.enter(); err != nil {
 		return nil, fmt.Errorf("console takeover: %w", err)
@@ -143,7 +145,6 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 }
 
 func (d *Driver) Bind(c api.Callbacks)          { d.callbacks = c }
-func (d *Driver) Show()                         {}
 func (d *Driver) SetupKeys()                    {}
 func (d *Driver) SetTitle(string)               {}
 func (d *Driver) SetIconTitle(string)           {}
@@ -268,6 +269,7 @@ func (d *Driver) Run() {
 			continue
 		default:
 		}
+		d.refreshSystemBar(time.Now())
 		if time.Since(d.lastScan) > 2*time.Second {
 			if err := d.scanMice(false); err != nil {
 				limits.Report("fb mouse", "%v", err)

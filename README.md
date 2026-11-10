@@ -526,6 +526,9 @@ touchscreens and gesture processing are not yet implemented. Clipboard data is
 local to this terminal process, not shared with a desktop clipboard. Titles,
 `BAR_DATA` and desktop window-placement requests are ignored.
 
+A backend-owned top-right bar overlays application drawing with local date/time
+and battery percentage, when available under `/sys`, refreshed every 30 seconds.
+
 **Ctrl-Alt-F1…F12** switches VTs; **Ctrl-Alt-Backspace** exits the framebuffer
 host. Normal shell exit and SIGINT/SIGTERM/SIGHUP/SIGQUIT restore console modes.
 Writes stop while another VT is active; returning repaints retained pixels.

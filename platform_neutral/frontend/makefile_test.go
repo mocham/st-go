@@ -45,6 +45,8 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 	for _, path := range append(append([]string{}, artifacts...),
 		"third_party/stb/stb_image.h", "third_party_wrapper/stb_image.c",
 		"third_party_wrapper/webp_anim.c", "third_party_wrapper/alsa_snd.c",
+		"third_party_wrapper/ff2.h", "third_party_wrapper/plugin-ff2.c",
+		"platform_dependent/fb/generate_system_bar_font.go", "platform_dependent/fb/system_bar_font_generated.go",
 		"third_party_wrapper/pdf_bridge.cpp", "pdf_bridge.h", "go.mod", "go.sum", "Monaco_Linux.ttf", "st", "file-browser") {
 		write(path, nil, old)
 	}
@@ -76,6 +78,14 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 	question("st-web", 1)
 	question("st-fb", 1)
 	question("file-browser", 1)
+	const statusFont = "platform_dependent/fb/system_bar_font_generated.go"
+	question(statusFont, 0)
+	// The framebuffer's Monaco atlas must rebuild when the bundled font changes,
+	// without rebuilding unrelated native archives or requiring runtime cgo.
+	write("Monaco_Linux.ttf", nil, old.Add(30*time.Minute))
+	question(statusFont, 1)
+	question("third_party/freetype/libfreetype.a", 0)
+	write("Monaco_Linux.ttf", nil, old)
 	// Real native dependencies still invalidate their consumers.
 	write("third_party/jpeg/lib/libjpeg.a", nil, old.Add(30*time.Minute))
 	question("third_party/poppler/lib/libpoppler.a", 1)
