@@ -12,9 +12,28 @@ options before `-e`.
 
 The CGO-free binary embeds the browser client, fonts, and PDF.js. No native media
 libraries, npm build, CDN, or separate assets are needed. One browser controls
-the server's terminal session, including its tabs. Disconnecting leaves PTYs
+the direct-launch terminal session, including its tabs. Disconnecting leaves PTYs
 running; reconnecting restores current content. Closing the last terminal exits
 the server.
+
+## Persistent shared service
+
+```sh
+./BINARIES/st-web -service -port 8080 -base-path /terminal/ -dir /absolute/project/path
+```
+
+Service mode stays alive with zero PTYs. Its top-level browser page provides
+**New terminal**, **Refresh terminals**, rename, close, and per-browser hide/show.
+Different browsers can control different PTYs; each PTY has one exclusive,
+expiring attachment. Hiding detaches without closing the PTY. Occupancy and the
+terminal list update on page load or manual refresh, with no notification stream.
+The default heartbeat/expiry are 20/90 seconds (`-attachment-timeout` changes
+expiry); clean disconnects release immediately. Refresh and select to reattach.
+
+For remote access, use the [nginx/Docker Compose deployment](../../deploy/web/README.md):
+TLS and bcrypt Basic authentication at nginx, a private st-web upstream, mandatory
+prefix preservation, and `-origin https://your-host` validation. APIs, media,
+PDF.js workers, pages, redirects, and attachments all stay under `-base-path`.
 
 ## Ownership and protocol
 
@@ -30,6 +49,9 @@ the server.
 - Media storage is bounded to 64 registrations / 128 MiB encoded content, with
   64 MiB per input and at most 16 inline resources. PDF canvases are evicted when
   offscreen. Replacement/generation checks discard stale work.
+- In service mode each PTY has its own renderer, callback/input serialization,
+  scene/media stores and clipboard requests. The listener and PTY factory outlive
+  individual terminals. `-max-ptys` (default 8) bounds their aggregate count.
 
 Canvas dimensions follow device pixels, so viewport size changes add/remove
 terminal cells rather than stretch their content. Browser zoom and display
@@ -67,9 +89,10 @@ to the browser/OS clipboard; synchronization cannot bypass browser permissions.
 
 ## Remote access and limits
 
-The URL grants shell access with the server user's permissions; `-dir` is not a
-sandbox. Keep it private, bind loopback, and use an SSH tunnel for remote access.
-The server has no TLS, multi-user authentication, or reverse-proxy configuration.
+Direct-launch token URLs grant shell access with the server user's permissions;
+`-dir` selects a working directory. Loopback plus an SSH tunnel supports private
+direct access. Shared remote access uses the authenticated Compose deployment
+above; authentication and TLS belong to nginx, and Docker provides the sandbox.
 
 A modern browser is required. Canvas terminal text has no semantic accessibility
 tree. Browser-reserved shortcuts may not reach the terminal; toolbar Esc/Tab

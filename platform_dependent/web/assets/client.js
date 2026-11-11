@@ -8,9 +8,12 @@
   const sync = document.getElementById("sync");
   const ctx = screen.getContext("2d", { alpha: false });
   const htmlPanes = new Map();
+  const managed = document.body.dataset.managed === "true";
+  if (managed && !document.body.dataset.pty) return;
+  const notifyService = detail => { if (managed) window.dispatchEvent(new CustomEvent("st-terminal", { detail })); };
   let htmlState;
   let socket, metrics, composing = false, clipboard = "", reconnect, screenRatio = 0, syncEnabled = false;
-  let resizeTimer, requestedWidth = 0, requestedHeight = 0, wheel = 0;
+  let resizeTimer, heartbeat, requestedWidth = 0, requestedHeight = 0, wheel = 0;
   const utf8 = new TextEncoder();
   const message = text => { status.textContent = text; };
   const syncState = data => {
@@ -224,7 +227,7 @@
 
   function connect() {
     clearTimeout(reconnect);
-    const url = new URL("ws", location.href);
+    const url = new URL(managed ? "../attach" : "ws", location.href);
     url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
@@ -240,6 +243,9 @@
       }
       const data = JSON.parse(event.data);
       if (data.type === "hello") {
+        clearInterval(heartbeat);
+        heartbeat = setInterval(() => send({type: "ping"}), data.heartbeatMS || 20000);
+        notifyService({type: "connected", attachment: data.attachment});
         metrics = data; requestedWidth = data.width; requestedHeight = data.height;
         message("Connected"); syncState(data); resize();
         send({ type: "paint_ack", id: 0 }); // Opt into one presentation in flight.
@@ -266,6 +272,7 @@
           sizeScreen(data.width,data.height); await state.scene.apply(data);
         }).catch(error => { if (socket === state.conn) { message(error.message); state.conn.close(); } });
       }
+      else if (data.type === "open_pty") notifyService({type: "open", pty: data.openPTY});
       else if (data.type === "document") state.scene.documents(data.documents, data.cancelled);
       else if (data.type === "clipboard_sync") syncState(data);
       else if (data.type === "clipboard") { clipboard = data.text || ""; copy.disabled = false; message("Selection ready to copy"); }
@@ -282,13 +289,24 @@
       clearGlyphs(state);
       state.scene.close();
       if (socket === state.conn) {
+        clearInterval(heartbeat);
         for (const pane of htmlPanes.values()) pane.element.remove();
         htmlPanes.clear(); htmlState = null;
-        message("Disconnected — reconnecting (only one browser may attach)"); reconnect = setTimeout(connect, 1500);
+        if (managed) {
+          metrics = null;
+          message("Disconnected — refresh the terminal list to attach again");
+          copy.disabled = true; sync.disabled = true;
+          notifyService({type: "disconnected"});
+        } else {
+          message("Disconnected — reconnecting (only one browser may attach)"); reconnect = setTimeout(connect, 1500);
+        }
       }
     };
     socket.onerror = () => message("Connection unavailable");
   }
+
+  window.addEventListener("pagehide", () => { clearTimeout(reconnect); if (socket) socket.close(); });
+  window.addEventListener("pageshow", event => { if (event.persisted) location.reload(); });
 
   const specials = new Set(["Backspace", "Tab", "Enter", "Escape", "Delete", "Insert", "Home", "End", "PageUp", "PageDown", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
   input.addEventListener("keydown", e => {
@@ -341,6 +359,5 @@
   document.getElementById("paste").addEventListener("click", async () => { try { paste(await navigator.clipboard.readText()); } catch (_) { message("Use Ctrl+Shift+V or the browser paste menu"); } });
   document.getElementById("escape").addEventListener("click", () => { send({ type: "key", key: "Escape" }); focus(); });
   document.getElementById("tab").addEventListener("click", () => { send({ type: "key", key: "Tab" }); focus(); });
-  setInterval(() => send({ type: "ping" }), 20000);
   connect();
 })();

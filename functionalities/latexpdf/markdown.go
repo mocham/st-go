@@ -60,10 +60,15 @@ func MarkdownToLaTeX(source string) string {
 		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
 			flushParagraph()
 			closeList()
-			fence := trimmed[:3]
+			width := 3
+			for width < len(trimmed) && trimmed[width] == trimmed[0] {
+				width++
+			}
+			fence := trimmed[:width]
 			var code []string
 			for index++; index < len(lines); index++ {
-				if strings.HasPrefix(strings.TrimSpace(lines[index]), fence) {
+				closing := strings.TrimSpace(lines[index])
+				if strings.HasPrefix(closing, fence) && strings.TrimSpace(strings.TrimLeft(closing, string(fence[0]))) == "" {
 					break
 				}
 				code = append(code, lines[index])
@@ -85,6 +90,11 @@ func MarkdownToLaTeX(source string) string {
 		}
 		if isMarkdownMathDeclaration(trimmed) {
 			writeBlock(trimmed + "\n")
+			continue
+		}
+		if table, end, ok := markdownTable(lines, index); ok {
+			writeBlock(table)
+			index = end
 			continue
 		}
 		if level, title, ok := markdownHeading(trimmed); ok {
@@ -200,6 +210,10 @@ func isMarkdownMathDeclaration(line string) bool {
 }
 
 func markdownInlineToLaTeX(source string) string {
+	return markdownInline(source, false)
+}
+
+func markdownInline(source string, tableCell bool) string {
 	var output strings.Builder
 	for position := 0; position < len(source); {
 		switch {
@@ -217,21 +231,23 @@ func markdownInlineToLaTeX(source string) string {
 				continue
 			}
 		case source[position] == '`':
-			if relative := strings.IndexByte(source[position+1:], '`'); relative >= 0 {
-				end := position + 1 + relative
-				output.WriteString(`\texttt{` + escapeMarkdownText(source[position+1:end]) + `}`)
-				position = end + 1
+			if code, end, ok := markdownCodeSpan(source, position); ok {
+				if tableCell {
+					code = strings.ReplaceAll(code, `\|`, `|`)
+				}
+				output.WriteString(`\texttt{` + escapeMarkdownText(code) + `}`)
+				position = end
 				continue
 			}
 		case strings.HasPrefix(source[position:], "!["):
 			if label, _, end, ok := markdownLinkAt(source, position+1); ok {
-				output.WriteString(markdownInlineToLaTeX(label))
+				output.WriteString(markdownInline(label, tableCell))
 				position = end
 				continue
 			}
 		case source[position] == '[':
 			if label, target, end, ok := markdownLinkAt(source, position); ok {
-				output.WriteString(`\href{` + escapeMarkdownURL(target) + `}{` + markdownInlineToLaTeX(label) + `}`)
+				output.WriteString(`\href{` + escapeMarkdownURL(target) + `}{` + markdownInline(label, tableCell) + `}`)
 				position = end
 				continue
 			}
@@ -239,7 +255,7 @@ func markdownInlineToLaTeX(source string) string {
 			marker := source[position : position+2]
 			if relative := strings.Index(source[position+2:], marker); relative >= 0 {
 				end := position + 2 + relative
-				output.WriteString(`\textbf{` + markdownInlineToLaTeX(source[position+2:end]) + `}`)
+				output.WriteString(`\textbf{` + markdownInline(source[position+2:end], tableCell) + `}`)
 				position = end + 2
 				continue
 			}
@@ -247,18 +263,22 @@ func markdownInlineToLaTeX(source string) string {
 			marker := source[position]
 			if relative := strings.IndexByte(source[position+1:], marker); relative >= 0 {
 				end := position + 1 + relative
-				output.WriteString(`\emph{` + markdownInlineToLaTeX(source[position+1:end]) + `}`)
+				output.WriteString(`\emph{` + markdownInline(source[position+1:end], tableCell) + `}`)
 				position = end + 1
 				continue
 			}
 		case source[position] == '<':
 			if relative := strings.IndexByte(source[position+1:], '>'); relative >= 0 {
+				tag := strings.ToLower(strings.ReplaceAll(source[position:position+relative+2], " ", ""))
+				if tag == "<br>" || tag == "<br/>" {
+					output.WriteString(`\\`)
+				}
 				position += relative + 2
 				continue
 			}
 		case source[position] == '\\' && position+1 < len(source):
 			next, size := utf8.DecodeRuneInString(source[position+1:])
-			if strings.ContainsRune(`\`+"`*_{}[]()#+-.!", next) {
+			if strings.ContainsRune(`\`+"`*_{}[]()#+-.!|", next) {
 				output.WriteString(escapeMarkdownText(string(next)))
 				position += 1 + size
 				continue

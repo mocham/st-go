@@ -429,6 +429,8 @@ func (layout *pdfDocumentLayout) renderNode(node *html.Node, indent float64) {
 		layout.drawParagraph(layout.collectInlineChildren(node, bodyPDFStyle()), indent, 0, 2.5)
 	case "pre":
 		layout.drawPreformatted(htmlText(node), indent)
+	case "table":
+		layout.renderTable(node, indent)
 	case "ul", "ol":
 		layout.renderList(node, indent, node.Data == "ol")
 	case "li":
@@ -806,8 +808,16 @@ func (layout *pdfDocumentLayout) drawParagraph(runs []pdfInline, indent, before,
 		return
 	}
 	layout.verticalSpace(before)
-	items := layout.breakInlineRuns(runs)
-	available := layout.availableWidth(indent)
+	for _, line := range layout.wrapInlineItems(layout.breakInlineRuns(runs), layout.availableWidth(indent)) {
+		layout.drawLine(line, layout.marginLeft+indent)
+	}
+	layout.verticalSpace(after)
+}
+
+// Measuring and wrapping separately lets table cells share paragraph typography
+// while reserving the height of a whole row before painting any of its columns.
+func (layout *pdfDocumentLayout) wrapInlineItems(items []pdfLineItem, available float64) [][]pdfLineItem {
+	var lines [][]pdfLineItem
 	var line []pdfLineItem
 	lineWidth := 0.0
 	recalculateLineWidth := func() {
@@ -827,7 +837,7 @@ func (layout *pdfDocumentLayout) drawParagraph(runs []pdfInline, indent, before,
 		if len(line) == 0 {
 			return
 		}
-		layout.drawLine(line, layout.marginLeft+indent)
+		lines = append(lines, line)
 		line = nil
 		lineWidth = 0
 	}
@@ -889,7 +899,7 @@ func (layout *pdfDocumentLayout) drawParagraph(runs []pdfInline, indent, before,
 		lineWidth += item.width
 	}
 	flush()
-	layout.verticalSpace(after)
+	return lines
 }
 
 func (layout *pdfDocumentLayout) availableWidth(leftIndent float64) float64 {

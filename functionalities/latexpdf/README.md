@@ -8,6 +8,9 @@ selectable. Fonts are embedded and optional faces load on first use.
 ## Supported features
 
 - Headings, prose, inline/display math, colors, underline/strike, and Unicode.
+- Markdown pipe tables with column alignment, inline formatting/math, escaped
+  pipes, and cell line breaks. HTML uses semantic tables; PDFs wrap cells, keep
+  selectable text, and repeat headers when a table spans pages.
 - Xy-pic/tikzcd grids and arrows, labelled Dynkin diagrams, and a subset of TikZ
   nodes, paths, shapes, plots, and loops.
 - Traditional and biblatex BBL data through `SupplementBibliography`.

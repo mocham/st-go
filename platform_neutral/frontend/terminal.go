@@ -120,6 +120,10 @@ func NewTerminalOpts(cfg *config.Config, ratio float64, x, y int, geomMask XGeom
 	if err != nil {
 		return nil, err
 	}
+	if _, ok := host.(api.SessionService); ok {
+		t.host = host
+		return t, nil
+	}
 	widget, err := widgets.Wrap(host)
 	if err != nil {
 		host.Close()

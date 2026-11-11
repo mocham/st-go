@@ -1,10 +1,28 @@
 package preview
 
 import (
+	"bytes"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestMarkdownTablePreviewWorksInPDFAndHTML(t *testing.T) {
+	source, err := Load(filepath.Join(t.TempDir(), "table.md"), func(string) (string, error) {
+		return "| Tool | Formula |\n| --- | ---: |\n| **shell** | $x^2$ |\n", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, mathErrors, err := RenderHTML(source)
+	if err != nil || mathErrors != 0 || !strings.Contains(body, "<table ") || !strings.Contains(body, "<strong>shell</strong>") || !strings.Contains(body, "<svg") {
+		t.Fatalf("HTML table: %v, %d, %s", err, mathErrors, body)
+	}
+	pdf, mathErrors, err := Render(source)
+	if err != nil || mathErrors != 0 || !bytes.HasPrefix(pdf, []byte("%PDF-")) {
+		t.Fatalf("PDF table: %v, %d", err, mathErrors)
+	}
+}
 
 func TestHTMLPreviewUsesSemanticRendererWithoutPDF(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "note.md")

@@ -9,6 +9,8 @@ policy, asynchronous scheduling, and preview lifetime.
 - `Position` / `ExpandedPosition`: approximate source-to-scroll navigation.
 - `Render`: selectable PDF text and vector math; `FontScaleForPane` keeps
   file-browser text consistent with govim's preview.
+- Markdown tables retain rows/columns, alignment, wrapped cells, and inline math
+  in PDF and HTML output.
 - `LoadWeb` / `RenderHTML`: HTML/SVG output, including direct HTML/XHTML and
   escaped CSS/JSON source views.
 - `EncodeHTML` / `SendHTML`: bounded HTML/CSS encoding and atomic chunked transfer.

@@ -1,0 +1,9 @@
+.git
+.opencode
+BINARIES
+third_party
+TEST-ASSETS
+SNAPSHOT
+deploy/web/secrets
+deploy/web/.env
+*.log

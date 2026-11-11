@@ -68,6 +68,9 @@ func (d *Driver) dispatch(c *client, m inputMessage) error {
 	if cb.Closed() {
 		return fmt.Errorf("terminal closed")
 	}
+	if c.expired() {
+		return fmt.Errorf("attachment expired")
+	}
 	switch m.Type {
 	case "paint_ack":
 		select {
@@ -147,6 +150,12 @@ func (d *Driver) dispatch(c *client, m inputMessage) error {
 		}
 		d.finishQuery(c, m.ID, m.Text, m.OK)
 	case "ping":
+		select {
+		case c.controls <- serverMessage{Type: "pong"}:
+		default:
+			return fmt.Errorf("heartbeat backlog")
+		}
+		return nil
 	case "document_reply":
 		return d.documentReply(c, m.ID, m.Data)
 	case "media_status":

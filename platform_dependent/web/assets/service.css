@@ -1,0 +1,15 @@
+:root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #181818; color: #ddd; }
+* { box-sizing: border-box; }
+body { margin: 0; height: 100dvh; display: flex; flex-direction: column; }
+header { flex-basis: auto; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 8px 12px; background: #252525; }
+button { background: #333; color: inherit; border: 1px solid #666; border-radius: 3px; padding: 5px 9px; cursor: pointer; }
+button:disabled { opacity: .4; cursor: default; }
+#service-status { flex: 1; min-width: 180px; }
+nav { display: flex; gap: 6px; padding: 6px; overflow-x: auto; flex-shrink: 0; }
+.pty { display: flex; gap: 3px; align-items: center; border: 1px solid #444; padding: 3px; border-radius: 4px; }
+.pty.active { border-color: #9dbfdf; }
+.pty.occupied { color: #888; }
+.pty .select { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+main { flex: 1; min-height: 0; position: relative; }
+#empty { padding: 20px; }
+[hidden] { display: none !important; }

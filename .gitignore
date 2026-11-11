@@ -25,4 +25,5 @@
 /SNAPSHOT/
 AGENTS.md
 /TEST-ASSETS/
-
+/deploy/web/.env
+/deploy/web/secrets/

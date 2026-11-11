@@ -43,6 +43,8 @@ and Poppler PDF rendering.
 `st-web` embeds Canvas code, PDF.js, workers, fonts, and other browser assets.
 It needs no native media libraries, npm build, CDN, or companion asset directory.
 Images/PDFs render in the browser; TIFF/BMP conversion uses pure Go on the server.
+The [web-service Compose image](../deploy/web/README.md) builds these CGO-free
+binaries and runs st-web behind a TLS/authenticating nginx sibling.
 
 All SQLite users use pure-Go `modernc.org/sqlite`. Full native terminals cache
 decoded WebP frames; every backend supports opt-in shared clipboard storage.
@@ -57,8 +59,8 @@ Use Make for native linking: bare root Go build/test commands lack its link obje
 ```sh
 make test                 # integrated native, web, and module tests
 make test-tui             # standalone modules, without graphical libraries
-make test-web             # CGO-free web and shared-clipboard checks
-make test-web-browser     # Node >=22 and Chromium; no npm packages
+make test-web             # web protocol, shared clipboard, service/PTY lifecycle
+make test-web-browser     # direct + shared-service Chromium checks; Node >=22, no npm
 make test-zat-djvu        # bundled static DjVuLibre profile
 ```
 

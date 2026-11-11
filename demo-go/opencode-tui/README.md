@@ -38,6 +38,10 @@ make st-web opencode-tui
 ./BINARIES/st-web -e ./BINARIES/opencode-tui --web --server http://127.0.0.1:4096 /project
 ```
 
+Markdown pipe tables render with column alignment, wrapped cells, and inline
+formatting/math in both modes. PDF tables repeat their header across pages;
+wide browser tables scroll horizontally within the preview.
+
 Responses update while streaming. F2 toggles rich/text display; Esc returns focus
 from browser previews to the composer. `--no-preview` uses text only and takes
 precedence over `--web`. Unsupported terminals automatically fall back to text.

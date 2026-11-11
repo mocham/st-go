@@ -1,7 +1,10 @@
 package web
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"image"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -11,6 +14,9 @@ import (
 )
 
 type serverMessage struct {
+	Attachment    string            `json:"attachment,omitempty"`
+	HeartbeatMS   int64             `json:"heartbeatMS,omitempty"`
+	OpenPTY       *ptyInfo          `json:"openPTY,omitempty"`
 	Cancelled     []uint64          `json:"cancelled,omitempty"`
 	Documents     []documentRequest `json:"documents,omitempty"`
 	Media         []mediaOverlay    `json:"media,omitempty"`
@@ -30,11 +36,13 @@ type serverMessage struct {
 	SyncAvailable bool              `json:"syncAvailable,omitempty"`
 }
 type client struct {
-	conn     *websocket.Conn
-	controls chan serverMessage
-	pressed  map[byte]inputMessage
-	done     chan struct{}
-	paintAck chan uint64
+	conn       *websocket.Conn
+	controls   chan serverMessage
+	pressed    map[byte]inputMessage
+	done       chan struct{}
+	paintAck   chan uint64
+	leaseUntil atomic.Int64
+	token      string
 }
 type clipboardQuery struct {
 	id     uint64
@@ -44,9 +52,16 @@ type clipboardQuery struct {
 }
 
 func (d *Driver) serveSocket(conn *websocket.Conn) {
+	var secret [32]byte
+	if _, err := rand.Read(secret[:]); err != nil {
+		conn.Close()
+		return
+	}
 	// JSON may escape each byte of valid clipboard text as six ASCII bytes.
 	conn.MaxPayloadBytes = 6*limits.ClipboardBytes + 16384
 	c := &client{conn: conn, controls: make(chan serverMessage, 4), pressed: make(map[byte]inputMessage), done: make(chan struct{}), paintAck: make(chan uint64, 16)}
+	c.leaseUntil.Store(time.Now().Add(d.attachmentTimeout).UnixNano())
+	c.token = hex.EncodeToString(secret[:])
 	d.mu.Lock()
 	select {
 	case <-d.done:
@@ -63,6 +78,10 @@ func (d *Driver) serveSocket(conn *websocket.Conn) {
 	state := d.ClipboardSyncState()
 	hello := serverMessage{Type: "hello", Width: d.width, Height: d.height, CellWidth: d.window.CellWidth, CellHeight: d.window.CellHeight, Border: d.window.Border,
 		SyncEnabled: state.Enabled, SyncReady: state.Ready, SyncAvailable: state.Available}
+	hello.HeartbeatMS = min(20*time.Second, d.attachmentTimeout/3).Milliseconds()
+	if d.managed {
+		hello.Attachment = c.token
+	}
 	d.mu.Unlock()
 	writerDone := make(chan struct{})
 	go func() { defer close(writerDone); defer conn.Close(); d.writeSocket(c, hello) }()
@@ -100,15 +119,24 @@ func (d *Driver) serveSocket(conn *websocket.Conn) {
 	for {
 		var input inputMessage
 		// Expire vanished controllers so a broken network cannot reserve the
-		// single attachment forever. The embedded browser sends an idle heartbeat.
-		conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+		// single attachment forever. The browser sends an idle heartbeat.
+		conn.SetReadDeadline(time.Unix(0, c.leaseUntil.Load()))
 		if err := websocket.JSON.Receive(conn, &input); err != nil {
+			return
+		}
+		if c.expired() {
 			return
 		}
 		if err := d.dispatch(c, input); err != nil {
 			return
 		}
+		c.leaseUntil.Store(time.Now().Add(d.attachmentTimeout).UnixNano())
 	}
+}
+
+func (c *client) expired() bool {
+	until := c.leaseUntil.Load()
+	return until != 0 && time.Now().UnixNano() >= until
 }
 
 func sendJSON(c *client, message serverMessage) error {

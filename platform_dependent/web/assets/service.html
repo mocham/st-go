@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>st-go terminals</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="service.css">
+  <script src="scene.js" defer></script>
+  <script src="service.js" defer></script>
+  <script src="client.js" defer></script>
+</head>
+<body data-managed="true" data-prefix="{{prefix}}" data-pty="{{pty}}">
+  <header>
+    <strong>st-go</strong>
+    <button id="refresh">Refresh terminals</button>
+    <button id="new">New terminal</button>
+    <label><input id="show-hidden" type="checkbox"> Show hidden</label>
+    <span id="service-status" role="status">Loading terminals…</span>
+  </header>
+  <nav id="terminals" aria-label="Shared terminals"></nav>
+  <p id="empty">Select a terminal or create a new one.</p>
+  <header id="terminal-tools" hidden>
+    <span id="status" role="status">Connecting…</span>
+    <button id="sync" type="button" disabled>Sync off</button>
+    <button id="copy" type="button" disabled>Copy</button>
+    <button id="paste" type="button">Paste</button>
+    <button id="escape" type="button">Esc</button>
+    <button id="tab" type="button">Tab</button>
+  </header>
+  <main id="viewport" hidden>
+    <canvas id="screen" aria-label="Server-rendered terminal"></canvas>
+    <textarea id="input" aria-label="Terminal input" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+  </main>
+</body>
+</html>

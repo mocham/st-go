@@ -1,0 +1,53 @@
+services:
+  terminal:
+    build:
+      context: ../..
+      dockerfile: deploy/web/Dockerfile
+    init: true
+    restart: unless-stopped
+    command:
+      - -service
+      - -listen
+      - 0.0.0.0
+      - -port
+      - "8080"
+      - -base-path
+      - ${ST_BASE_PATH:-/terminal/}
+      - -origin
+      - ${ST_ORIGIN:?Set ST_ORIGIN to the external HTTPS origin}
+      - -attachment-timeout
+      - ${ST_ATTACHMENT_TIMEOUT:-90s}
+      - -max-ptys
+      - ${ST_MAX_PTYS:-8}
+      - -dir
+      - /workspace
+    volumes:
+      - workspace:/workspace
+      - home:/home/terminal
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://127.0.0.1:8080${ST_BASE_PATH:-/terminal/}healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+  nginx:
+    image: nginx:stable-bookworm
+    restart: unless-stopped
+    depends_on:
+      terminal:
+        condition: service_healthy
+    ports:
+      - "${ST_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./secrets/htpasswd:/etc/nginx/htpasswd:ro
+      - ./secrets/tls.crt:/etc/nginx/tls.crt:ro
+      - ./secrets/tls.key:/etc/nginx/tls.key:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t -q && kill -0 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  workspace:
+  home:

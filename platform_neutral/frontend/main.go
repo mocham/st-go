@@ -215,6 +215,12 @@ func main() {
 		log.Fatalf("display: %v", err)
 	}
 	defer t.Close()
+	if service, ok := t.host.(api.SessionService); ok {
+		if err := serveTerminalSessions(service, cfg, ratio, cmdArgs, childDir, title, allowTabs && !noTabs); err != nil {
+			log.Printf("terminal service: %v", err)
+		}
+		return
+	}
 	if identity, ok := t.host.(api.BackendIdentity); ok && identity.BackendName() == "x11" {
 		cfg.ClipboardSyncToken = newGeometryToken()
 	}

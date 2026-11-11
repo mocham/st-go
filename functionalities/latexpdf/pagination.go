@@ -101,7 +101,7 @@ func environmentRendersTextBlocks(environment string) bool {
 	switch strings.TrimSuffix(environment, "*") {
 	case "equation", "displaymath", "align", "alignat", "flalign", "split",
 		"gather", "multline", "CD", "verbatim", "lstlisting", "minted",
-		"tikzpicture", "flowchart", "tabular", "tabularx", "array":
+		"tikzpicture", "flowchart", "tabular", "tabularx", "array", "markdowntable":
 		return false
 	default:
 		return true

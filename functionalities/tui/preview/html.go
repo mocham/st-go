@@ -13,7 +13,7 @@ import (
 	"st-go/limits"
 )
 
-const HTMLStyle = `body{font:18px/1.55 Georgia,serif;color:#242424;margin:20px}h1,h2,h3,h4{line-height:1.25}pre,code{font-family:monospace}pre{padding:12px;background:#eee;white-space:pre-wrap}table{border-collapse:collapse;max-width:100%}td,th{padding:4px 8px;border:1px solid #aaa}.math-inline{display:inline-block}.math-display{display:block;text-align:center;overflow-x:auto;margin:1em 0}.math-inline svg,.math-display svg{vertical-align:middle}blockquote{border-left:3px solid #aaa;padding-left:1em}a{color:#246}`
+const HTMLStyle = `body{font:18px/1.55 Georgia,serif;color:#242424;margin:20px}h1,h2,h3,h4{line-height:1.25}pre,code{font-family:monospace}pre{padding:12px;background:#eee;white-space:pre-wrap}table{border-collapse:collapse;max-width:100%}td,th{padding:4px 8px;border:1px solid #aaa;vertical-align:top}.markdown-table-scroll{max-width:100%;overflow-x:auto;margin:1em 0}.markdown-table{width:100%;table-layout:auto}.markdown-table td,.markdown-table th{overflow-wrap:anywhere;min-width:3em}.markdown-table th{background:#e9edf1}.markdown-table tbody tr:nth-child(even){background:#f1f3f5}.math-inline{display:inline-block}.math-display{display:block;text-align:center;overflow-x:auto;margin:1em 0}.math-inline svg,.math-display svg{vertical-align:middle}blockquote{border-left:3px solid #aaa;padding-left:1em}a{color:#246}`
 
 func WebSupported(path string) bool {
 	if Supported(path) {

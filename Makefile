@@ -484,9 +484,11 @@ test-tui:
 # Optional live canvas check using installed Chromium and Node's built-in CDP.
 test-web: st-web
 	CGO_ENABLED=0 go test -tags 'backend_web' ./platform_dependent/web ./platform_neutral/sharedclipboard
+	CGO_ENABLED=0 go test -tags 'backend_web terminal_tabs' ./platform_neutral/frontend -run '^TestWebService'
 
 test-web-browser: st-web govim file-browser
 	node platform_dependent/web/testdata/browser-smoke.mjs
+	node platform_dependent/web/testdata/service-smoke.mjs
 
 # End-to-end animated-WebP playback through the built browser, PTY, terminal
 # timer and X framebuffer. Point DISPLAY at an isolated X server.

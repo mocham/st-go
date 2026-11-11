@@ -515,6 +515,8 @@ func (context *latexRenderContext) renderEnvironment(environment, options, conte
 		return context.renderFlowchart(content, options)
 	case "tabular":
 		return context.renderTabular(content, 1)
+	case "markdowntable":
+		return context.renderMarkdownTable(content)
 	case "tabularx":
 		return context.renderTabular(content, 2)
 	case "array":
