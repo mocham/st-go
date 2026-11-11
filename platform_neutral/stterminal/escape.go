@@ -747,6 +747,12 @@ func (t *Term) dslOpen(args []string) {
 		opts.ViewCols, opts.ViewRows = rw, rh
 	}
 
+	if source, ok := t.hooks.(ImageSourceHooks); ok {
+		if cols, rows, glyphs, handled := source.OpenImageSource(path, opts); handled {
+			t.placeImageGlyphs(cols, rows, glyphs, opts, rectSet, rx, ry, rw, rh)
+			return
+		}
+	}
 	data, err := limits.ReadFile(path)
 	if err != nil {
 		log.Printf("dsl: open %q: %v\n", path, err)
@@ -802,6 +808,10 @@ func (t *Term) dslOpen(args []string) {
 		log.Printf("dsl: failed to decode %q\n", path)
 		return
 	}
+	t.placeImageGlyphs(cols, rows, glyphs, opts, rectSet, rx, ry, rw, rh)
+}
+
+func (t *Term) placeImageGlyphs(cols, rows int, glyphs []Glyph, opts ImageDecodeOptions, rectSet bool, rx, ry, rw, rh int) {
 	if cols < 1 {
 		cols = 1
 	}
@@ -1397,6 +1407,27 @@ checkControlCode:
 		t.esc = 0
 		return
 	}
+	if width == 0 {
+		x := t.c.x - 1
+		if t.c.state&cursorWrapNext != 0 {
+			x = t.c.x
+		}
+		if x < 0 {
+			return
+		}
+		if t.line[t.c.y][x].Mode&ATTRWdummy != 0 {
+			x--
+		}
+		if x < 0 {
+			return
+		}
+		g := &t.line[t.c.y][x]
+		if g.U != ImageRune && len(g.Suffix)+len_ <= 64 {
+			g.Suffix += string(u)
+			t.markDirty(x, t.c.y, min(t.col-1, x+1), t.c.y)
+		}
+		return
+	}
 	if t.selected(t.c.x, t.c.y) {
 		t.selclear()
 	}
@@ -1434,6 +1465,7 @@ checkControlCode:
 				t.line[t.c.y][t.c.x+2].Mode &^= ATTRWdummy
 			}
 			t.line[t.c.y][t.c.x+1].U = '\x00'
+			t.line[t.c.y][t.c.x+1].Suffix = ""
 			t.line[t.c.y][t.c.x+1].Mode = ATTRWdummy
 		}
 	}

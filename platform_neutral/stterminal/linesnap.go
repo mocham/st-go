@@ -8,7 +8,7 @@ func (t *Term) LineText(y int) string {
 			continue
 		}
 		if t.line[y][x].U != 0 {
-			s += string(t.line[y][x].U)
+			s += t.line[y][x].Text()
 		}
 	}
 	return s

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,39 @@ import (
 type tabButtonTestHost struct {
 	*web.Driver
 	newTerminalTab func()
+	firstScene     *tabSceneProbe
+}
+
+type tabSceneProbe struct {
+	api.SceneSurface
+	color atomic.Uint32
+}
+
+func (p *tabSceneProbe) Apply(u api.SceneUpdate) {
+	if u.Reset {
+		p.color.Store(u.Background)
+	}
+	for _, row := range u.Rows {
+		if row.Y == 1 {
+			color := row.Background
+			if len(row.Text) > 0 {
+				color = row.Text[0].Background
+			}
+			p.color.Store(color)
+		}
+	}
+	p.SceneSurface.Apply(u)
+}
+func (host *tabButtonTestHost) NewSceneSurface(k api.WidgetKind, r image.Rectangle, bg uint32, visible bool) (api.SceneSurface, error) {
+	s, err := host.Driver.NewSceneSurface(k, r, bg, visible)
+	if err != nil {
+		return nil, err
+	}
+	p := &tabSceneProbe{SceneSurface: s}
+	if host.firstScene == nil {
+		host.firstScene = p
+	}
+	return p, nil
 }
 
 func (host *tabButtonTestHost) BindNewTerminalTab(handler func()) { host.newTerminalTab = handler }
@@ -382,9 +416,7 @@ func TestTabTemporaryFileHandoffAndSynchronizedActivation(t *testing.T) {
 	spawnTestTab(t, root, request)
 	var child *Terminal
 	tabWindow(t, m, func() { child = m.entries[1].terminal; m.selectTab(1); m.selectTab(0) })
-	root.mu.Lock()
-	pixel := root.framebuf[root.fbW+1]
-	root.mu.Unlock()
+	pixel := widgets.Unwrap(root.host).(*tabButtonTestHost).firstScene.color.Load()
 	if pixel != 0xff112233 {
 		t.Fatalf("tab initialization/activation exposed uncommitted pixels: %#x", pixel)
 	}

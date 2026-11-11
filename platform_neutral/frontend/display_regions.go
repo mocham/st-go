@@ -20,6 +20,8 @@ import (
 // to mu. Lock order is Terminal.mu -> mu; preview workers never take Terminal.mu.
 // Geometry is copied at layout changes so workers never read the terminal grid.
 type displayRegionState struct {
+	documentCancel        func()
+	documentQuery         uint64
 	mu                    sync.Mutex
 	mainWidth, totalWidth int // requested ratio, preserved across WM resizes
 	mainRows, windowRows  int // nonzero mainRows selects a stacked layout
@@ -50,6 +52,8 @@ type regionReply struct {
 }
 
 type regionSurface struct {
+	mediaStatus           api.MediaStatus
+	media                 api.MediaView
 	html                  api.HTMLView
 	list                  *regionListSurface
 	listSelected          int
@@ -198,6 +202,13 @@ func (t *Terminal) SetRegions(regions []term.DisplayRegion) error {
 	s := &t.displayRegions
 	s.mu.Lock()
 	if mainWidth == cols {
+		if registry, ok := t.host.(api.MediaRegistry); ok {
+			for _, surface := range []*regionSurface{s.secondary, s.listPreview} {
+				if surface != nil && surface.media.ID != 0 {
+					registry.ReleaseMedia(surface.media.ID)
+				}
+			}
+		}
 		s.generation++ // invalidate both pending and in-flight decode results
 		s.documentRevision++
 		s.secondary = nil
@@ -299,6 +310,66 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 	}
 	if request.KeepPage && surface.request != nil {
 		request.Options.Page = surface.request.Options.Page
+		if surface.media.ID != 0 {
+			request.Options.Page = max(0, surface.media.Page-1)
+		}
+	}
+	if t.scene() != nil {
+		registry := t.host.(api.MediaRegistry)
+		resource := registry.RegisterMedia(api.MediaSource{Path: request.Path})
+		if resource == 0 {
+			return fmt.Errorf("media resource budget exhausted")
+		}
+		if surface.media.ID != 0 {
+			registry.ReleaseMedia(surface.media.ID)
+		}
+		t.displayRegions.documentRevision++
+		if t.displayRegions.documentCancel != nil {
+			t.displayRegions.documentCancel()
+			t.displayRegions.documentCancel = nil
+		}
+		surface.search, surface.pendingSearch = nil, nil
+		surface.mediaStatus = api.MediaStatus{}
+		fit := "contain"
+		if request.Continuous {
+			fit = "width"
+		}
+		if request.Viewer {
+			fit = "native"
+			if request.Options.FitContain {
+				fit = "width"
+			}
+		}
+		if request.Options.FitWidth {
+			fit = "width"
+		}
+		if request.Options.FitHeight {
+			fit = "height"
+		}
+		surface.request = &request
+		surface.html = api.HTMLView{}
+		surface.media = api.MediaView{ID: resource, Generation: t.displayRegions.documentRevision, Page: request.Options.Page + 1, Fit: fit, Continuous: request.Continuous, Background: request.Background, Zoom: request.ViewerZoom}
+		surface.loading = true
+		view := surface.media
+		t.host.(api.MediaObserver).WatchMedia(resource, func(status api.MediaStatus) {
+			s := &t.displayRegions
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if t.closed() || surface.media.ID != status.ID || view.Generation != status.Generation || surface.media.PositionID != status.PositionID {
+				return
+			}
+			surface.mediaStatus = status
+			surface.loading = false
+			surface.scrollFailed = status.Error != ""
+			surface.media.Page = max(1, status.Page)
+			surface.media.Position = status.Position
+			if surface.reportScroll {
+				t.queueRegionReply(regionReply{s.generation, t.regionStatusReply(id, surface)})
+			}
+		})
+		surface.dirty = true
+		t.requestRegionPaint()
+		return nil
 	}
 	initialPage := request.Continuous && request.Options.Page > 0 && !request.KeepPage
 	request.KeepPage = false
@@ -362,6 +433,17 @@ func (t *Terminal) clearRegion(id term.RegionID) error {
 	if err != nil {
 		return err
 	}
+	if surface.media.ID != 0 {
+		t.host.(api.MediaRegistry).ReleaseMedia(surface.media.ID)
+		surface.media = api.MediaView{}
+	}
+	if old := t.displayRegions.listPreview; old != nil && old.media.ID != 0 {
+		t.host.(api.MediaRegistry).ReleaseMedia(old.media.ID)
+	}
+	if t.displayRegions.documentCancel != nil {
+		t.displayRegions.documentCancel()
+		t.displayRegions.documentCancel = nil
+	}
 	t.displayRegions.generation++
 	t.displayRegions.documentRevision++
 	t.cancelRegionDecode()
@@ -389,6 +471,11 @@ func (t *Terminal) queueRegionImage() {
 	s := &t.displayRegions
 	s.generation++
 	surface := s.secondary
+	if surface != nil && surface.media.ID != 0 {
+		surface.dirty = true
+		t.requestRegionPaint()
+		return
+	}
 	if surface != nil && surface.list != nil {
 		list := surface.list
 		if list.cw != t.cw || list.ch != t.ch || list.baseline != t.baseline {
@@ -857,6 +944,9 @@ func (t *Terminal) FindRegion(id term.RegionID, text string, direction int, next
 	if s.request == nil || !s.request.Continuous {
 		return fmt.Errorf("search requires a loaded continuous PDF")
 	}
+	if s.media.ID != 0 {
+		return t.findSceneDocument(s, text, direction, next)
+	}
 	if text == "" {
 		s.search, s.pendingSearch, s.dirty = nil, nil, true
 		s.searchAnchored = false
@@ -915,6 +1005,44 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 	}
 	if event.Value < -limits.MaxBytes || event.Value > limits.MaxBytes || (event.Kind == "seek" && event.Value < 1) {
 		return fmt.Errorf("invalid region navigation event")
+	}
+	if surface.media.ID != 0 {
+		switch event.Kind {
+		case "info":
+			t.termCore.WriteToTTY([]byte(t.regionStatusReply(id, surface)), false)
+			return nil
+		case "scroll":
+			surface.media.Scroll += event.Value
+		case "view":
+			surface.media.Scroll += event.Value * t.displayRegions.viewport.Dy() / 1000000 / max(1, t.ch)
+		case "position":
+			surface.media.PositionID++
+			surface.media.Position = clampInt(event.Value, 0, 1000000)
+			surface.media.Scroll = 0
+		case "seek":
+			surface.media.Page = max(1, event.Value)
+			surface.media.Position = 0
+			surface.media.PositionID++
+		case "page":
+			surface.media.Page = max(1, surface.media.Page+event.Value)
+			surface.media.Position = 0
+			surface.media.PositionID++
+		case "zoom":
+			surface.media.Zoom = clampInt(event.Value, 1, term.RegionViewerZoomMaximum)
+		case "zoomstep":
+			surface.media.Zoom = clampInt(int(float64(max(100, surface.media.Zoom))*math.Pow(1.25, float64(clampInt(event.Value, -20, 20)))), 1, term.RegionViewerZoomMaximum)
+		case "fit-width":
+			surface.media.Fit = "width"
+		case "fit-height":
+			surface.media.Fit = "height"
+		case "fit-original":
+			surface.media.Fit = "native"
+		default:
+			return fmt.Errorf("unsupported media navigation")
+		}
+		surface.dirty = true
+		t.requestRegionPaint()
+		return nil
 	}
 	if surface.html.Document != nil {
 		switch event.Kind {
@@ -1107,6 +1235,21 @@ func (t *Terminal) reportRegionScrollEdge(id term.RegionID, surface *regionSurfa
 // zoom, so the client can preserve that mode if the next key changes images.
 // The display-region mutex is held by every caller.
 func (t *Terminal) regionStatusReply(id term.RegionID, surface *regionSurface) string {
+	if surface.media.ID != 0 {
+		loading, failed := 0, 0
+		if surface.loading {
+			loading = 1
+		}
+		if surface.scrollFailed {
+			failed = 1
+		}
+		m := surface.mediaStatus
+		reply := fmt.Sprintf("\x1bPregion %s status %d %d %d %d %d %d\x1b\\", id, max(1, m.Page), m.Pages, m.Position, max(100, surface.media.Zoom), loading, failed)
+		if surface.request != nil && surface.request.Viewer {
+			reply += fmt.Sprintf("\x1bPregion %s image-status %d %d %d %d %s %d %d\x1b\\", id, m.Width, m.Height, m.Position, max(100, surface.media.Zoom), surface.media.Fit, loading, failed)
+		}
+		return reply
+	}
 	page, pages := surface.currentPage(), max(0, len(surface.bitmap.pageTops)-1)
 	if surface.request != nil && surface.request.Viewer && surface.sourceWidth > 0 {
 		page, pages = 1, 1

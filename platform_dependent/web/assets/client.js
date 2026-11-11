@@ -223,6 +223,7 @@
     socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
     const state = { conn: socket, glyphs: new Map(), atlases: new Set(), glyphBytes: 0, queue: Promise.resolve() };
+    state.scene = new SceneClient(screen, viewport, send, focus);
     socket.onmessage = event => {
       if (typeof event.data !== "string") {
         // Image decoding is asynchronous; commit damage frames in wire order.
@@ -249,9 +250,17 @@
       }
       else if (data.type === "html") {
         state.queue = state.queue.then(() => {
-          if (socket === state.conn && state.conn.readyState === WebSocket.OPEN) renderHTML(data);
+          if (socket === state.conn && state.conn.readyState === WebSocket.OPEN) { renderHTML(data); state.scene.previewsApply(data); }
         }).catch(error => { if (socket === state.conn) { message(error.message); state.conn.close(); } });
       }
+      else if (data.type === "scene") {
+        state.queue = state.queue.then(async () => {
+          if (socket !== state.conn || state.conn.readyState !== WebSocket.OPEN) return;
+          if (requestedWidth !== data.width || requestedHeight !== data.height) return;
+          sizeScreen(data.width,data.height); await state.scene.apply(data);
+        }).catch(error => { if (socket === state.conn) { message(error.message); state.conn.close(); } });
+      }
+      else if (data.type === "document") state.scene.documents(data.documents, data.cancelled);
       else if (data.type === "clipboard_sync") syncState(data);
       else if (data.type === "clipboard") { clipboard = data.text || ""; copy.disabled = false; message("Selection ready to copy"); }
       else if (data.type === "clipboard_read") {
@@ -265,6 +274,7 @@
     };
     socket.onclose = () => {
       clearGlyphs(state);
+      state.scene.close();
       if (socket === state.conn) {
         for (const pane of htmlPanes.values()) pane.element.remove();
         htmlPanes.clear(); htmlState = null;

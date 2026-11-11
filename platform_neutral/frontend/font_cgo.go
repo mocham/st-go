@@ -1,3 +1,5 @@
+//go:build !backend_web
+
 package frontend
 
 /*

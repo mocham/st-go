@@ -1,4 +1,4 @@
-//go:build fastimage
+//go:build fastimage && !backend_web
 
 package frontend
 

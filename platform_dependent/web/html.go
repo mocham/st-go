@@ -21,7 +21,12 @@ func (s *surface) PresentHTML(_ uint64, view api.HTMLView) bool {
 		return false
 	}
 	if s.html != view {
+		if s.scene != nil {
+			s.scene.hidden = true
+			s.scene.dirty = true
+		}
 		s.html = view
+		s.media = api.MediaView{}
 		d.htmlVersion++
 		d.notify()
 	}
@@ -38,6 +43,9 @@ func (d *Driver) htmlSnapshot(previous uint64) (uint64, *serverMessage) {
 	}
 	m := &serverMessage{Type: "html", Width: d.width, Height: d.height, Overlays: []htmlOverlay{}}
 	for _, s := range d.surfaces {
+		if !s.closed && !s.hidden && s.media.ID != 0 {
+			m.Media = append(m.Media, mediaOverlay{s.id, s.bounds.Min.X, s.bounds.Min.Y, s.bounds.Dx(), s.bounds.Dy(), s.media})
+		}
 		if !s.closed && !s.hidden && s.html.Document != nil {
 			m.Overlays = append(m.Overlays, htmlOverlay{s.id, s.bounds.Min.X, s.bounds.Min.Y, s.bounds.Dx(), s.bounds.Dy(), s.html})
 		}

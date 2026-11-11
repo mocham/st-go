@@ -8,7 +8,6 @@ import (
 	"image"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -444,6 +443,10 @@ func tabLabel(title string, limit int) string {
 }
 
 func (m *terminalTabs) paintBar() {
+	if host, ok := m.bar.(api.ScenePainter); ok && host.Scene() != nil {
+		m.paintSceneBar(host.Scene())
+		return
+	}
 	if m.bar == nil || !m.bar.Visible() {
 		return
 	}
@@ -454,57 +457,6 @@ func (m *terminalTabs) paintBar() {
 		return
 	}
 	pixels := make([]uint32, size/4)
-	for i := range pixels {
-		pixels[i] = 0xff2d2b46
-	}
-	m.hits = nil
-	cell := max(1, m.renderer.cw)
-	available := w / cell
-	if available < 1 {
-		m.bar.Upload(pixels, w, 0, 0, w, h)
-		return
-	}
-	textY := max(0, (h-m.renderer.ch)/2)
-	count := len(m.entries)
-	start := 0
-	// Keep the active tab reachable even when the bar cannot show every label.
-	shown := min(count, max(1, available/terminalTabWidthCells))
-	if m.active >= shown {
-		start = m.active - shown + 1
-	}
-	width := terminalTabWidthCells
-	x := 0
-	for i := start; i < min(count, start+shown); i++ {
-		bg := uint32(0xff2d2b46)
-		fg := uint32(0xffc4dfb5)
-		if i == m.active {
-			bg = 0xff414967
-			fg = 0xffffffff
-		}
-		end := min(w, x+width*cell)
-		for y := 0; y < h; y++ {
-			for col := x; col < end; col++ {
-				pixels[y*w+col] = bg
-			}
-		}
-		label := strconv.Itoa(i+1) + " " + m.entries[i].title
-		label = tabLabel(label, max(0, (end-x)/cell-1))
-		px := x
-		for _, ch := range label {
-			stride, glyph := m.renderer.glyphPixels(ch, fg, bg, term.CellWidth(ch) > 1)
-			if stride < 1 {
-				continue
-			}
-			for y := 0; y < min(m.renderer.ch, h-textY); y++ {
-				n := min(stride, end-px)
-				if n > 0 {
-					copy(pixels[(y+textY)*w+px:(y+textY)*w+px+n], glyph[y*stride:y*stride+n])
-				}
-			}
-			px += stride
-		}
-		m.hits = append(m.hits, tabHit{x, end, i})
-		x = end
-	}
+	m.paintSceneBar(rasterScene{pixels: pixels, width: w, height: h, clip: image.Rect(0, 0, w, h), glyph: cachedGlyphPixels})
 	m.bar.Upload(pixels, w, 0, 0, w, h)
 }

@@ -224,7 +224,7 @@ func (t *Term) GetSel() string {
 			if t.line[y][i].Mode&ATTRWdummy != 0 {
 				continue
 			}
-			sb = append(sb, utf8encode(t.line[y][i].U)...)
+			sb = append(sb, t.line[y][i].Text()...)
 		}
 		if (y < t.sel.ne.y || lastx >= linelen) &&
 			(t.sel.typ == selRectangular || last < 0 || t.line[y][last].Mode&ATTRWrap == 0) {
@@ -437,11 +437,13 @@ func (t *Term) tsetchar(u rune, attr *Glyph, x, y int) {
 	if t.line[y][x].Mode&ATTRWide != 0 {
 		if x+1 < t.col {
 			t.line[y][x+1].U = ' '
+			t.line[y][x+1].Suffix = ""
 			t.line[y][x+1].Mode &^= ATTRWdummy
 			last++
 		}
 	} else if t.line[y][x].Mode&ATTRWdummy != 0 && x > 0 {
 		t.line[y][x-1].U = ' '
+		t.line[y][x-1].Suffix = ""
 		t.line[y][x-1].Mode &^= ATTRWide
 		first--
 	}
@@ -449,6 +451,7 @@ func (t *Term) tsetchar(u rune, attr *Glyph, x, y int) {
 	t.markDirty(first, y, last, y)
 	t.line[y][x] = *attr
 	t.line[y][x].U = u
+	t.line[y][x].Suffix = ""
 }
 
 func (t *Term) tclearregion(x1, y1, x2, y2 int) {
@@ -591,7 +594,7 @@ func (t *Term) dumpLine(n int) {
 	end := min(t.tlinelen(n), t.col) - 1
 	if t.tlinelen(n) > 0 && t.line[n][0].U != ' ' || end > 0 {
 		for i := 0; i <= end; i++ {
-			sb = append(sb, utf8encode(t.line[n][i].U)...)
+			sb = append(sb, t.line[n][i].Text()...)
 		}
 	}
 	sb = append(sb, '\n')

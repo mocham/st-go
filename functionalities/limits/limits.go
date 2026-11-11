@@ -109,8 +109,9 @@ func ImageRGBA(scope string, width, height int) (int, bool) {
 }
 
 func Grid(cols, rows int) bool {
-	// Two 16-byte glyph screens plus tab/damage bookkeeping headroom.
-	_, ok := Product("terminal grid", MaxBytes, cols, rows, 40)
+	// Two 32-byte glyph screens, bounded 64-byte combining suffixes and
+	// tab/damage bookkeeping headroom.
+	_, ok := Product("terminal grid", MaxBytes, cols, rows, 200)
 	return ok
 }
 

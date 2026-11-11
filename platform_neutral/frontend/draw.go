@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"st-go/limits"
+	"st-go/platform_neutral/api"
 	term "st-go/platform_neutral/stterminal"
 )
 
@@ -14,6 +15,11 @@ func (t *Terminal) ensureFramebuffer(w, h int) bool {
 	size, valid := limits.RGBA("framebuffer", w, h)
 	if !valid {
 		return false
+	}
+	if t.scene() != nil {
+		t.fbW, t.fbH = w, h
+		t.framebuf = nil
+		return true
 	}
 	if len(t.framebuf) >= w*h && t.fbW == w && t.fbH == h {
 		return true
@@ -29,6 +35,10 @@ func (t *Terminal) ensureFramebuffer(w, h int) bool {
 
 func (t *Terminal) clearFramebuffer() {
 	bg := t.colorAt(ColDefaultBg)
+	if s := t.scene(); s != nil {
+		s.Apply(api.SceneUpdate{Reset: true, Background: bg})
+		return
+	}
 	for i := range t.framebuf {
 		t.framebuf[i] = bg
 	}
@@ -77,22 +87,26 @@ func (t *Terminal) drawGlyphAt(u rune, fg, bg uint32, x, y int, wide bool) {
 }
 
 func (t *Terminal) glyphPixels(u rune, fg, bg uint32, wide bool) (int, []uint32) {
-	// FreeType owns mutable face slots. Serialize lookup identity and native
-	// rasterization against font reloads and other terminal widgets.
-	fontMu.Lock()
-	defer fontMu.Unlock()
 	w := t.cw
 	if wide {
 		w *= 2
 	}
-	key := glyphKey{font: ft.generation, u: u, fg: fg, bg: bg, w: w, h: t.ch, baseline: t.baseline}
+	return w, cachedGlyphPixels(u, fg, bg, w, t.ch, t.baseline)
+}
+
+func cachedGlyphPixels(u rune, fg, bg uint32, w, h, baseline int) []uint32 {
+	// FreeType owns mutable face slots. Serialize lookup identity and native
+	// rasterization against font reloads and other terminal widgets.
+	fontMu.Lock()
+	defer fontMu.Unlock()
+	key := glyphKey{font: ft.generation, u: u, fg: fg, bg: bg, w: w, h: h, baseline: baseline}
 	glyphMu.RLock()
 	img, ok := glyphCache[key]
 	glyphMu.RUnlock()
 	if !ok {
-		_, img = makeGlyphLocked(u, fg, bg, w, t.ch, t.baseline)
+		_, img = makeGlyphLocked(u, fg, bg, w, h, baseline)
 		if len(img) == 0 {
-			return 0, nil
+			return nil
 		}
 		glyphMu.Lock()
 		if size := len(img) * 4; size <= maxGlyphCacheBytes {
@@ -107,7 +121,7 @@ func (t *Terminal) glyphPixels(u rune, fg, bg uint32, wide bool) (int, []uint32)
 		}
 		glyphMu.Unlock()
 	}
-	return w, img
+	return img
 }
 
 // Clip at the final pixel write as well as at the logical terminal grid. In
@@ -143,29 +157,7 @@ func (t *Terminal) Bell()     {}
 func (t *Terminal) ClipCopy() {}
 
 func (t *Terminal) DrawLine(line []term.Glyph, x1, y1, x2 int) {
-	// clear row first
-	px0 := t.borderpx + x1*t.cw
-	py := t.borderpx + y1*t.ch
-	w := (x2 - x1) * t.cw
-	t.fillRect(t.defaultBgARGB(), px0, py, w, t.ch)
-	for x := x1; x < x2; x++ {
-		g := line[x]
-		// image cell: blit the raw image pixels (many colors per cell)
-		if g.U == term.ImageRune {
-			t.drawImageCell(g, x, y1)
-			continue
-		}
-		if g.U == 0 || g.Mode&term.ATTRWdummy != 0 {
-			continue
-		}
-		if t.termCore.Selected(x, y1) {
-			g.Mode ^= term.ATTRReverse
-		}
-		fg := t.resolveFG(g)
-		bg := t.resolveBG(g)
-		wide := g.Mode&term.ATTRWide != 0
-		t.drawGlyphAt(g.U, fg, bg, x, y1, wide)
-	}
+	t.drawSceneLine(line, x1, y1, x2)
 }
 
 // FinishDraw is a no-op: paint.go submits the completed dirty row spans after the

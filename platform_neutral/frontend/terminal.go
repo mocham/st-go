@@ -34,6 +34,10 @@ type Terminal struct {
 	imageAtlas                        []uint32
 	imageSlots                        []*imageSlot
 	imageStampSeq                     uint64
+	sceneImages                       map[uint32]sceneImage
+	nextSceneImage                    uint32
+	sceneScratch                      api.SceneRow
+	sceneText                         []byte
 	msel                              mouseSel
 	buttons                           uint
 	session                           *ptySession
@@ -167,10 +171,14 @@ func newTerminalState(cfg *config.Config, ratio float64, title string) *Terminal
 }
 
 func (t *Terminal) bindWidget(widget api.Widget) error {
+	t.host = widget
 	if !t.ensureFramebuffer(t.borderpx*2+t.cols*t.cw, t.borderpx*2+t.rows*t.ch) {
 		return fmt.Errorf("invalid terminal framebuffer size")
 	}
 	t.host = widget
+	if host, ok := widget.(interface{ SetSceneFont([]byte) }); ok {
+		host.SetSceneFont(embeddedFont)
+	}
 	t.loadColors(t.cfg)
 	t.clearFramebuffer()
 	if t.cfg.WebPCachePath != "" {
@@ -252,6 +260,25 @@ func (t *Terminal) Close() {
 	if t.session != nil {
 		t.session.close()
 	}
+	t.releaseSceneImages()
+	t.displayRegions.mu.Lock()
+	if t.displayRegions.documentCancel != nil {
+		t.displayRegions.documentCancel()
+	}
+	if registry, ok := t.host.(api.MediaRegistry); ok {
+		for _, s := range []*regionSurface{t.displayRegions.secondary, t.displayRegions.listPreview} {
+			if s != nil && s.media.ID != 0 {
+				registry.ReleaseMedia(s.media.ID)
+			}
+		}
+	}
+	t.displayRegions.mu.Unlock()
+	t.pdfSearch.mu.Lock()
+	if t.pdfSearch.cancel != nil {
+		t.pdfSearch.cancel()
+		t.host.(api.MediaRegistry).ReleaseMedia(t.pdfSearch.resource)
+	}
+	t.pdfSearch.mu.Unlock()
 	if t.audio != nil {
 		t.audio.Close()
 	}

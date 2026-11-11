@@ -13,7 +13,7 @@ func (h *Host) SetBounds(bounds image.Rectangle) {
 		w.paintMu.Unlock()
 		return
 	}
-	if h.isClosed() || bounds.Empty() || !h.buffer.Resize(bounds.Dx(), bounds.Dy()) {
+	if h.isClosed() || bounds.Empty() || (h.scene == nil && !h.buffer.Resize(bounds.Dx(), bounds.Dy())) {
 		w.paintMu.Unlock()
 		return
 	}
@@ -28,6 +28,9 @@ func (h *Host) SetBounds(bounds image.Rectangle) {
 		}
 	}
 	w.mu.Unlock()
+	if h.scene != nil {
+		h.scene.Configure(bounds, 0xff000000)
+	}
 	if h.bar != nil {
 		h.bar.Configure(bounds, 0xff000000)
 	}
@@ -76,6 +79,9 @@ func (h *Host) SetVisible(visible bool) {
 	}
 	bounds := h.options.Bounds
 	w.mu.Unlock()
+	if h.scene != nil {
+		h.scene.SetVisible(visible)
+	}
 	if h.bar != nil {
 		if native, ok := h.bar.(api.SurfaceVisibility); ok {
 			native.SetVisible(visible)
@@ -156,6 +162,9 @@ func (h *Host) FocusWidget() {
 }
 
 func (w *Window) eraseLocked(bounds image.Rectangle) {
+	if _, ok := w.native.(api.SceneFactory); ok {
+		return
+	}
 	r := bounds.Intersect(image.Rect(0, 0, w.width, w.height))
 	if r.Empty() {
 		return
@@ -171,6 +180,9 @@ func (w *Window) eraseLocked(bounds image.Rectangle) {
 }
 func (w *Window) repaintLocked() {
 	for _, h := range w.visible() {
+		if h.scene != nil {
+			continue
+		}
 		if h.bar != nil {
 			h.bar.Present(h.buffer.Pixels, h.buffer.Width, h.buffer.Height, 0, false)
 		} else {

@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"image"
 	"math"
-	"strings"
 
 	"golang.org/x/text/unicode/norm"
-	"st-go/limits"
 	"st-go/platform_neutral/api"
 	term "st-go/platform_neutral/stterminal"
 )
@@ -15,16 +13,11 @@ import (
 const listBackground uint32 = 0xfff7f5ef
 const listForeground uint32 = 0xff30343b
 
-// Glyph pixels and content are immutable after publication. The preview painter
-// can composite them without touching fonts, terminal cells, or Terminal.mu.
+// Lists retain only semantic content and metrics. Renderer-owned glyph caches
+// are populated during presentation, independently of the terminal input loop.
 type regionListSurface struct {
 	content          term.RegionList
-	glyphs           map[rune]listGlyph
 	cw, ch, baseline int
-}
-type listGlyph struct {
-	pixels []uint32
-	width  int
 }
 
 func newRegionList(content term.RegionList, cw, ch, baseline int, previous *regionListSurface) (*regionListSurface, error) {
@@ -33,35 +26,9 @@ func newRegionList(content term.RegionList, cw, ch, baseline int, previous *regi
 	}
 	content.Items = append([]term.RegionListItem(nil), content.Items...)
 	content.Title = norm.NFC.String(content.Title)
-	list := &regionListSurface{content: content, glyphs: make(map[rune]listGlyph), cw: cw, ch: ch, baseline: baseline}
-	texts := []string{content.Title, "No headings or labels", "Shift-Tab: preview", "…"}
+	list := &regionListSurface{content: content, cw: cw, ch: ch, baseline: baseline}
 	for i := range content.Items {
 		list.content.Items[i].Text = norm.NFC.String(content.Items[i].Text)
-		texts = append(texts, list.content.Items[i].Text)
-	}
-	bytes := 0
-	for _, text := range texts {
-		for _, r := range text {
-			if _, ok := list.glyphs[r]; ok {
-				continue
-			}
-			width := term.CellWidth(r) * cw
-			if width <= 0 {
-				continue
-			}
-			if len(list.glyphs) >= limits.GlyphCacheEntries || int64(width)*int64(ch)*4 > int64(limits.GlyphCacheBytes-bytes) {
-				return nil, fmt.Errorf("region list glyphs exceed resource limit")
-			}
-			bytes += width * ch * 4
-			if previous != nil && previous.cw == cw && previous.ch == ch && previous.baseline == baseline {
-				if glyph, ok := previous.glyphs[r]; ok {
-					list.glyphs[r] = glyph
-					continue
-				}
-			}
-			_, pixels := makeGlyph(r, listForeground, listBackground, width, ch, baseline)
-			list.glyphs[r] = listGlyph{pixels, width}
-		}
 	}
 	return list, nil
 }
@@ -167,77 +134,25 @@ func (t *Terminal) noteRegionListFrame(frame regionFrame) {
 }
 
 func renderRegionList(surface regionSurface, r, pane image.Rectangle, pixels []uint32, stride int) {
-	list := surface.list
-	fill := func(rect image.Rectangle, color uint32) {
-		rect = rect.Intersect(pane)
-		for y := rect.Min.Y; y < rect.Max.Y; y++ {
-			for x := rect.Min.X; x < rect.Max.X; x++ {
-				pixels[y*stride+x] = color
-			}
+	update := regionListScene(regionFrame{surface: surface, pane: pane, viewport: r})
+	// Headless composition can target a pane inside a larger framebuffer.
+	for i := range update.Rows {
+		row := &update.Rows[i]
+		row.X += pane.Min.X
+		row.Y += pane.Min.Y
+		for j := range row.Text {
+			row.Text[j].X += pane.Min.X
 		}
 	}
-	fill(pane, listBackground)
-	fill(image.Rect(pane.Min.X, pane.Min.Y, r.Min.X, pane.Max.Y), 0xff777777)
-	drawText := func(text string, x, y int, clip image.Rectangle) {
-		for _, char := range text {
-			glyph, ok := list.glyphs[char]
-			if !ok {
-				continue
-			}
-			if x+glyph.width > clip.Max.X {
-				break
-			}
-			box := image.Rect(x, y, x+glyph.width, y+list.ch).Intersect(clip)
-			for py := box.Min.Y; py < box.Max.Y; py++ {
-				first := (py-y)*glyph.width + box.Min.X - x
-				if first+box.Dx() <= len(glyph.pixels) {
-					copy(pixels[py*stride+box.Min.X:py*stride+box.Max.X], glyph.pixels[first:first+box.Dx()])
-				}
-			}
-			x += glyph.width
+	for i := range update.Fills {
+		update.Fills[i].X += pane.Min.X
+		update.Fills[i].Y += pane.Min.Y
+	}
+	update.Reset = false
+	for y := pane.Min.Y; y < pane.Max.Y; y++ {
+		for x := pane.Min.X; x < pane.Max.X; x++ {
+			pixels[y*stride+x] = listBackground
 		}
 	}
-	drawText(list.content.Title, r.Min.X+list.cw, r.Min.Y+list.ch/3, r)
-	drawText("Shift-Tab: preview", r.Min.X+list.cw, r.Min.Y+list.ch+list.ch/2, r)
-	body := r
-	body.Min.Y = min(r.Max.Y, r.Min.Y+list.headerHeight())
-	fill(image.Rect(r.Min.X, body.Min.Y-1, r.Max.X, body.Min.Y), 0xffd0cdc5)
-	rowHeight := list.rowHeight()
-	first := int(surface.scrollY) / rowHeight
-	if len(list.content.Items) == 0 {
-		drawText("No headings or labels", body.Min.X+list.cw, body.Min.Y+list.ch/3, body)
-	}
-	for i := first; i < len(list.content.Items); i++ {
-		y := body.Min.Y + i*rowHeight - int(math.Round(surface.scrollY))
-		if y >= body.Max.Y {
-			break
-		}
-		item := list.content.Items[i]
-		if item.ID == surface.listSelected {
-			fill(image.Rect(body.Min.X, y, body.Min.X+max(2, list.cw/3), y+rowHeight).Intersect(body), 0xff668db0)
-		}
-		indent := min(2*item.Level, max(0, body.Dx()/max(1, list.cw)-14))
-		x := body.Min.X + (1+indent)*list.cw
-		clip := body
-		clip.Max.X = max(body.Min.X, body.Max.X-4)
-		text := item.Text
-		columns := max(0, (clip.Max.X-x)/max(1, list.cw))
-		var visible strings.Builder
-		used := 0
-		for _, char := range text {
-			w := term.CellWidth(char)
-			if used+w > columns {
-				break
-			}
-			visible.WriteRune(char)
-			used += w
-		}
-		drawText(visible.String(), x, y+(rowHeight-list.ch)/2, clip)
-	}
-	if maximum := list.maximum(r.Dy()); maximum > 0 && body.Dy() > 0 {
-		height := max(6, int(float64(body.Dy()*body.Dy())/(maximum+float64(body.Dy()))))
-		height = min(height, body.Dy())
-		top := body.Min.Y + int(surface.scrollY/maximum*float64(body.Dy()-height))
-		fill(image.Rect(body.Max.X-3, top, body.Max.X, top+height), 0xff8e9399)
-	}
+	(rasterScene{pixels: pixels, width: stride, height: len(pixels) / stride, clip: pane, glyph: cachedGlyphPixels}).Apply(update)
 }

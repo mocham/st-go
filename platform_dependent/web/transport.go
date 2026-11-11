@@ -11,19 +11,23 @@ import (
 )
 
 type serverMessage struct {
-	Overlays      []htmlOverlay `json:"overlays,omitempty"`
-	Type          string        `json:"type"`
-	Width         int           `json:"width,omitempty"`
-	Height        int           `json:"height,omitempty"`
-	CellWidth     int           `json:"cellWidth,omitempty"`
-	CellHeight    int           `json:"cellHeight,omitempty"`
-	Border        int           `json:"border,omitempty"`
-	Selection     string        `json:"selection,omitempty"`
-	Text          string        `json:"text,omitempty"`
-	ID            uint64        `json:"id,omitempty"`
-	SyncEnabled   bool          `json:"syncEnabled,omitempty"`
-	SyncReady     bool          `json:"syncReady,omitempty"`
-	SyncAvailable bool          `json:"syncAvailable,omitempty"`
+	Cancelled     []uint64          `json:"cancelled,omitempty"`
+	Documents     []documentRequest `json:"documents,omitempty"`
+	Media         []mediaOverlay    `json:"media,omitempty"`
+	Scenes        []sceneMessage    `json:"scenes,omitempty"`
+	Overlays      []htmlOverlay     `json:"overlays,omitempty"`
+	Type          string            `json:"type"`
+	Width         int               `json:"width,omitempty"`
+	Height        int               `json:"height,omitempty"`
+	CellWidth     int               `json:"cellWidth,omitempty"`
+	CellHeight    int               `json:"cellHeight,omitempty"`
+	Border        int               `json:"border,omitempty"`
+	Selection     string            `json:"selection,omitempty"`
+	Text          string            `json:"text,omitempty"`
+	ID            uint64            `json:"id,omitempty"`
+	SyncEnabled   bool              `json:"syncEnabled,omitempty"`
+	SyncReady     bool              `json:"syncReady,omitempty"`
+	SyncAvailable bool              `json:"syncAvailable,omitempty"`
 }
 type client struct {
 	conn     *websocket.Conn
@@ -74,6 +78,7 @@ func (d *Driver) serveSocket(conn *websocket.Conn) {
 			}
 		}
 		var queryID uint64
+		delete(d.documentCancels, c)
 		if d.query != nil && d.query.client == c {
 			queryID = d.query.id
 		}
@@ -122,6 +127,7 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 	var sequence, pending uint64
 	var flowControlled bool
 	var htmlVersion uint64
+	sceneFull := true
 	// Repaint immediately on attachment, then coalesce bursts at frame cadence.
 	ticker := time.NewTicker(limits.PreviewFrameInterval)
 	defer ticker.Stop()
@@ -160,6 +166,11 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 			}
 			clipboardVersion = version
 		}
+		if documents := d.documentSnapshot(c); documents != nil {
+			if sendJSON(c, *documents) != nil {
+				return
+			}
+		}
 		if flowControlled && pending != 0 || time.Since(lastFrame) < limits.PreviewFrameInterval {
 			continue
 		}
@@ -168,7 +179,14 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 		d.callbacks.Lock()
 		frames := d.frames()
 		version, html := d.htmlSnapshot(htmlVersion)
+		scene := d.sceneSnapshot(sceneFull)
 		d.callbacks.Unlock()
+		if scene != nil {
+			if sendJSON(c, *scene) != nil {
+				return
+			}
+			sceneFull = false
+		}
 		if html != nil {
 			if sendJSON(c, *html) != nil {
 				return
@@ -189,7 +207,8 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 				}
 			}
 		}
-		if len(frames) != 0 || html != nil {
+		if len(frames) != 0 || html != nil || scene != nil {
+			lastFrame = time.Now()
 			sequence++
 			pending = sequence
 			if sendJSON(c, serverMessage{Type: "paint", ID: sequence}) != nil {

@@ -113,6 +113,18 @@ func (p *regionPresenter) present(frame regionFrame, pixels []uint32) {
 		}
 		return
 	}
+	if frame.surface.media.ID != 0 {
+		if media, ok := p.native.(api.MediaSurface); ok && media.PresentMedia(frame.presentation, frame.surface.media) {
+			p.last = &frame
+		}
+		return
+	}
+	if frame.surface.list != nil && pixels == nil {
+		if semantic, ok := p.native.(api.SemanticSurface); ok && semantic.PresentScene(frame.presentation, regionListScene(frame)) {
+			p.last = &frame
+		}
+		return
+	}
 	w, h := frame.pane.Dx(), frame.pane.Dy()
 	dy, reusable := regionScrollCopy(p.last, frame)
 	if native, ok := p.native.(api.GuardedSurface); ok {
@@ -179,9 +191,13 @@ func (t *Terminal) regionPainter(wake <-chan struct{}, done <-chan struct{}, pre
 			continue
 		}
 		last = now
-		if frame.surface.html.Document != nil {
+		if frame.surface.html.Document != nil || frame.surface.media.ID != 0 || (frame.surface.list != nil && t.scene() != nil) {
 			pixels = nil
 			present(frame, nil)
+			t.noteRegionListFrame(frame)
+			if frame.surface.scrollY != frame.surface.targetY {
+				timer.Reset(limits.PreviewFrameInterval)
+			}
 			continue
 		}
 		size, valid := limits.RGBA("preview frame", frame.pane.Dx(), frame.pane.Dy())

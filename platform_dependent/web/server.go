@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,6 +54,15 @@ type Driver struct {
 	pixels           []uint32
 	textCursor       api.TextCursor
 	surfaces         []*surface
+	scenes           []*sceneSurface
+	font             []byte
+	media            map[uint64]*mediaResource
+	mediaJobs        chan mediaJob
+	nextMediaID      uint64
+	mediaBytes       int
+	documents        map[uint64]*documentJob
+	nextDocumentID   uint64
+	documentCancels  map[*client][]uint64
 	nextSurfaceID    uint64
 	htmlVersion      uint64
 	dirty            []image.Rectangle
@@ -168,6 +179,12 @@ func (d *Driver) Close() {
 		close(d.done)
 		d.mu.Lock()
 		client := d.client
+		for _, r := range d.media {
+			r.cancel()
+		}
+		clear(d.media)
+		clear(d.documents)
+		clear(d.documentCancels)
 		if d.query != nil {
 			d.query.timer.Stop()
 			d.query = nil
@@ -211,7 +228,7 @@ func (d *Driver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src blob: data:; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; font-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' blob: data:; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'")
 	if !d.validHost(r.Host) {
 		http.Error(w, "invalid host", http.StatusForbidden)
 		return
@@ -221,7 +238,7 @@ func (d *Driver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET")
 		http.Error(w, "GET required", http.StatusMethodNotAllowed)
 		return
@@ -249,11 +266,37 @@ func (d *Driver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, contentType := "", ""
+	if strings.HasPrefix(parts[3], "pdfjs/") {
+		data, err := assets.ReadFile("assets/" + parts[3])
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", mime.TypeByExtension(filepath.Ext(parts[3])))
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		w.Write(data)
+		return
+	}
+	if strings.HasPrefix(parts[3], "media/") {
+		d.serveMedia(w, r, parts[3])
+		return
+	}
+	if parts[3] == "font.ttf" {
+		d.mu.Lock()
+		font := d.font
+		d.mu.Unlock()
+		w.Header().Set("Content-Type", "font/ttf")
+		w.Header().Set("Cache-Control", "private, max-age=86400")
+		w.Write(font)
+		return
+	}
 	switch parts[3] {
 	case "":
 		name, contentType = "index.html", "text/html; charset=utf-8"
 	case "client.js":
 		name, contentType = "client.js", "text/javascript; charset=utf-8"
+	case "scene.js":
+		name, contentType = "scene.js", "text/javascript; charset=utf-8"
 	case "style.css":
 		name, contentType = "style.css", "text/css; charset=utf-8"
 	default:

@@ -86,10 +86,12 @@ PNG/JPEG/WebP decoding and the SQLite WebP cache; reduced builds omit SQLite.
 | `st-pdf` | + Poppler | Go raster images + PDF |
 | `st` | + libpng + libjpeg-turbo + libwebp + Poppler + SQLite | Accelerated PNG/JPEG/WebP, animated WebP, other Go raster codecs, PDF |
 
-`st-web` embeds its HTML, JavaScript, CSS, and fonts; no npm build, CDN, or
-separate asset directory is required. `st-fb` uses a pure-Go Linux fbdev/evdev
-driver. Neither backend links XGB; both retain the shared native font/media
-libraries.
+`st-web` is built with `CGO_ENABLED=0`. It embeds Canvas rendering code, PDF.js
+(including its worker/fonts/CMaps), CSS, and the terminal font. Images and PDFs
+are decoded in the browser; TIFF/BMP conversion and clipboard SQLite use pure Go.
+No npm build, CDN, separate asset directory, FreeType, Poppler, or native codec
+is required. `st-fb` uses a pure-Go Linux fbdev/evdev driver with the native
+font/media renderer. Neither backend links XGB.
 
 ### Minimal terminal
 

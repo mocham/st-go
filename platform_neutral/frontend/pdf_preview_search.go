@@ -13,12 +13,15 @@ import (
 
 	"st-go/limits"
 	"st-go/pdfmeta"
+	"st-go/platform_neutral/api"
 	term "st-go/platform_neutral/stterminal"
 )
 
 // Terminal.mu -> mu. The worker never takes Terminal.mu, writes to the PTY, or
 // touches the image atlas. It publishes immutable bounded match/size snapshots.
 type pdfSearchState struct {
+	cancel     func()
+	resource   uint64
 	mu         sync.Mutex
 	generation uint64
 	token      int
@@ -43,6 +46,12 @@ func (t *Terminal) SearchPDF(request term.PDFSearchRequest) error {
 	s := &t.pdfSearch
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.cancel != nil && (request.Token == 0 || request.Path != "") {
+		s.cancel()
+		s.cancel = nil
+		t.host.(api.MediaRegistry).ReleaseMedia(s.resource)
+		s.resource = 0
+	}
 	if request.Token == 0 {
 		s.generation++
 		s.token, s.data, s.result, s.reply = 0, nil, nil, ""
@@ -62,6 +71,24 @@ func (t *Terminal) SearchPDF(request term.PDFSearchRequest) error {
 	}
 	s.generation++
 	s.token, s.data, s.result, s.reply = request.Token, nil, nil, ""
+	if t.scene() != nil {
+		registry := t.host.(api.MediaRegistry)
+		s.resource = registry.RegisterMedia(api.MediaSource{Path: request.Path})
+		generation := s.generation
+		s.cancel = t.host.(api.DocumentHost).QueryMedia(s.resource, api.DocumentQuery{Kind: "search", Text: request.Text}, func(data []byte, err error) {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if t.closed() || s.generation != generation {
+				return
+			}
+			if err != nil {
+				data, _ = json.Marshal(pdfmeta.Search{Error: err.Error()})
+			}
+			s.data = data
+			s.chunk(0)
+		})
+		return nil
+	}
 	if s.jobs == nil {
 		s.jobs = make(chan pdfSearchJob, 1)
 		if t.done == nil {

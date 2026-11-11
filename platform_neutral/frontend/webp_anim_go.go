@@ -1,4 +1,4 @@
-//go:build !libwebp
+//go:build !libwebp || backend_web
 
 package frontend
 

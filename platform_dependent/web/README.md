@@ -10,7 +10,9 @@ Open the printed `/t/<random-token>/` URL. `-listen` defaults to `127.0.0.1`;
 and `-e PROGRAM ARGS...` runs an explicit command in the server-side directory.
 Use absolute program paths or programs on PATH when combining `-e` with `-dir`.
 Copying this one binary is enough; all browser assets and built-in fonts are
-embedded. There is no X connection or browser-side terminal reimplementation.
+embedded, including PDF.js. `st-web` builds with `CGO_ENABLED=0`; it needs no
+FreeType, Poppler, native image codecs, or decoded-WebP cache. There is no X
+connection or browser-side terminal reimplementation.
 
 Use the complete random session URL printed by the server, such as
 `http://127.0.0.1:8080/t/<token>/`. `-dir` selects the initial server-side PTY and
@@ -19,11 +21,11 @@ Terminal flags must precede `-e`.
 
 One server runs one terminal session with one attached browser at a time.
 Closing/reloading the browser leaves the PTY running; reconnecting receives its
-current pixels. Shell exit stops the server; Ctrl-C in the server's launching
+current semantic scene. Shell exit stops the server; Ctrl-C in the server's launching
 terminal stops it too. The terminal backing buffer follows the browser viewport
 in **device pixels** (`CSS size × devicePixelRatio`), while canvas presentation
 divides by the same ratio. This fills the viewport while keeping each
-server-rendered glyph/image pixel mapped to one browser device pixel—additional
+server-selected cell coordinate mapped to one browser device pixel—additional
 space creates more terminal rows/columns instead of stretching raster content.
 Keyboard/IME, mouse reporting, selections, bracketed paste,
 images/PDFs, and retained previews use the same terminal engine and
@@ -31,41 +33,35 @@ images/PDFs, and retained previews use the same terminal engine and
 
 ## Ownership and protocol
 
-* The existing neutral frontend owns the Linux PTY, terminal parser, software
-  rasterizer, codecs, clipboard authorization and preview state. All demos
-  continue to communicate using terminal ANSI/OSC/DCS text.
-* This driver owns HTTP/WebSocket input decoding, a copied retained pixel
-  buffer, retained `api.Surface` panes and browser presentation. It invokes
-  uniform callbacks under the frontend lock, never importing frontend internals.
-* The browser caches **rendered glyph cells** and receives compact glyph-ID draws
-  for repeated cells, alongside PNG **damage rectangles** for uncached pixels.
-  FreeType rendering remains server-side; the browser does not interpret ANSI.
-  Exact opaque pixel comparisons include colors, font changes, selection and
-  composited overlays. Wide glyphs occupy two cached cells. Only whole cells
-  reused at different positions are admitted, so repainting an image in place
-  does not turn its tiles into glyph definitions;
-  adjacent identical glyphs use a single repeated-ID run.
-* `STW1` is followed by six little-endian uint32 values (canvas width, canvas
-  height, x, y, patch width, patch height), then a PNG. `STG1` is followed by
-  canvas width, canvas height and operation count, then ordered operations:
-  `0` clears the glyph cache; `2,id,x,y,count` draws a horizontal run;
-  `3,firstID,count,cellWidth,cellHeight,columns,length,PNG` defines consecutive
-  glyph IDs in one row-major PNG atlas. Every integer is uint32 little-endian.
-  The browser decodes each atlas once and draws glyphs from source rectangles.
-  Subsequent draws contain no PNG. Both peers bound the cache (including atlas
-  padding) to 32 MiB of pixels and 16,384 entries. A presentation admits at most
-  256 new glyphs; fragmented fallback damage collapses after four PNG patches.
-* Glyph caches are connection-local and rebuilt on reconnect. Viewport resizing
-  preserves cached bitmaps; definitions/resets from obsolete-size frames still
-  apply, while their screen draws are discarded. Separate dirty rows stay
-  separate; bounded damage fragmentation may collapse to a PNG refresh.
-  Retained preview panes are composited over underlying terminal updates.
-* Input/control messages are bounded JSON. PNG encoding and network writes do
-  not hold the terminal lock. Async browser image decoding commits in wire order.
+* The frontend owns the PTY, parser, grid, Unicode sequences, resolved colors,
+  selection and preview parameters. Demos still use ANSI/OSC/DCS.
+* `api.SceneUpdate` describes text runs, explicit advances, fills, media handles
+  and the cursor. Terminal text, tab labels and preview lists use these operations
+  across Canvas and the native raster adapter. X11/framebuffer keep their native
+  glyph cache and damage/scroll presentation paths.
+* `scene` WebSocket messages replace changed horizontal bands. The server retains
+  every state mutation while coalescing presentations; it does not allocate a
+  terminal framebuffer for semantic web surfaces. Canvas uses the embedded font,
+  server coordinates and explicit wide/combining-cell advances without reflow.
+* Media registration returns an opaque ID immediately. Two bounded workers load
+  immutable encoded files; the browser fetches `media/<id>` and owns decoding.
+  PNG/JPEG/GIF/WebP are sent unchanged. TIFF/BMP have bounded pure-Go PNG fallback.
+  The resource store allows 64 registrations and 128 MiB of encoded content;
+  individual inputs retain the shared 64 MiB limit. Inline media retains at most
+  16 resources. Cancellation and document generations reject stale completions.
+* PDF.js is bundled locally, with its worker, CMaps, standard fonts and WASM.
+  Original PDF bytes support HTTP range requests with stable offsets. Continuous
+  views rasterize nearby pages with two tasks at a time, evict offscreen canvases,
+  and provide selectable text. Search and outline/page-text queries use the
+  existing terminal metadata protocol. Replacement keeps the committed preview
+  visible while the new resource loads.
+* Media decoding/document queries run outside the ordered text paint queue.
+  A stalled preview therefore cannot delay terminal text acknowledgements.
+  Network writes never hold the terminal lock.
   The browser opts into flow control with `{"type":"paint_ack","id":0}`.
   Each presentation ends with `{"type":"paint","id":N}`; the browser returns
   `paint_ack` for N after queued paints complete. Only one presentation remains
-  in flight, so slow decoding coalesces newer damage on the server instead of
+  in flight, so slow presentation coalesces newer state on the server instead of
   building a browser backlog. Input and clipboard controls continue meanwhile.
 * One browser controls the one server session. Disconnecting leaves its PTY
   alive; reconnecting gets a full snapshot. Idle heartbeats expire vanished
@@ -110,7 +106,9 @@ clipboard used by other enabled st-go fb/web/X11 windows. It starts off on every
 launch and is not persisted. Disabled sessions perform no shared-clipboard SQL
 or polling. While enabled, the server polls revisions only while a browser is
 attached; browser security still requires the user to press **Copy** before the
-shared text can replace the browser/OS clipboard. No separate service exists.
+shared text can replace the browser/OS clipboard. The web build uses a pure-Go
+SQLite driver for this shared clipboard database; native builds retain their
+existing driver. No separate service exists.
 
 Select with the mouse (Shift overrides application mouse reporting), then use
 **Copy** or Ctrl-Shift-C. Use native Ctrl-Shift-V or the **Paste** button to paste.
@@ -122,8 +120,8 @@ qualifies. Clipboard-read authorization remains disabled by default.
 The directory is **not a sandbox**. Anyone with the random URL can use a shell
 with the server user's permissions. Keep the URL private and bind loopback;
 use an SSH tunnel for remote access. The server validates numeric/localhost
-Host values and exact HTTP Origin, disallows framing, serves only three
-embedded assets and never serves arbitrary files. It provides no TLS,
+Host values and exact HTTP Origin, disallows framing, and serves embedded assets
+and registered media resources. It provides no TLS,
 multi-user authentication or reverse-proxy configuration. Direct exposure on
 an untrusted network is not safe.
 
@@ -137,6 +135,7 @@ provide basic alternatives. HTTP outside loopback may disable Clipboard APIs.
 
 ```sh
 go test -race ./platform_dependent/web
+make test-web             # CGO-free build, renderer and clipboard tests
 go test ./platform_dependent/web -run '^$' -bench BenchmarkWebDamage -benchmem
 make test                 # includes built-server PTY/cwd/input/image regression
 make test-web-browser     # optional: Node >=22 and Chromium; no npm packages

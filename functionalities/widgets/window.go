@@ -62,7 +62,14 @@ func (w *Window) NewWidget(options api.WidgetOptions) (api.Widget, error) {
 		return nil, fmt.Errorf("invalid widget options")
 	}
 	h := &Host{window: w, options: options, visible: !options.Hidden, done: make(chan struct{})}
-	if !h.buffer.Resize(options.Bounds.Dx(), options.Bounds.Dy()) {
+	factory, semantic := w.native.(api.SceneFactory)
+	if semantic {
+		var err error
+		h.scene, err = factory.NewSceneSurface(options.Kind, options.Bounds, 0xff000000, h.visible)
+		if err != nil {
+			return nil, err
+		}
+	} else if !h.buffer.Resize(options.Bounds.Dx(), options.Bounds.Dy()) {
 		return nil, fmt.Errorf("invalid widget size")
 	}
 	w.mu.Lock()
@@ -74,7 +81,7 @@ func (w *Window) NewWidget(options api.WidgetOptions) (api.Widget, error) {
 	h.id = w.next
 	w.widgets = append(w.widgets, h)
 	w.mu.Unlock()
-	if options.Kind == api.BarWidget {
+	if options.Kind == api.BarWidget && h.scene == nil {
 		var err error
 		if native, ok := w.native.(api.WidgetSurfaceFactory); ok {
 			h.bar, err = native.NewWidgetSurfaceVisible(api.BarWidget, options.Bounds, 0xff000000, h.visible)

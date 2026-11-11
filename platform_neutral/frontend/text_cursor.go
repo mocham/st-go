@@ -12,6 +12,10 @@ func (*Terminal) CursorIsOverlay() bool { return true }
 // DrawCursor prepares only a cell-sized overlay. Moving, hiding, or changing
 // the caret never restores/rasterizes glyphs or mutates the content framebuffer.
 func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, _, _ int, _ term.Glyph) {
+	if t.scene() != nil {
+		t.drawSceneCursor(cx, cy, g)
+		return
+	}
 	if t.winModeIs(term.ModeHide) || t.fbW < 1 || t.fbH < 1 {
 		t.textCursor.Bounds = image.Rectangle{}
 		t.textCursor.Pixels = t.textCursor.Pixels[:0]
@@ -55,6 +59,39 @@ func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, _, _ int, _ term.Glyph) 
 			}
 		}
 	}
+	g, color := t.cursorGlyph(cx, cy, g)
+	if !t.winModeIs(term.ModeFocused) {
+		fill(image.Rect(x, y, x+t.cw-1, y+1), color)
+		fill(image.Rect(x, y, x+1, y+t.ch-1), color)
+		fill(image.Rect(x+t.cw-1, y, x+t.cw, y+t.ch-1), color)
+		fill(image.Rect(x, y+t.ch-1, x+t.cw, y+t.ch), color)
+		return
+	}
+	switch t.cursorShape {
+	case 7:
+		g.U = 0x2603
+		fallthrough
+	case 0, 1, 2:
+		if g.U != term.ImageRune {
+			stride, glyph := t.glyphPixels(g.U, t.resolveFG(g), t.resolveBG(g), g.Mode&term.ATTRWide != 0)
+			if g.Suffix != "" {
+				glyph = clusterPixels(g.Text(), t.resolveFG(g), t.resolveBG(g), stride, t.ch, t.baseline, cachedGlyphPixels)
+			}
+			if stride > 0 {
+				for row := bounds.Min.Y; row < bounds.Max.Y; row++ {
+					at := (row-y)*stride + bounds.Min.X - x
+					copy(pixels[(row-bounds.Min.Y)*bounds.Dx():], glyph[at:at+bounds.Dx()])
+				}
+			}
+		}
+	case 3, 4:
+		fill(image.Rect(x, y+t.ch-t.cursorThick, x+t.cw, y+t.ch), color)
+	case 5, 6:
+		fill(image.Rect(x, y, x+t.cursorThick, y+t.ch), color)
+	}
+}
+
+func (t *Terminal) cursorGlyph(cx, cy int, g term.Glyph) (term.Glyph, uint32) {
 	g.Mode &= term.ATTRBold | term.ATTRItalic | term.ATTRUnderline | term.ATTRStruck | term.ATTRWide
 	selected := t.termCore.Selected(cx, cy)
 	var color uint32
@@ -74,35 +111,13 @@ func (t *Terminal) DrawCursor(cx, cy int, g term.Glyph, _, _ int, _ term.Glyph) 
 		}
 		color = t.colorAt(g.Bg)
 	}
-	if !t.winModeIs(term.ModeFocused) {
-		fill(image.Rect(x, y, x+t.cw-1, y+1), color)
-		fill(image.Rect(x, y, x+1, y+t.ch-1), color)
-		fill(image.Rect(x+t.cw-1, y, x+t.cw, y+t.ch-1), color)
-		fill(image.Rect(x, y+t.ch-1, x+t.cw, y+t.ch), color)
-		return
-	}
-	switch t.cursorShape {
-	case 7:
-		g.U = 0x2603
-		fallthrough
-	case 0, 1, 2:
-		if g.U != term.ImageRune {
-			stride, glyph := t.glyphPixels(g.U, t.resolveFG(g), t.resolveBG(g), g.Mode&term.ATTRWide != 0)
-			if stride > 0 {
-				for row := bounds.Min.Y; row < bounds.Max.Y; row++ {
-					at := (row-y)*stride + bounds.Min.X - x
-					copy(pixels[(row-bounds.Min.Y)*bounds.Dx():], glyph[at:at+bounds.Dx()])
-				}
-			}
-		}
-	case 3, 4:
-		fill(image.Rect(x, y+t.ch-t.cursorThick, x+t.cw, y+t.ch), color)
-	case 5, 6:
-		fill(image.Rect(x, y, x+t.cursorThick, y+t.ch), color)
-	}
+	return g, color
 }
 
 func (t *Terminal) presentTextCursor() {
+	if t.scene() != nil {
+		return
+	}
 	if host, ok := t.host.(api.TextCursorPainter); ok {
 		host.SetTextCursor(t.textCursor)
 	}

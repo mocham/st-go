@@ -96,7 +96,9 @@ try {
         window.terminalSocket = this;
         this.addEventListener("message", event => {
           if (!(event.data instanceof ArrayBuffer)) {
-            if (JSON.parse(event.data).type === "paint") window.paintBatches++;
+            const m=JSON.parse(event.data);
+            if (m.type === "paint") window.paintBatches++;
+            if (m.type === "scene") window.paintLog.push(m);
             return;
           }
           const d = new DataView(event.data);
@@ -147,8 +149,7 @@ try {
   await type("' > composition.txt");
   await wait(fileEquals("composition.txt", "中文"), "IME composition commit");
 
-  // Repaint a colored FreeType glyph after erasing it. The second paint must
-  // restore identical pixels through cached IDs, with no PNG for that row.
+  // Text crosses the wire semantically; repainting must reproduce Canvas pixels.
   await fs.writeFile(path.join(dir, "glyph.sh"), "printf '\\033[10;1H\\033[38;2;201;113;57mMMMMMMMM\\033[0m\\033[12;1H'\n");
   const glyphRaster = `(() => {
     const p = document.querySelector("canvas").getContext("2d").getImageData(1, 253, 128, 28).data;
@@ -166,10 +167,15 @@ try {
   await type("sh glyph.sh");
   await wait(async () => (await evaluate(glyphRaster)).hash === originalGlyphs.hash, "cached glyph pixels match original FreeType raster");
   const glyphWire = await evaluate("window.paintLog");
-  if (!glyphWire.some(p => p.type === "draw" && p.y === 253) ||
-      glyphWire.some(p => p.type === "png" && p.x < 129 && p.x + p.w > 1 && p.y < 281 && p.y + p.h > 253)) {
-    throw new Error("Repeated FreeType glyph damage did not use cached IDs exclusively");
+  if (!glyphWire.some(p => p.type === "scene" && p.scenes.some(s=>s.update.rows?.some(r=>r.text?.some(t=>t.text.includes("MMMMMMMM"))))) ||
+       glyphWire.some(p => p.type === "png" || p.type === "atlas")) {
+    throw new Error("Terminal text was not sent as compact semantic runs");
   }
+
+  await fs.writeFile(path.join(dir,"combining.sh"),"printf '\\033[10;1He\u0301界\u0301X\\033[12;1H'\n");
+  await evaluate("window.paintLog=[];true");
+  await type("sh combining.sh");
+  await wait(()=>evaluate('window.paintLog.some(m=>m.scenes?.some(s=>s.update.rows?.some(r=>r.text?.some(t=>t.cluster&&t.text==="e\\u0301"))))'),"retained combining-cell sequence");
 
   // Exercise real browser clipboard gestures, including the native paste event.
   await call("Browser.grantPermissions", { origin: new URL(address).origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
@@ -209,10 +215,11 @@ try {
   await type(`printf '\\033]0;IGNORED_TITLE\\007'`);
   if (await evaluate("document.title") !== "st-go web terminal") throw new Error("Terminal title changed browser title");
   await type(`printf "\\033Pregion split 50%%; region secondary open 'preview.png'\\033\\\\"`);
-  await wait(() => evaluate(greenPixels(true)), "retained preview pane");
+  const imagePreview='document.querySelector(".media-preview img")';
+  await wait(() => evaluate(`${imagePreview}?.complete && ${imagePreview}?.naturalWidth > 0`), "retained preview pane");
   await type(`printf '\\033[2J'; touch erased`);
   await wait(fileEquals("erased", ""), "terminal erase command");
-  await wait(() => evaluate(greenPixels(true)), "retained preview survives erase");
+  await wait(() => evaluate(`${imagePreview}?.complete && ${imagePreview}?.naturalWidth > 0`), "retained preview survives erase");
   await type(`printf '\\033Pregion reset\\033\\'`);
   await command("Emulation.setDeviceMetricsOverride", { width: 1000, height: 700, deviceScaleFactor: 1, mobile: false });
   await wait(() => evaluate('document.querySelector("canvas").width === 1000 && document.querySelector("canvas").height === 664'), "live device-pixel resize");
@@ -240,10 +247,10 @@ try {
   stress += "\x1b[0m\x1b[20;1H";
   await fs.writeFile(path.join(dir, "stress.ansi"), stress);
   await fs.writeFile(path.join(dir, "stress.sh"), "for n in $(seq 1 60); do cat stress.ansi; sleep 0.01; done\nprintf '\\033[2J\\033[1;1H\\033[48;2;31;191;79m                                        \\033[0m\\033[3;1H'\ntouch stress.done\n");
-  await evaluate(`window.originalBitmap = window.createImageBitmap; window.paintStalled = false;
-    window.createImageBitmap = async (...args) => {
+  await evaluate(`window.originalApply = SceneClient.prototype.apply; window.paintStalled = false;
+    SceneClient.prototype.apply = async function(...args) {
       if (!window.paintStalled) { window.paintStalled = true; await new Promise(resolve => window.releasePaint = resolve); }
-      return window.originalBitmap(...args);
+      return window.originalApply.apply(this,args);
     }; true`);
   await type("sh stress.sh");
   await wait(() => evaluate("window.paintStalled"), "stalled image decode");
@@ -254,8 +261,72 @@ try {
   await wait(fileEquals("stress.input", "responsive"), "input during stalled paint");
   if (Date.now() - inputStart > 1500) throw new Error("Stalled painting blocked keyboard input");
   if (await evaluate("window.paintBatches") - stalledBatches > 1) throw new Error("Unbounded browser paint backlog");
-  await evaluate("window.createImageBitmap = window.originalBitmap; window.releasePaint(); true");
+  await evaluate("SceneClient.prototype.apply = window.originalApply; window.releasePaint(); true");
   await wait(() => evaluate(`(() => { const p = document.querySelector("canvas").getContext("2d").getImageData(10, 10, 1, 1).data; return p[0] === 31 && p[1] === 191 && p[2] === 79; })()`), "latest pixels after coalescing stalled output");
+
+  // Delayed media must not delay text ACKs. Replacing the desired preview while
+  // decoding must reject the stale completion and preserve the committed image.
+  await evaluate(`window.originalDecode=HTMLImageElement.prototype.decode; window.mediaStalled=false;
+    HTMLImageElement.prototype.decode=async function(){if(!window.mediaStalled){window.mediaStalled=true;await new Promise(resolve=>window.releaseMedia=resolve);}return window.originalDecode.call(this);};true`);
+  await type(`printf "\\033Pregion split 50%%; region secondary open 'preview.png'\\033\\\\"`);
+  await wait(()=>evaluate("window.mediaStalled"),"asynchronous media decode");
+  const framesBefore=await evaluate('Number(document.querySelector("canvas").dataset.textFrames)');
+  await type("printf media-responsive > media.input");
+  await wait(fileEquals("media.input","media-responsive"),"input while media is loading");
+  await wait(()=>evaluate(`Number(document.querySelector("canvas").dataset.textFrames)>${framesBefore}`),"text presentation while media is loading");
+  await type(`printf '\\033Pregion reset\\033\\'`);
+  await evaluate("HTMLImageElement.prototype.decode=window.originalDecode;window.releaseMedia();true");
+  await wait(()=>evaluate('!document.querySelector(".media-preview")'),"stale preview completion discarded");
+
+  // A multipage PDF with a real xref and shared font. Padding makes range fetches
+  // observable; pages outside the viewport must never retain canvas rasters.
+  const objects=[];
+  const add=s=>{objects.push(s);return objects.length;};
+  add('<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R >>');
+  add('');add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  add('<< /Type /Outlines /First 5 0 R /Last 5 0 R /Count 1 >>');
+  add('<< /Title (Browser PDF outline) /Parent 4 0 R /Dest [6 0 R /Fit] >>');
+  const kids=[];
+  for(let n=1;n<=40;n++){const id=objects.length+1;kids.push(`${id} 0 R`);add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 400] /Resources << /Font << /F1 3 0 R >> >> /Contents ${id+1} 0 R >>`);const text=`BT /F1 24 Tf 20 350 Td (Browser PDF page ${n}) Tj ET`;add(`<< /Length ${text.length} >>\nstream\n${text}\nendstream`);}
+  objects[1]=`<< /Type /Pages /Count 40 /Kids [${kids.join(" ")}] >>`;
+  let pdf="%PDF-1.7\n",offsets=[0];
+  for(let i=0;i<objects.length;i++){offsets.push(Buffer.byteLength(pdf));pdf+=`${i+1} 0 obj\n${objects[i]}\nendobj\n`;}
+  pdf+="%"+"padding".repeat(40000)+"\n";
+  const xref=Buffer.byteLength(pdf);pdf+=`xref\n0 ${objects.length+1}\n0000000000 65535 f \n`+offsets.slice(1).map(o=>String(o).padStart(10,"0")+" 00000 n \n").join("")+`trailer\n<< /Size ${objects.length+1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  await fs.writeFile(path.join(dir,"preview.pdf"),pdf);
+  await type(`printf "\\033Pregion split 50%%; region secondary open 'preview.pdf' continuous\\033\\\\"`);
+  await wait(()=>evaluate('document.querySelector(".pdf-page canvas")?.width>0'),"PDF.js page rendering");
+  await wait(()=>evaluate('document.querySelector(".textLayer")?.textContent.includes("Browser PDF page 1")'),"PDF text selection layer");
+  if(!await evaluate('getComputedStyle(document.querySelector(".textLayer span")).fontSize!=="0px"'))throw new Error("PDF text geometry missing");
+  if(await evaluate('document.querySelectorAll(".pdf-page canvas").length')>8)throw new Error("PDF pages were eagerly rasterized");
+  await evaluate('document.querySelector(".media-preview").scrollTop=10000;true');
+  await wait(()=>evaluate('Array.from(document.querySelectorAll(".pdf-page canvas")).some(c=>Number(c.parentNode.dataset.page)>10)'),"lazy PDF pages after scrolling");
+  if(await evaluate('document.querySelectorAll(".pdf-page canvas").length')>8)throw new Error("PDF page cache was not evicted");
+  await fs.writeFile(path.join(dir,"pdf-query.py"),String.raw`import os, termios, tty, select, time, json, base64
+saved=termios.tcgetattr(0)
+tty.setraw(0)
+def response(command,prefix):
+    os.write(1,b'\x1bP'+command+b'\x1b\\')
+    data=b''
+    end=time.monotonic()+8
+    while time.monotonic()<end:
+        if select.select([0],[],[],0.1)[0]: data+=os.read(0,8192)
+        start=data.find(prefix)
+        if start>=0 and b'\x1b\\' in data[start:]: return data[start:].split(b'\x1b\\')[0]
+    raise RuntimeError('metadata timeout: '+repr(data))
+try:
+    for kind,command,prefix in [('outline',b'region secondary toc 7 0',b'\x1bPregion secondary data 7 toc'),('text',b'region secondary text 8 1 0',b'\x1bPregion secondary data 8 text')]:
+        data=response(command,prefix)
+        with open('pdf.'+kind,'w') as f: json.dump(json.loads(base64.b64decode(data.split(b' ')[-1])),f)
+    data=response(b"region secondary find forward 'page 10'",b'\x1bPregion secondary matches')
+    with open('pdf.search','wb') as f: f.write(data)
+finally: termios.tcsetattr(0,termios.TCSANOW,saved)
+`);
+  await type("python3 pdf-query.py");
+  await wait(async()=>{try{return JSON.parse(await fs.readFile(path.join(dir,"pdf.outline"),"utf8")).toc[0].title==="Browser PDF outline";}catch{return false;}},"PDF outline protocol reply");
+  await wait(async()=>{try{return JSON.parse(await fs.readFile(path.join(dir,"pdf.text"),"utf8")).text.includes("Browser PDF page 1");}catch{return false;}},"PDF selectable page text protocol reply");
+  await wait(fileEquals("pdf.search","\x1bPregion secondary matches 10 1 1 1 0"),"PDF search protocol reply");
+  await type(`printf '\\033Pregion reset\\033\\'`);
 
   // Real govim --web: no PDF preview, genuine HTML/CSS, save refresh, resize,
   // reconnect and teardown use the same retained secondary-pane lifecycle.
@@ -281,7 +352,7 @@ try {
   await type(":q!");
   await wait(() => evaluate(`!${preview}`), "HTML preview removed on editor exit");
   if (pageErrors.length) throw new Error("JavaScript errors: " + pageErrors.join("\n"));
-  console.log("PASS: Chromium glyph atlases, stalled-decode backpressure/input, govim HTML/CSS/Markdown preview, pixel fidelity, keyboard/IME, clipboard, mouse, resize and reconnect.");
+  console.log("PASS: Chromium semantic text, paint backpressure/input, browser media, govim HTML/CSS/Markdown, keyboard/IME, clipboard, mouse, resize and reconnect.");
   console.log("Test artifacts: " + dir);
 } catch (error) {
   console.error(serverLog, browserLog);

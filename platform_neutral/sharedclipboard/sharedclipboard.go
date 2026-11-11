@@ -16,7 +16,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/sys/unix"
 	"st-go/limits"
 )
@@ -396,9 +395,9 @@ func open(path string) (*sql.DB, error) {
 	if err := secureFile(path); err != nil {
 		return nil, err
 	}
-	params := url.Values{"_busy_timeout": {"250"}, "_journal_mode": {"WAL"}, "_secure_delete": {"on"}, "_synchronous": {"NORMAL"}}
+	params := driverParams()
 	dsn := (&url.URL{Scheme: "file", Path: path, RawQuery: params.Encode()}).String()
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open(sqliteDriver, dsn)
 	if err != nil {
 		return nil, err
 	}

@@ -94,6 +94,8 @@ func (d *Driver) SetTextCursor(cursor api.TextCursor) {
 }
 
 type surface struct {
+	scene  *sceneSurface
+	media  api.MediaView
 	id     uint64
 	html   api.HTMLView
 	driver *Driver
@@ -136,6 +138,10 @@ func (d *Driver) NewWidgetSurfaceVisible(kind api.WidgetKind, bounds image.Recta
 }
 
 func (s *surface) fill(background uint32) {
+	if len(s.driver.scenes) > 0 {
+		s.pixels = nil
+		return
+	}
 	s.pixels = make([]uint32, s.bounds.Dx()*s.bounds.Dy())
 	for i := range s.pixels {
 		s.pixels[i] = background
@@ -147,7 +153,12 @@ func (s *surface) SetVisible(visible bool) {
 	defer d.mu.Unlock()
 	if !s.closed && s.hidden == visible {
 		s.hidden = !visible
-		if s.html.Document != nil {
+		if s.scene != nil {
+			s.scene.hidden = !visible
+			s.scene.dirty = true
+			s.scene.reset = true
+		}
+		if s.html.Document != nil || s.media.ID != 0 {
 			d.htmlVersion++
 		}
 		d.damage(s.bounds)
@@ -165,7 +176,12 @@ func (s *surface) Configure(bounds image.Rectangle, background uint32) {
 	}
 	old := s.bounds
 	s.bounds = bounds
-	if s.html.Document != nil && old != bounds {
+	if s.scene != nil {
+		s.scene.bounds = bounds
+		s.scene.dirty = true
+		s.scene.reset = true
+	}
+	if (s.html.Document != nil || s.media.ID != 0) && old != bounds {
 		d.htmlVersion++
 	}
 	if old.Size() != bounds.Size() {
@@ -178,12 +194,16 @@ func (s *surface) Present(pixels []uint32, w, h, scrollRows int, reuse bool) {
 	d := s.driver
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if s.closed || w != s.bounds.Dx() || h != s.bounds.Dy() || len(pixels) != len(s.pixels) {
+	if s.closed || w != s.bounds.Dx() || h != s.bounds.Dy() || len(pixels) != w*h {
 		return
 	}
+	if len(s.pixels) != len(pixels) {
+		s.pixels = make([]uint32, len(pixels))
+	}
 	copy(s.pixels, pixels)
-	if s.html.Document != nil {
+	if s.html.Document != nil || s.media.ID != 0 {
 		s.html = api.HTMLView{}
+		s.media = api.MediaView{}
 		d.htmlVersion++
 	}
 	d.damage(s.bounds)
@@ -206,9 +226,15 @@ func (s *surface) Close() {
 		return
 	}
 	s.closed = true
-	if s.html.Document != nil {
+	if s.scene != nil {
+		s.scene.closed = true
+		s.scene.hidden = true
+		s.scene.dirty = true
+	}
+	if s.html.Document != nil || s.media.ID != 0 {
 		d.htmlVersion++
 		s.html = api.HTMLView{}
+		s.media = api.MediaView{}
 	}
 	s.pixels = nil
 	for i, candidate := range d.surfaces {
@@ -231,6 +257,10 @@ type frame struct {
 func (d *Driver) frames() []frame {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if len(d.scenes) > 0 {
+		d.dirty = nil
+		return nil
+	}
 	frames := make([]frame, 0, len(d.dirty))
 	for _, r := range d.dirty {
 		f := frame{d.width, d.height, r, make([]uint32, r.Dx()*r.Dy())}

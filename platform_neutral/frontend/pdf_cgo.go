@@ -1,3 +1,5 @@
+//go:build !backend_web
+
 // Package main bridges st-go to poppler for PDF rendering (C++ API).
 //
 // The pdf_render_page / pdf_page_count symbols are defined by the C++ bridge

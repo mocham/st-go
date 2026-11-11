@@ -18,6 +18,7 @@ type Host struct {
 	callbacks        api.Callbacks
 	buffer           Buffer
 	bar              api.Surface
+	scene            api.SceneSurface
 	cursor           api.TextCursor
 	generation       uint64
 	title, iconTitle string
@@ -346,6 +347,9 @@ func (h *Host) Close() {
 		if h.bar != nil {
 			h.bar.Close()
 			h.bar = nil
+		}
+		if h.scene != nil {
+			h.scene.Close()
 		}
 		bounds := h.options.Bounds
 		h.buffer = Buffer{}

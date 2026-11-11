@@ -140,11 +140,15 @@ func IsTrueColor(x uint32) bool     { return 1<<24&x != 0 }
 
 // Glyph is one terminal cell.
 type Glyph struct {
-	U    rune
-	Mode uint16
-	Fg   uint32
-	Bg   uint32
+	U      rune
+	Mode   uint16
+	Fg     uint32
+	Bg     uint32
+	Suffix string // bounded zero-width continuation; immutable and hashable
 }
+
+func (g Glyph) Text() string { return string(g.U) + g.Suffix }
+
 type Line []Glyph
 
 // TCursor
@@ -242,6 +246,12 @@ type ImageDecodeOptions struct {
 	ViewRows                 int
 	Animate                  bool // play an animated WebP (open DSL `anim` option)
 	SearchToken, SearchMatch int  // fixed-page PDF highlights; match is one-based
+}
+
+// Encoded-media renderers reserve cells immediately and load/decode off the PTY
+// goroutine. Native raster renderers may retain the existing decode interface.
+type ImageSourceHooks interface {
+	OpenImageSource(string, ImageDecodeOptions) (int, int, []Glyph, bool)
 }
 
 type GeometryUnit uint8

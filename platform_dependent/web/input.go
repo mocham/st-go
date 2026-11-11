@@ -1,28 +1,32 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"image"
 	"strconv"
 	"unicode/utf8"
 
 	"st-go/limits"
+	"st-go/platform_neutral/api"
 )
 
 type inputMessage struct {
-	Type      string `json:"type"`
-	Key       string `json:"key"`
-	Modifiers uint16 `json:"modifiers"`
-	Button    byte   `json:"button"`
-	X         int    `json:"x"`
-	Y         int    `json:"y"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	Text      string `json:"text"`
-	Focused   bool   `json:"focused"`
-	ID        uint64 `json:"id"`
-	OK        bool   `json:"ok"`
-	Enabled   bool   `json:"enabled"`
+	MediaStatus api.MediaStatus `json:"mediaStatus"`
+	Data        json.RawMessage `json:"data"`
+	Type        string          `json:"type"`
+	Key         string          `json:"key"`
+	Modifiers   uint16          `json:"modifiers"`
+	Button      byte            `json:"button"`
+	X           int             `json:"x"`
+	Y           int             `json:"y"`
+	Width       int             `json:"width"`
+	Height      int             `json:"height"`
+	Text        string          `json:"text"`
+	Focused     bool            `json:"focused"`
+	ID          uint64          `json:"id"`
+	OK          bool            `json:"ok"`
+	Enabled     bool            `json:"enabled"`
 }
 
 // These stable key IDs match the terminal's existing configuration vocabulary;
@@ -109,6 +113,9 @@ func (d *Driver) dispatch(c *client, m inputMessage) error {
 		if m.Width != d.width || m.Height != d.height {
 			d.width, d.height = m.Width, m.Height
 			d.pixels = make([]uint32, d.width*d.height)
+			if len(d.scenes) > 0 {
+				d.pixels = nil
+			}
 			d.dirty = nil
 			d.damage(image.Rect(0, 0, d.width, d.height))
 		}
@@ -140,6 +147,10 @@ func (d *Driver) dispatch(c *client, m inputMessage) error {
 		}
 		d.finishQuery(c, m.ID, m.Text, m.OK)
 	case "ping":
+	case "document_reply":
+		return d.documentReply(c, m.ID, m.Data)
+	case "media_status":
+		d.mediaStatus(m.MediaStatus)
 	default:
 		return fmt.Errorf("unknown input type")
 	}

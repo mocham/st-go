@@ -3,12 +3,16 @@ package frontend
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -102,17 +106,28 @@ func TestWebBackendPTYDirectoryInputAndImagePreview(t *testing.T) {
 		if err := websocket.Message.Receive(conn, &data); err != nil {
 			t.Fatalf("no rendered image frame: %v", err)
 		}
-		if len(data) < 28 || string(data[:4]) != "STW1" {
+		var scene struct {
+			Scenes []struct {
+				Update struct {
+					Rows []struct{ Media []struct{ ID uint64 } }
+				}
+			}
+		}
+		if json.Unmarshal(data, &scene) != nil {
 			continue
 		}
-		pixels, err := png.Decode(bytes.NewReader(data[28:]))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for y := pixels.Bounds().Min.Y; y < pixels.Bounds().Max.Y; y++ {
-			for x := pixels.Bounds().Min.X; x < pixels.Bounds().Max.X; x++ {
-				r, g, b, _ := pixels.At(x, y).RGBA()
-				if r>>8 == 34 && g>>8 == 187 && b>>8 == 68 {
+		for _, s := range scene.Scenes {
+			for _, row := range s.Update.Rows {
+				for _, m := range row.Media {
+					response, err := http.Get(address + "media/" + strconv.FormatUint(m.ID, 10))
+					if err != nil {
+						t.Fatal(err)
+					}
+					original, err := io.ReadAll(response.Body)
+					response.Body.Close()
+					if err != nil || !bytes.Equal(original, encoded.Bytes()) {
+						t.Fatal("media resource did not preserve original encoded PNG", err)
+					}
 					return
 				}
 			}

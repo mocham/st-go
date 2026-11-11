@@ -9,4 +9,11 @@ button:disabled { opacity: .45; cursor: default; }
 #viewport { position: relative; flex: 1; min-height: 0; overflow: auto; }
 #screen { display: block; max-width: none; max-height: none; }
 .html-preview { position: absolute; border: 0; background: #fff; z-index: 1; }
+.media-preview { position:absolute; overflow:auto; z-index:1; outline:none; color:#222; }
+.pdf-page { position:relative; overflow:hidden; background:white; margin-bottom:8px; }
+.pdf-page canvas { display:block; }
+.textLayer { position:absolute; inset:0; overflow:hidden; line-height:1; text-align:initial; transform-origin:0 0; }
+.textLayer span, .textLayer br { color:transparent; position:absolute; white-space:pre; cursor:text; transform-origin:0% 0%; }
+.textLayer ::selection { background:rgba(0,80,255,.3); }
+.textLayer .search-hit { background:rgba(255,200,0,.35); }
 #input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; pointer-events: none; }

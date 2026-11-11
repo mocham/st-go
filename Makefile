@@ -352,7 +352,8 @@ WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:lib
 # --gc-sections drops unreferenced functions from function-sections objects.
 GC_EXTRA   = -Wl,--gc-sections
 
-PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go platform_dependent/web/assets/*)
+WEB_ASSETS := $(wildcard platform_dependent/web/assets/* platform_dependent/web/assets/pdfjs/* platform_dependent/web/assets/pdfjs/*/*)
+PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go) $(WEB_ASSETS)
 GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard functionalities/config/*.go functionalities/audio/*.go functionalities/widgets/*.go) $(PLATFORM_SRC) \
 	  go.mod go.sum Monaco_Linux.ttf \
 	  $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go) \
@@ -383,8 +384,8 @@ $(OUTPUT_DIR)/st: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 # Embedded HTTP/canvas client; terminal, fonts and media decoders stay native.
-$(OUTPUT_DIR)/st-web: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(GO_SRC)
-	go build -trimpath -tags 'backend_web netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
+$(OUTPUT_DIR)/st-web: $(GO_SRC)
+	CGO_ENABLED=0 go build -trimpath -tags 'backend_web netgo osusergo $(TAB_GO_TAGS)' -o $@ .
 
 # Linux console fbdev/evdev host, with the existing full software media renderer.
 FB_STATUS_FONT = platform_dependent/fb/system_bar_font_generated.go
@@ -467,7 +468,7 @@ install: st
 # are tested explicitly: Go's ./... pattern never crosses module boundaries.
 TEST_EXTRA = $(FULL_EXTRA)
 
-test: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules
+test: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules test-web
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 # Integrated profile, including the in-process pure-Go Pinyin tests.
@@ -484,6 +485,9 @@ test-tui:
 	done
 
 # Optional live canvas check using installed Chromium and Node's built-in CDP.
+test-web: st-web
+	CGO_ENABLED=0 go test -tags 'backend_web' ./platform_dependent/web ./platform_neutral/sharedclipboard
+
 test-web-browser: st-web govim
 	node platform_dependent/web/testdata/browser-smoke.mjs
 
@@ -516,4 +520,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-modules test-tui test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu $(BINARY_NAMES) terminal-profile-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu $(BINARY_NAMES) terminal-profile-force
