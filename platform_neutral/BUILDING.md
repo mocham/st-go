@@ -137,12 +137,12 @@ pinned DjVuLibre source is downloaded, checksum-verified, and statically built
 against the bundled static libjpeg. The decoder remains in that client rather
 than the terminal. File-browser and GoLS need a C compiler
 for bundled SQLite, **not** graphical codecs or ALSA. File-browser sends audio
-requests to st-go, whose audio module owns libasound and MP3 playback. Universal
+requests to st-go, whose pure-Go audio module owns direct ALSA playback. Universal
 readline and govim use the in-process pure-Go `st-go/googlepinyin`
 decoder with a checked-in architecture-independent corpus transformation. The
 build performs no Google Pinyin source download or native generation.
-Distribution binaries remain static, including terminal-owned audio with
-`alsa_static` and `zat-djvu`.
+Distribution binaries remain static, including terminal-owned audio and
+`zat-djvu`.
 
 Go's `./...` does not cross module boundaries. The root pattern tests only the
 host; `make test` additionally tests every shared/demo module, including the

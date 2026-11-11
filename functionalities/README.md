@@ -31,10 +31,10 @@ make test-tui                 # all client modules, no graphical stack
 make test                    # also native audio and graphical integration
 ```
 
-`audio` is a **host service**, not a TUI dependency. Its normal Go build uses
-system ALSA through pkg-config; `alsa_static` selects the Make-built static
-library. `make test-tui` excludes this native host service. No demo module
-imports it, XGB, the graphical frontend, or the root `st-go` module.
+`audio` is a **host service**, not a TUI dependency. Its pure-Go Linux frontend
+uses the ALSA kernel UAPI directly, without libasound, cgo, or system development
+packages. `make test-tui` excludes this host service. No demo module imports it,
+XGB, the graphical frontend, or the root `st-go` module.
 
 Each application under [`demo-go/`](../demo-go/README.md) has its own `go.mod`.
 Go's `./...` pattern does not cross module boundaries; use `make test-tui` or

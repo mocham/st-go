@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,11 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 	makefile, err := os.ReadFile("Makefile")
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, retired := range []string{"alsa_static", "libasound", "alsa_snd", "ALSA_LIB"} {
+		if bytes.Contains(makefile, []byte(retired)) {
+			t.Fatalf("Makefile still contains retired ALSA build token %q", retired)
+		}
 	}
 	old := time.Now().Add(-2 * time.Hour)
 	write := func(path string, data []byte, when time.Time) {
@@ -41,11 +47,10 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 		"third_party/djvu/lib/libdjvulibre.a",
 		"third_party/webp/lib/libwebp.a", "third_party/webp/lib/libwebpdemux.a",
 		"third_party/webp/webp_anim.o", "third_party/pdf_bridge.o",
-		"third_party/alsa/lib/libasound.a", "third_party/alsa/snd.o",
 	}
 	for _, path := range append(append([]string{}, artifacts...),
 		"third_party/stb/stb_image.h", "third_party_wrapper/stb_image.c",
-		"third_party_wrapper/webp_anim.c", "functionalities/audio/alsa_snd.c",
+		"third_party_wrapper/webp_anim.c",
 		"third_party_wrapper/ff2.h", "third_party_wrapper/plugin-ff2.c",
 		"platform_dependent/fb/generate_system_bar_font.go", "platform_dependent/fb/system_bar_font_generated.go",
 		"third_party_wrapper/pdf_bridge.cpp", "pdf_bridge.h", "go.mod", "go.sum", "Monaco_Linux.ttf", "st", "file-browser") {

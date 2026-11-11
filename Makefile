@@ -61,7 +61,7 @@ TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 # dependency from SQLite.
 TABS ?= 1
 TAB_GO_TAGS = $(if $(filter 1,$(TABS)),terminal_tabs,)
-FULL_GO_TAGS = webpcache sqlite_omit_load_extension alsa_static $(TAB_GO_TAGS)
+FULL_GO_TAGS = webpcache sqlite_omit_load_extension $(TAB_GO_TAGS)
 TERMINAL_NAMES = st st-web st-fb st-pdf st-stb st-min
 TERMINAL_PROFILE = $(OUTPUT_DIR)/.terminal-profile
 
@@ -135,19 +135,6 @@ WEBP_LIB     = third_party/webp/lib/libwebp.a
 WEBP_DEMUX   = third_party/webp/lib/libwebpdemux.a
 WEBP_ANIM_C  = third_party_wrapper/webp_anim.c
 WEBP_ANIM_O  = third_party/webp/webp_anim.o
-
-# ALSA (libasound): terminal-owned audio playback requested by TUI clients.
-# Built statically following the gowidgets/CLibBuild recipe, including its
-# static-linking patches: dlopen() and NSS lookups (getgrnam_r/getpwuid_r)
-# are unavailable in a statically linked binary, so they are neutralized.
-ALSA_VERSION = 1.2.14
-ALSA_URL     = https://www.alsa-project.org/files/pub/lib/alsa-lib-$(ALSA_VERSION).tar.bz2
-ALSA_TAR     = third_party/alsa-lib-$(ALSA_VERSION).tar.bz2
-ALSA_SRC     = third_party/alsa-lib-src
-ALSA_DIR     = third_party/alsa
-ALSA_LIB     = third_party/alsa/lib/libasound.a
-SND_C        = functionalities/audio/alsa_snd.c
-SND_O        = third_party/alsa/snd.o
 
 # Build every terminal profile/backend, demo, and helper.
 all: $(BINARY_PATHS)
@@ -313,39 +300,10 @@ $(WEBP_DEMUX): $(WEBP_LIB)
 	cp "$(WEBP_SRC)/src/webp/"*.h third_party/webp/include/webp/
 
 # Animated-WebP bridge (WebPAnimDecoder) for the Go file-browser, precompiled
-# like alsa_snd.o so the cgo file only declares extern functions.
+# so the cgo file only declares extern functions.
 $(WEBP_ANIM_O): $(WEBP_ANIM_C) $(WEBP_LIB) $(WEBP_DEMUX)
 	@mkdir -p "$(dir $@)"
 	$(CC) -O2 -fPIC -Ithird_party/webp/include -c "$<" -o "$@"
-
-# --- ALSA static (libasound; audio playback for the Go file-browser) ------
-# Static build mirroring gowidgets/CLibBuild. dlopen() and the NSS lookups
-# getgrnam_r/getpwuid_r do not work in a statically linked binary, so they are
-# patched out (plugin loading via dlopen is replaced by "not found"; NSS
-# lookups degrade to "no such user/group").
-$(ALSA_LIB):
-	@mkdir -p third_party
-	@if [ ! -f "$(ALSA_TAR)" ]; then \
-		echo "downloading alsa-lib $(ALSA_VERSION)..."; \
-		curl -fL -o "$(ALSA_TAR)" "$(ALSA_URL)"; \
-	fi
-	rm -rf "$(ALSA_SRC)" "$(ALSA_DIR)"
-	mkdir -p "$(ALSA_SRC)" "$(ALSA_DIR)/lib" "$(ALSA_DIR)/include"
-	tar -xjf "$(ALSA_TAR)" -C "$(ALSA_SRC)" --strip-components=1
-	sed -i 's|handle = dlopen(filename, mode);|printf("name=%s\\npath=%s\\n", name, filename);handle = NULL;|' "$(ALSA_SRC)/src/dlmisc.c"
-	sed -i 's|int st = getgrnam_r(.*);|int st=-1;|' "$(ALSA_SRC)/src/pcm/pcm_direct.c"
-	sed -i '/getpwuid_r/ c\goto out;while(0){' "$(ALSA_SRC)/src/userfile.c"
-	sed -i '/dlopen/ c\handle=NULL;' "$(ALSA_SRC)/src/pcm/pcm_ladspa.c"
-	cd "$(ALSA_SRC)" && ./configure --enable-shared=no --enable-static=yes CFLAGS="-fPIC -O2"
-	$(MAKE) -C "$(ALSA_SRC)"
-	cp "$(ALSA_SRC)/src/.libs/libasound.a" "$(ALSA_LIB)"
-	cp -r "$(ALSA_SRC)/include/." "$(ALSA_DIR)/include/"
-
-# ALSA playback wrapper, precompiled like pdf_bridge.o so the cgo file only
-# needs extern declarations (no ALSA headers at Go-compile time).
-$(SND_O): $(SND_C) $(ALSA_LIB)
-	@mkdir -p "$(dir $@)"
-	$(CC) -O2 -fPIC -Ithird_party/alsa/include -c "$<" -o "$@"
 
 # --- poppler static (minimal, C++ API only) ------------------------------
 $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB) $(JPEG_LIB)
@@ -411,8 +369,6 @@ STB_EXTRA  = $(STB_O) -lm $(DUMMY_WEBP) $(DUMMY_PDF)
 PDF_EXTRA  = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(DUMMY_WEBP)
 FULL_EXTRA = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
 
-# The file-browser's alsa_static profile supplies its own native link items.
-
 # Animated-WebP items for the Go file-browser (WebPAnimDecoder playback).
 # webp_anim.o must precede -l:libwebpdemux.a; libwebp.a comes via WEBP_LIB.
 WEBP_ANIM_EXTRA = $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a -l:libwebp.a
@@ -441,9 +397,6 @@ $(addprefix $(OUTPUT_DIR)/,$(TERMINAL_NAMES)): $(TERMINAL_PROFILE)
 
 terminal-profile-force:
 
-# Sound-device ownership belongs to the terminal, on every display backend.
-$(addprefix $(OUTPUT_DIR)/,st st-web st-fb st-pdf st-stb st-min): $(ALSA_LIB) $(SND_O)
-
 $(OUTPUT_DIR):
 	mkdir -p $@
 
@@ -466,13 +419,13 @@ $(OUTPUT_DIR)/st-fb: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $
 	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
-	go build -trimpath -tags 'alsa_static $(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
+	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -trimpath -tags 'alsa_static $(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
+	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -trimpath -tags 'alsa_static $(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
+	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
 
 # --- Go file-browser demo --------------------------------------------------
 # Independent TUI module. TeX/Markdown previews are vector PDFs from latexpdf;
@@ -543,9 +496,9 @@ test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) 
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 # Integrated profile, including the in-process pure-Go Pinyin tests.
-test-modules: $(ALSA_LIB) $(SND_O)
+test-modules:
 	@set -e; for module in $(GO_MODULES); do \
-		GOWORK=off go -C "$$module" test -tags 'alsa_static sqlite_omit_load_extension' ./... -count=1; \
+		GOWORK=off go -C "$$module" test -tags 'sqlite_omit_load_extension' ./... -count=1; \
 	done
 
 # Standard Go workflow: no graphical libraries or Make-built assets needed.

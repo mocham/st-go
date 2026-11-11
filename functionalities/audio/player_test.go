@@ -94,11 +94,19 @@ func TestALSAErrorLogging(t *testing.T) {
 }
 
 func TestOpenALSA(t *testing.T) {
+	for _, rate := range []int{-1, 0} {
+		if player, err := openALSA(rate); err == nil || player != nil {
+			t.Fatalf("openALSA(%d) accepted an invalid sample rate", rate)
+		}
+	}
 	p, err := openALSA(44100)
 	if err != nil {
 		return
 	} // No hardware in headless tests.
 	defer p.close()
+	if p.rate == 0 || p.bufferFrames == 0 || p.bufferFrames > maxPCMBufferFrames {
+		t.Fatalf("invalid negotiated PCM configuration: rate=%d buffer=%d", p.rate, p.bufferFrames)
+	}
 	if err := p.send(make([]byte, 4096)); err != nil {
 		t.Fatal(err)
 	}

@@ -5,8 +5,8 @@
  * count, next() yields each composited RGBA frame with its timestamp (ms),
  * delete frees the decoder.
  *
- * Compiled once (like alsa_snd.o) so the Go side only declares extern
- * functions and never includes libwebp headers.
+ * Compiled once so the Go side only declares extern functions and never
+ * includes libwebp headers.
  */
 #include <webp/demux.h>
 #include <stdlib.h>
