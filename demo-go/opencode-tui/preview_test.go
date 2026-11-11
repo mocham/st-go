@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -104,5 +105,71 @@ func TestLargeWebResponseUsesChunkedDCS(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "region secondary html begin ") || !strings.HasSuffix(output.String(), "\x1bPregion secondary html commit\x1b\\") {
 		t.Fatal("large response did not use atomic chunked transfer")
+	}
+}
+
+func TestFileMediaPreviewAndResponseSwitchKeepIndependentResources(t *testing.T) {
+	for _, web := range []bool{false, true} {
+		name := "pdf"
+		if web {
+			name = "web"
+		}
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			view, err := newRichPreview(&output, 58, true, web)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer view.close()
+			view.visible, view.ready = true, true
+			settle := func() {
+				t.Helper()
+				deadline := time.Now().Add(5 * time.Second)
+				for time.Now().Before(deadline) {
+					status, err := view.tick(time.Now())
+					if err != nil || status != "" {
+						t.Fatalf("render: %s %v", status, err)
+					}
+					if !view.busy && view.pending == nil {
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+				t.Fatal("file render timed out")
+			}
+			pdf, _, err := renderMarkdown("# Attached document\n", t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := view.requestMedia("file:one", &fileMedia{data: pdf, extension: ".pdf"}); err != nil {
+				t.Fatal(err)
+			}
+			settle()
+			file := view.mediaPath
+			data, err := os.ReadFile(file)
+			if err != nil || !bytes.Equal(data, pdf) || !strings.Contains(output.String(), "region secondary open "+quoteDSL(file)) {
+				t.Fatal("downloaded PDF was not published")
+			}
+			view.toggle(time.Now())
+			output.Reset()
+			view.toggle(time.Now())
+			view.setReady(&regionLayout{})
+			if !strings.Contains(output.String(), quoteDSL(file)) {
+				t.Fatal("F2 restore lost file preview")
+			}
+			view.clear()
+			view.request("prompt:one", "Back to the response with $x^2$.")
+			settle()
+			if view.mediaPath != "" {
+				t.Fatal("return to response retained file media")
+			}
+			data, err = os.ReadFile(file)
+			if err != nil || !bytes.Equal(data, pdf) {
+				t.Fatal("response replacement overwrote a retained file resource")
+			}
+			if web && !strings.Contains(string(view.html), "Back to the response") {
+				t.Fatal("HTML response not restored after PDF")
+			}
+		})
 	}
 }

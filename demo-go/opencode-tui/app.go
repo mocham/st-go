@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -31,6 +30,10 @@ type chatMessage struct {
 	Failed       bool
 	Acknowledged bool
 	Uncertain    bool
+	Tools        []messageContent
+	Order        []responsePart
+	Files        []messageAttachment
+	ChangedFiles []string
 }
 
 type streamItem struct {
@@ -51,6 +54,7 @@ type operationResult struct {
 	catalog     *catalogResult
 	attachToken uint64
 	details     *sessionDetails
+	file        *fileResult
 }
 
 type app struct {
@@ -115,6 +119,12 @@ type app struct {
 	deleting                 map[string]bool
 	deleted                  map[string]bool
 	deleteHits               map[int]string
+
+	filesMode                 bool
+	promptScroll, filesScroll int
+	fileSelection             *fileSelection
+	fileSequence              uint64
+	fileCancel                context.CancelFunc
 }
 
 func newApp(client *apiClient, session sessionInfo, messages []apiMessage, permissions []permissionRequest, output io.Writer, fd int, rich *richPreview) *app {
@@ -141,36 +151,24 @@ func convertMessages(messages []apiMessage) []chatMessage {
 		switch message.Type {
 		case "user":
 			promptID = message.ID
-			converted = append(converted, chatMessage{ID: message.ID, Role: "user", Text: message.Text, Rich: message.Text, Acknowledged: true})
+			converted = append(converted, chatMessage{ID: message.ID, Role: "user", Text: message.Text, Rich: message.Text, Acknowledged: true, Files: message.Files})
 		case "assistant":
-			var rich []string
-			var auxiliary []string
-			parts := make(map[int]string)
+			item := chatMessage{ID: message.ID, Role: "assistant", PromptID: promptID, Parts: make(map[int]string), ChangedFiles: message.Snapshot.Files}
 			for ordinal, content := range message.Content {
 				switch content.Type {
 				case "text":
-					if content.Text != "" {
-						rich = append(rich, content.Text)
-						parts[ordinal] = content.Text
-					}
+					item.Parts[ordinal] = content.Text
+					item.Order = append(item.Order, responsePart{ordinal: ordinal})
 				case "tool":
-					status := content.State.Status
-					if status == "" {
-						status = "pending"
+					if content.ID == "" {
+						content.ID = fmt.Sprintf("part-%d", ordinal)
 					}
-					auxiliary = append(auxiliary, fmt.Sprintf("[tool: %s — %s]", content.Name, status))
+					item.Tools = append(item.Tools, content)
+					item.Order = append(item.Order, responsePart{toolID: content.ID})
 				}
 			}
-			richText := strings.Join(rich, "\n\n")
-			auxiliaryText := strings.Join(auxiliary, "\n")
-			plain := richText
-			if auxiliaryText != "" {
-				if plain != "" {
-					plain += "\n\n"
-				}
-				plain += auxiliaryText
-			}
-			converted = append(converted, chatMessage{ID: message.ID, Role: "assistant", Text: plain, Rich: richText, Aux: auxiliaryText, Parts: parts, PromptID: promptID})
+			rebuildMessage(&item)
+			converted = append(converted, item)
 		}
 	}
 	return converted
@@ -184,6 +182,7 @@ func (application *app) rebuildIndex() {
 }
 
 func (application *app) replaceMessages(messages []apiMessage) {
+	selected := application.selectedPrompt
 	application.updateUsage(messages)
 	previous := application.messages
 	application.messages = convertMessages(messages)
@@ -205,6 +204,9 @@ func (application *app) replaceMessages(messages []apiMessage) {
 		application.selectLatestPreview()
 	} else if _, ok := application.messageIndex[application.selectedPrompt]; !ok {
 		application.selectLatestPreview()
+	}
+	if selected != application.selectedPrompt {
+		application.resetFiles()
 	}
 	application.dirty = true
 }
@@ -228,23 +230,7 @@ func (application *app) ensureAssistant(messageID string) *chatMessage {
 }
 
 func (application *app) rebuildAssistant(message *chatMessage) {
-	ordinals := make([]int, 0, len(message.Parts))
-	for ordinal := range message.Parts {
-		ordinals = append(ordinals, ordinal)
-	}
-	sort.Ints(ordinals)
-	parts := make([]string, 0, len(ordinals))
-	for _, ordinal := range ordinals {
-		parts = append(parts, message.Parts[ordinal])
-	}
-	message.Rich = strings.Join(parts, "\n\n")
-	message.Text = message.Rich
-	if message.Aux != "" {
-		if message.Text != "" {
-			message.Text += "\n\n"
-		}
-		message.Text += message.Aux
-	}
+	rebuildMessage(message)
 }
 
 func (application *app) promptIndexes() []int {
@@ -296,6 +282,9 @@ func (application *app) queuePreview() {
 		key = application.attachTarget + "\x00loading"
 	}
 	text := application.selectedResponse()
+	if application.filesMode && application.fileSelection != nil && application.attachTarget == "" {
+		key += fmt.Sprintf("\x00file\x00%s\x00%d", application.fileSelection.ref.ID, application.fileSequence)
+	}
 	generation := key + "\x00" + text
 	if generation == application.previewGeneration {
 		return
@@ -308,7 +297,13 @@ func (application *app) queuePreview() {
 			application.status = err.Error()
 		}
 	}
-	application.preview.request(key, text)
+	if selected := application.fileSelection; application.filesMode && selected != nil && selected.media != nil && application.attachTarget == "" {
+		if err := application.preview.requestMedia(key, selected.media); err != nil {
+			application.status = err.Error()
+		}
+	} else {
+		application.preview.request(key, text)
+	}
 }
 
 func (application *app) startEventStream() {
@@ -464,14 +459,22 @@ func (application *app) applyEvent(event apiEvent) {
 	case "session.step.ended", "session.step.failed":
 		var step struct {
 			Tokens *tokenUsage `json:"tokens"`
+			Files  []string    `json:"files"`
 		}
-		if json.Unmarshal(event.Data, &step) == nil && step.Tokens != nil {
-			model := application.effectiveModel()
-			if application.details.lastModel != nil {
-				model = *application.details.lastModel
+		if json.Unmarshal(event.Data, &step) == nil {
+			if len(step.Files) > 0 && data.AssistantMessageID != "" {
+				application.ensureAssistant(data.AssistantMessageID).ChangedFiles = step.Files
 			}
-			application.usage = &contextUsage{tokens: *step.Tokens, model: model}
+			if step.Tokens != nil {
+				model := application.effectiveModel()
+				if application.details.lastModel != nil {
+					model = *application.details.lastModel
+				}
+				application.usage = &contextUsage{tokens: *step.Tokens, model: model}
+			}
 		}
+	case "session.tool.input.started", "session.tool.input.delta", "session.tool.input.ended", "session.tool.called", "session.tool.progress", "session.tool.success", "session.tool.failed":
+		application.applyToolEvent(event)
 	case "session.compaction.ended", "session.revert.staged", "session.revert.cleared", "session.revert.committed":
 		application.requestSync()
 	case "session.status":
@@ -489,12 +492,14 @@ func (application *app) applyEvent(event apiEvent) {
 		}
 	case "session.text.started":
 		message := application.ensureAssistant(data.AssistantMessageID)
+		message.addTextPart(data.Ordinal)
 		if message.Parts == nil {
 			message.Parts = make(map[int]string)
 		}
 		application.busy = true
 	case "session.text.delta":
 		message := application.ensureAssistant(data.AssistantMessageID)
+		message.addTextPart(data.Ordinal)
 		if message.Parts == nil {
 			message.Parts = make(map[int]string)
 		}
@@ -502,6 +507,7 @@ func (application *app) applyEvent(event apiEvent) {
 		application.rebuildAssistant(message)
 	case "session.text.ended":
 		message := application.ensureAssistant(data.AssistantMessageID)
+		message.addTextPart(data.Ordinal)
 		if message.Parts == nil {
 			message.Parts = make(map[int]string)
 		}
@@ -580,6 +586,10 @@ func (application *app) applyOperation(result operationResult) {
 	}
 	if result.picker != nil {
 		application.applyPickerResult(result)
+		return
+	}
+	if result.file != nil {
+		application.applyFileResult(result)
 		return
 	}
 	if result.details != nil {
@@ -701,6 +711,7 @@ func (application *app) submitPrompt() {
 		application.activePrompt = id
 	}
 	application.selectedPrompt, application.followPreview = id, true
+	application.resetFiles()
 	application.busy = true
 	application.sidebarFocus = application.session.ID
 	application.status = "Sending…"
@@ -815,6 +826,9 @@ func (application *app) handleInput(event inputEvent) {
 		return
 	}
 	switch event.key {
+	case "<Tab>":
+		application.toggleFiles()
+		return
 	case "\x11": // Ctrl-Q
 		application.running = false
 		return
@@ -834,9 +848,17 @@ func (application *app) handleInput(event inputEvent) {
 		application.dirty = true
 		return
 	case "<A-Up>":
+		if application.filesMode {
+			application.moveFile(-1)
+			return
+		}
 		application.movePreview(-1)
 		return
 	case "<A-Down>":
+		if application.filesMode {
+			application.moveFile(1)
+			return
+		}
 		application.movePreview(1)
 		return
 	case "<A-PageUp>":
@@ -846,6 +868,10 @@ func (application *app) handleInput(event inputEvent) {
 		application.scrollResponse(1)
 		return
 	case "<F3>":
+		if application.filesMode {
+			application.reloadFile()
+			return
+		}
 		application.morePrompts()
 		return
 	case "<F2>":
@@ -915,6 +941,7 @@ func (application *app) run() error {
 	defer application.input.Close()
 	defer application.closePicker()
 	defer application.cancelAttach()
+	defer application.cancelFile()
 	application.terminalSize()
 	signal.Notify(application.signals, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(application.signals)

@@ -33,6 +33,7 @@ type displayRow struct {
 	action    string
 	spans     []textSpan
 	deleteID  string
+	fileID    string
 }
 
 func safeText(value string) string {
@@ -191,11 +192,14 @@ func (application *app) helpLine() string {
 	if application.picker != nil {
 		return "↑/↓ select · Enter apply · Esc cancel · type to filter · PgUp/PgDn · Ctrl-R reload"
 	}
+	if application.filesMode {
+		return "Tab prompts · Click file to preview · Alt-↑/↓ file · F3 reload · PgUp/PgDn files · Alt-PgUp/PgDn preview · Ctrl-Q quit"
+	}
 	previewKey := "F2 rich pane"
 	if application.preview == nil || !application.preview.enabled {
 		previewKey = "text response"
 	}
-	return "Click session/prompt · More/F3 +10 · Alt-↑/↓ select · Alt-PgUp/PgDn response · /sessions /models /variants · Enter send · Ctrl-Q quit · " + previewKey
+	return "Tab message files · Click session/prompt · More/F3 +10 · Alt-↑/↓ select · Alt-PgUp/PgDn response · /sessions /models /variants · Ctrl-Q quit · " + previewKey
 }
 
 func writeFull(writer io.Writer, data []byte) error {
@@ -229,9 +233,17 @@ func (application *app) drawPanes(output *strings.Builder) {
 	application.sidebarHits = make(map[int]sidebarHit)
 	application.deleteHits = make(map[int]string)
 	if layout.titleRow != 0 {
-		drawCells(output, 1, layout.titleRow, layout.prompts.width, dimStyle, "SESSIONS · click to activate")
+		title := "SESSIONS · Tab message files"
+		if application.filesMode {
+			title = "MESSAGE FILES · Tab prompts"
+		}
+		drawCells(output, 1, layout.titleRow, layout.prompts.width, dimStyle, title)
 		if layout.response.width > 0 {
-			drawCells(output, layout.response.x, layout.titleRow, layout.response.width, assistantStyle, "RESPONSE")
+			label := "RESPONSE"
+			if application.filesMode && application.fileSelection != nil {
+				label = application.fileSelection.ref.Name
+			}
+			drawCells(output, layout.response.x, layout.titleRow, layout.response.width, assistantStyle, label)
 		}
 	}
 	if layout.divider != 0 {
@@ -240,6 +252,9 @@ func (application *app) drawPanes(output *strings.Builder) {
 		}
 	}
 	rows := application.sidebarRows(layout.prompts.width)
+	if application.filesMode {
+		rows = application.fileRows(layout.prompts.width)
+	}
 	if application.sidebarFocus != "" {
 		for index, row := range rows {
 			if row.sessionID == application.sidebarFocus {
@@ -272,6 +287,8 @@ func (application *app) drawPanes(output *strings.Builder) {
 			application.deleteHits[y] = row.deleteID
 		}
 		switch {
+		case row.fileID != "":
+			application.sidebarHits[y] = sidebarHit{"file", row.fileID}
 		case row.sessionID != "":
 			application.sidebarHits[y] = sidebarHit{"session", row.sessionID}
 		case row.promptID != "":

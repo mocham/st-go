@@ -42,6 +42,23 @@ Responses update while streaming. F2 toggles rich/text display; Esc returns focu
 from browser previews to the composer. `--no-preview` uses text only and takes
 precedence over `--web`. Unsupported terminals automatically fall back to text.
 
+Tool calls appear inline in message order: status, the command being executed,
+and referenced filenames. Saved tool output is exposed as a named message `.txt`
+file. Live events update these summaries; history restores them on reconnection.
+
+Press **Tab** to replace the left list with **files from the selected prompt's
+messages**. Click a file to preview it on the right. Tab returns to the prompt list
+and response, preserving unfinished input and list scroll. The list includes tool
+file arguments, patch paths, changed files, local Markdown links, message
+attachments, and saved tool output. Streaming does not steal a selected preview.
+
+Source files are fetched from the OpenCode server on click (current saved content,
+not a historical version). Attachments and tool output use their saved message
+content. Markdown renders with math; other text/source files display as code.
+PDFs and common images use the native rich pane. **F3** reloads the selected file.
+Downloads are bounded at 16 MiB; text previews display up to 256 KiB. Deleted or
+unavailable files show an error in the preview.
+
 ## Navigation and controls
 
 The sidebar groups prompts by session, showing workdir and title. Click a session
@@ -53,9 +70,11 @@ The header displays model, variant, and context usage.
 | --- | --- |
 | Enter | Send the single-line prompt |
 | Up/Down | Prompt history |
-| More / F3 | Load 10 older prompts |
-| PgUp/PgDn | Scroll session/prompt list |
-| Alt-Up/Down | Select newer/older prompt |
+| Tab | Switch prompts / message files |
+| Click a message file | Preview its contents on the right |
+| More / F3 | Load 10 older prompts; in file mode, reload selected file |
+| PgUp/PgDn | Scroll session/prompt or file list |
+| Alt-Up/Down | Select newer/older prompt, or previous/next file |
 | Alt-PgUp/PgDn | Scroll response |
 | Mouse wheel | Scroll pane under pointer |
 | F2 | Toggle rich/text response |
@@ -75,8 +94,9 @@ reloads session state, with periodic history refresh as a fallback. Ambiguous
 prompt failures reconcile with server history rather than automatically resending
 and risking duplicate work. Long-running sessions have no prompt-duration cutoff.
 
-The client supports session management, live responses, model selection, and
-permissions. Attachments, multiline editing, forms, diffs, and PTY views are not
+The client supports session management, live responses/tools, message-file
+previews, model selection, and permissions. Sending attachments, multiline
+editing, forms, diffs, and PTY views are not
 implemented. API integration is isolated in [`api.go`](api.go); see the
 [OpenCode V2 client documentation](https://opencode.ai/v2/docs/build/client).
 

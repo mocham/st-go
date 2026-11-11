@@ -94,24 +94,55 @@ type sessionInfo struct {
 }
 
 type messageContent struct {
-	Type  string `json:"type"`
-	Text  string `json:"text"`
-	Name  string `json:"name"`
-	State struct {
-		Status string `json:"status"`
-	} `json:"state"`
+	Type  string    `json:"type"`
+	Text  string    `json:"text"`
+	ID    string    `json:"id"`
+	Name  string    `json:"name"`
+	State toolState `json:"state"`
+}
+
+type toolState struct {
+	Status   string          `json:"status"`
+	Input    json.RawMessage `json:"input"`
+	Content  []toolContent   `json:"content"`
+	Metadata map[string]any  `json:"metadata"`
+	Error    *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type toolContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+	URI  string `json:"uri"`
+	Name string `json:"name"`
+	MIME string `json:"mime"`
+}
+
+type messageAttachment struct {
+	Data   string `json:"data"`
+	MIME   string `json:"mime"`
+	Name   string `json:"name"`
+	Source struct {
+		Type string `json:"type"`
+		URI  string `json:"uri"`
+	} `json:"source"`
 }
 
 type apiMessage struct {
-	ID      string           `json:"id"`
-	Type    string           `json:"type"`
-	Text    string           `json:"text"`
-	Agent   string           `json:"agent"`
-	Content []messageContent `json:"content"`
-	Model   *modelRef        `json:"model"`
-	Tokens  *tokenUsage      `json:"tokens"`
-	Status  string           `json:"status"`
-	Time    struct {
+	ID       string              `json:"id"`
+	Type     string              `json:"type"`
+	Text     string              `json:"text"`
+	Agent    string              `json:"agent"`
+	Content  []messageContent    `json:"content"`
+	Files    []messageAttachment `json:"files"`
+	Snapshot struct {
+		Files []string `json:"files"`
+	} `json:"snapshot"`
+	Model  *modelRef   `json:"model"`
+	Tokens *tokenUsage `json:"tokens"`
+	Status string      `json:"status"`
+	Time   struct {
 		Created float64 `json:"created"`
 	} `json:"time"`
 }
@@ -467,6 +498,8 @@ var streamTypes = []string{
 	"session.execution.started", "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted",
 	"permission.asked", "permission.replied", "session.renamed", "session.model.selected",
 	"session.step.started", "session.step.ended", "session.step.failed", "session.compaction.ended", "session.revert.staged", "session.revert.cleared", "session.revert.committed", "session.status",
+	"session.tool.input.started", "session.tool.input.delta", "session.tool.input.ended",
+	"session.tool.called", "session.tool.progress", "session.tool.success", "session.tool.failed",
 }
 
 // subscribe consumes one live-only OpenCode SSE stream. Reconnection and state

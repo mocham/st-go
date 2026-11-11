@@ -16,6 +16,7 @@ type richRenderRequest struct {
 	generation uint64
 	messageID  string
 	text       string
+	media      *fileMedia
 }
 
 type richRenderResult struct {
@@ -24,6 +25,7 @@ type richRenderResult struct {
 	html       []byte // JSON, ready for single-command or chunked DCS delivery
 	mathErrors int
 	err        error
+	mediaPath  string
 }
 
 type richPreview struct {
@@ -37,6 +39,7 @@ type richPreview struct {
 	directory  string
 	pdfPath    string
 	html       []byte
+	mediaPath  string
 	deadline   time.Time
 	generation uint64
 	published  uint64
@@ -121,6 +124,23 @@ func (view *richPreview) request(messageID, text string) {
 	view.pending = &request
 }
 
+func (view *richPreview) requestMedia(key string, media *fileMedia) error {
+	if view == nil || !view.enabled {
+		return nil
+	}
+	if view.directory == "" {
+		directory, err := os.MkdirTemp("", "opencode-tui-preview-")
+		if err != nil {
+			return err
+		}
+		view.directory, view.pdfPath = directory, filepath.Join(directory, "response.pdf")
+	}
+	view.generation++
+	view.targetID = key
+	view.pending = &richRenderRequest{generation: view.generation, messageID: key, media: media}
+	return nil
+}
+
 func (view *richPreview) clear() error {
 	if view == nil {
 		return nil
@@ -129,6 +149,7 @@ func (view *richPreview) clear() error {
 	view.pending, view.published, view.displayed = nil, 0, 0
 	view.targetID = ""
 	view.html = nil
+	view.mediaPath = ""
 	view.nextRender = time.Time{}
 	if view.visible {
 		return view.command("region secondary clear")
@@ -150,7 +171,10 @@ func (view *richPreview) tick(now time.Time) (string, error) {
 			if result.err != nil {
 				return "Rich preview: " + result.err.Error(), nil
 			}
-			if view.web {
+			view.mediaPath = result.mediaPath
+			if result.mediaPath != "" {
+				view.html = nil
+			} else if view.web {
 				view.html = result.html
 			} else if err := view.publish(result.pdf); err != nil {
 				return "", err
@@ -182,7 +206,17 @@ func (view *richPreview) tick(now time.Time) (string, error) {
 		results, web, directory := view.results, view.web, view.directory
 		go func() {
 			result := richRenderResult{request: request}
-			if web {
+			if request.media != nil {
+				var file *os.File
+				file, result.err = os.CreateTemp(directory, "file-*"+request.media.extension)
+				if result.err == nil {
+					result.mediaPath = file.Name()
+					_, result.err = file.Write(request.media.data)
+					if err := file.Close(); result.err == nil {
+						result.err = err
+					}
+				}
+			} else if web {
 				result.html, result.mathErrors, result.err = renderMarkdownHTML(request.text)
 			} else {
 				result.pdf, result.mathErrors, result.err = renderMarkdown(request.text, directory)
@@ -233,7 +267,13 @@ func (view *richPreview) openPublished() error {
 		return nil
 	}
 	var err error
-	if view.web {
+	if view.mediaPath != "" {
+		options := " fit-contain"
+		if strings.HasSuffix(view.mediaPath, ".pdf") {
+			options = " fit-width continuous"
+		}
+		err = view.command("region secondary open " + quoteDSL(view.mediaPath) + options)
+	} else if view.web {
 		err = preview.SendHTML(view.html, view.command)
 	} else {
 		err = view.command("region secondary open " + quoteDSL(view.pdfPath) + " background '#f7f5ef' fit-width continuous")

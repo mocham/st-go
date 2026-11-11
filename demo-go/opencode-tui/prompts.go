@@ -11,6 +11,7 @@ func (application *app) selectPrompt(id string) {
 		return
 	}
 	application.selectedPrompt = id
+	application.resetFiles()
 	application.followPreview = false
 	application.responseScroll = 0
 	application.status = "Showing response to selected prompt"
@@ -26,6 +27,9 @@ func (application *app) selectedResponse() string {
 	}
 	if application.session.ID == "" {
 		return "Select a session or click + New session."
+	}
+	if application.filesMode && application.fileSelection != nil {
+		return application.fileSelection.text
 	}
 	var parts []string
 	for _, message := range application.messages {
@@ -223,6 +227,8 @@ func (application *app) handleMouse(mouse mouseEvent) {
 			application.requestCatalog()
 		case "new":
 			application.newSession()
+		case "file":
+			application.selectFile(hit.id)
 		}
 	}
 }

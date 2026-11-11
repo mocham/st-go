@@ -63,6 +63,7 @@ func (application *app) removeSession(id string) {
 		application.cancelAttach()
 	}
 	if application.deleted[application.session.ID] {
+		application.resetFiles()
 		directory := application.session.Location
 		application.closePicker()
 		application.cancelAttach()

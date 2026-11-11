@@ -140,6 +140,7 @@ func (application *app) applyAttach(result operationResult) {
 
 func (application *app) installSession(snapshot sessionSnapshot) {
 	application.cancelAttach()
+	application.resetFiles()
 	application.sessionEpoch++
 	application.revision++
 	application.session = *snapshot.session
