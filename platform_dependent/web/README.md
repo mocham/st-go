@@ -24,6 +24,10 @@ the server.
 
 Service mode stays alive with zero PTYs. Its top-level browser page provides
 **New terminal**, **Refresh terminals**, rename, close, and per-browser hide/show.
+One compact tab bar holds the terminals and **+** button. The **☰** menu contains
+refresh/hide-list controls, the tools icon opens clipboard and Esc/Tab controls,
+and each tab's **⋯** menu contains hide/show, rename, and close. Tabs scroll
+horizontally on narrow screens; dropdowns overlay the terminal without resizing it.
 Different browsers can control different PTYs; each PTY has one exclusive,
 expiring attachment. Hiding detaches without closing the PTY. Occupancy and the
 terminal list update on page load or manual refresh, with no notification stream.

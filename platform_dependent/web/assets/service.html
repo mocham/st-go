@@ -12,23 +12,39 @@
   <script src="client.js" defer></script>
 </head>
 <body data-managed="true" data-prefix="{{prefix}}" data-pty="{{pty}}">
-  <header>
-    <strong>st-go</strong>
-    <button id="refresh">Refresh terminals</button>
-    <button id="new">New terminal</button>
-    <label><input id="show-hidden" type="checkbox"> Show hidden</label>
-    <span id="service-status" role="status">Loading terminals…</span>
+  <header id="tab-bar">
+    <button id="service-menu-toggle" class="icon-button" type="button" popovertarget="service-menu" aria-label="Terminal service menu" aria-expanded="false" title="Terminal service menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <nav id="terminals" aria-label="Shared terminals"></nav>
+    <button id="new" class="icon-button" type="button" aria-label="New terminal" title="New terminal">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M4 12h16"/></svg>
+    </button>
+    <div id="terminal-tools" hidden>
+      <button id="tools-menu-toggle" class="icon-button" type="button" popovertarget="tools-menu" aria-label="Terminal tools" aria-expanded="false" title="Terminal tools">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h7m6 0h3M4 17h3m6 0h7"/><circle cx="14" cy="7" r="3"/><circle cx="10" cy="17" r="3"/></svg>
+      </button>
+    </div>
   </header>
-  <nav id="terminals" aria-label="Shared terminals"></nav>
-  <p id="empty">Select a terminal or create a new one.</p>
-  <header id="terminal-tools" hidden>
+
+  <div id="service-menu" class="dropdown" popover aria-label="Terminal service menu">
+    <strong>Terminals</strong>
+    <button id="refresh" type="button">Refresh terminals</button>
+    <label><input id="show-hidden" type="checkbox"> Show hidden terminals</label>
+    <span id="service-status" role="status">Loading terminals…</span>
+  </div>
+  <div id="tools-menu" class="dropdown" popover aria-label="Terminal tools">
+    <strong>Terminal tools</strong>
     <span id="status" role="status">Connecting…</span>
     <button id="sync" type="button" disabled>Sync off</button>
     <button id="copy" type="button" disabled>Copy</button>
     <button id="paste" type="button">Paste</button>
     <button id="escape" type="button">Esc</button>
     <button id="tab" type="button">Tab</button>
-  </header>
+  </div>
+  <div id="pty-menu" class="dropdown" popover aria-label="Terminal actions"></div>
+
+  <p id="empty">Select a terminal or create a new one.</p>
   <main id="viewport" hidden>
     <canvas id="screen" aria-label="Server-rendered terminal"></canvas>
     <textarea id="input" aria-label="Terminal input" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
