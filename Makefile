@@ -44,7 +44,7 @@ BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
 BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat zat-djvu goiv govim govim-pinyind
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
-FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
+FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
@@ -87,12 +87,13 @@ ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat
 GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
 GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 
-# Google Pinyin decoder only: no SCIM, GTK, X11 or installed IM framework.
+# Google Pinyin corpus only: the runtime decoder is pure Go and does not build
+# the upstream C++ decoder, SCIM, GTK, X11, or an installed IM framework.
 PINYIN_REV = 0b9407ef8e4e5fbf74d5ff4e42ea20025a1483fc
 PINYIN_TAR = third_party/scim-googlepinyin-$(PINYIN_REV).tar.gz
 PINYIN_SRC = third_party/googlepinyin-src
-PINYIN_LIB = third_party/googlepinyin/libpinyinime.a
-PINYIN_DATA = demo-go/pinyind/internal/pinyinengine/assets/dict_pinyin.dat
+PINYIN_DATA = demo-go/pinyind/internal/pinyinengine/assets/dict_pinyin.txt.gz
+PINYIN_LEGACY_DATA = demo-go/pinyind/internal/pinyinengine/assets/dict_pinyin.dat
 PINYIN_EMBED ?= 1
 ifeq ($(PINYIN_EMBED),1)
 PINYIN_GO_TAGS = googlepinyin
@@ -101,8 +102,6 @@ else
 PINYIN_GO_TAGS = googlepinyin,pinyin_external
 PINYIN_ASSET_DEP =
 endif
-PINYIN_NAMES = dictbuilder dictlist dicttrie lpicache matrixsearch mystdlib ngram pinyinime searchutility spellingtable spellingtrie splparser sync userdict utf16char utf16reader
-PINYIN_BUILDER_NAMES = dictbuilder dictlist dicttrie lpicache mystdlib ngram searchutility spellingtable spellingtrie splparser utf16char utf16reader
 
 $(PINYIN_TAR):
 	mkdir -p third_party
@@ -116,23 +115,16 @@ $(PINYIN_SRC)/.unpacked: $(PINYIN_TAR)
 	tar -xzf $< -C $(PINYIN_SRC) --strip-components=1
 	touch $@
 
-$(PINYIN_LIB): $(PINYIN_SRC)/.unpacked
+$(PINYIN_DATA): $(PINYIN_SRC)/.unpacked $(wildcard functionalities/googlepinyin/*.go functionalities/googlepinyin/cmd/dictgen/*.go)
 	mkdir -p $(@D)
-	set -e; for name in $(PINYIN_NAMES); do $(CXX) -O2 -std=c++11 -pthread -c $(PINYIN_SRC)/src/share/$$name.cpp -o $(@D)/$$name.o; done
-	$(AR) rcs $@ $(addprefix $(@D)/,$(addsuffix .o,$(PINYIN_NAMES)))
-
-third_party/googlepinyin/dictbuilder: $(PINYIN_SRC)/.unpacked
-	mkdir -p $(@D)
-	$(CXX) -O2 -std=c++11 -pthread -D___BUILD_MODEL___ $(PINYIN_SRC)/src/command/pinyinime_dictbuilder.cpp $(addprefix $(PINYIN_SRC)/src/share/,$(addsuffix .cpp,$(PINYIN_BUILDER_NAMES))) -o $@
-
-$(PINYIN_DATA): third_party/googlepinyin/dictbuilder
-	cd $(PINYIN_SRC)/src/command && $(abspath $<)
-	mkdir -p $(@D)
-	cp $(PINYIN_SRC)/src/data/dict_pinyin.dat $@
+	GOWORK=off go -C functionalities/googlepinyin run ./cmd/dictgen \
+		-raw "$(abspath $(PINYIN_SRC)/src/data/rawdict_utf16_65105_freq.txt)" \
+		-valid "$(abspath $(PINYIN_SRC)/src/data/valid_utf16.txt)" \
+		-output "$(abspath $@)"
 	cp $(PINYIN_SRC)/COPYING $(@D)/LICENSE
 
-$(OUTPUT_DIR)/govim-pinyind: $(PINYIN_LIB) $(PINYIN_ASSET_DEP) $(wildcard demo-go/pinyind/*.go demo-go/pinyind/internal/pinyinengine/*.* functionalities/tui/pinyin/*.go) go.mod go.sum Makefile pinyin-force | $(OUTPUT_DIR)
-	CGO_ENABLED=1 go -C demo-go/pinyind build -trimpath -tags 'netgo,osusergo,$(PINYIN_GO_TAGS)' -ldflags '-linkmode external -extldflags "-static -pthread"' -o $(abspath $@) .
+$(OUTPUT_DIR)/govim-pinyind: $(PINYIN_ASSET_DEP) $(wildcard demo-go/pinyind/*.go demo-go/pinyind/internal/pinyinengine/*.* functionalities/googlepinyin/*.go functionalities/tui/pinyin/*.go) go.mod go.sum Makefile pinyin-force | $(OUTPUT_DIR)
+	CGO_ENABLED=0 go -C demo-go/pinyind build -trimpath -tags '$(PINYIN_GO_TAGS)' -o $(abspath $@) .
 
 pinyin-assets: $(PINYIN_DATA)
 
@@ -198,7 +190,7 @@ ALSA_LIB     = third_party/alsa/lib/libasound.a
 SND_C        = functionalities/audio/alsa_snd.c
 SND_O        = third_party/alsa/snd.o
 
-# Build every terminal profile/backend, demo, and native helper.
+# Build every terminal profile/backend, demo, and helper.
 all: $(BINARY_PATHS)
 
 # --- FreeType2 static archive ------------------------------------------
@@ -593,11 +585,14 @@ TEST_EXTRA = $(FULL_EXTRA)
 test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
-# Integrated native profile, including real isolated CJK helper tests.
-test-modules: $(ALSA_LIB) $(SND_O) govim-pinyind
+# Integrated profile, including real pure-Go CJK helper tests.
+test-modules: $(ALSA_LIB) $(SND_O) govim-pinyind test-pinyind
 	@set -e; for module in $(GO_MODULES); do \
 		GOWORK=off go -C "$$module" test -tags 'alsa_static sqlite_omit_load_extension' ./... -count=1; \
 	done
+
+test-pinyind: $(PINYIN_DATA)
+	CGO_ENABLED=0 GOWORK=off go -C demo-go/pinyind test -tags 'googlepinyin' ./... -count=1
 
 # Standard Go workflow: no graphical libraries or Make-built assets needed.
 # File-browser/GoLS use bundled SQLite and need a C compiler, not ALSA.
@@ -634,9 +629,9 @@ uninstall:
 	      "$(DESTDIR)$(TERMINFO_DIR)/s/stterm-256color"
 
 clean:
-	rm -f $(BINARY_PATHS) $(PINYIN_DATA)
+	rm -f $(BINARY_PATHS) $(PINYIN_DATA) $(PINYIN_LEGACY_DATA)
 
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-modules test-tui test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu $(BINARY_NAMES) pinyin-assets pinyin-force terminal-profile-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-pinyind test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu $(BINARY_NAMES) pinyin-assets pinyin-force terminal-profile-force

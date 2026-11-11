@@ -6,13 +6,13 @@ Source: https://github.com/tchaikov/scim-googlepinyin
 Pinned revision: 0b9407ef8e4e5fbf74d5ff4e42ea20025a1483fc
 Archive SHA-256: 60f1c4396807e27ba9952611b3ffd523c6773e1ea910b158fee9bccaf6d0327e
 
-The Makefile compiles the decoder without SCIM/GTK and builds dict_pinyin.dat
-from src/data/rawdict_utf16_65105_freq.txt and src/data/valid_utf16.txt using
-the upstream dictionary builder. Native source is not modified. Our bounded
-bridge and process-isolation protocol are separate files outside upstream.
-The dictionary contains native-size fields; rebuild it for the helper's ABI.
+The Makefile does not compile the upstream C++ decoder. The pure-Go
+st-go/googlepinyin builder filters src/data/rawdict_utf16_65105_freq.txt with
+src/data/valid_utf16.txt and emits a bounded, architecture-independent gzip
+dictionary. The runtime parser, segmentation, ranking, and process protocol are
+separate Go code outside upstream.
 
-Generated dictionaries, native libraries and executables are not tracked in
-git. Distributions of the native helper (with or without a bundled dictionary)
-must include this notice and LICENSE. For unbundled distributions, do not claim
-to license a separately obtained dictionary; retain its supplier's notices.
+Generated dictionaries and executables are not tracked in git. Distributions
+of the helper (with or without a bundled dictionary) must include this notice
+and LICENSE. For unbundled distributions, do not claim to license a separately
+obtained dictionary; retain its supplier's notices.

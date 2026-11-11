@@ -8,6 +8,7 @@ so ordinary Go commands work with **`GOWORK=off`**, not just in the workspace.
 | Directory | Module | Responsibility |
 | --- | --- | --- |
 | `tui/` | `st-go/tui` | Line editing, navigation, search, outlines, input mappings, Pinyin client, document preview, audio and tab-spawn protocol clients |
+| `googlepinyin/` | `st-go/googlepinyin` | Bounded pure-Go Pinyin dictionary builder, parser, segmentation, ranking, and candidate lookup |
 | `latexpdf/` | `github.com/mocham/GoLS/latexpdf` | Native-Go selectable-text/vector-math PDF generation |
 | `semhtml/` | `st-go/semhtml` | Sanitized semantic HTML to PDF |
 | `ptyutil/` | `st-go/ptyutil` | Unix PTY creation, controlling terminals, resize |
@@ -24,6 +25,7 @@ The old `st-go/term` import remains a separate compatibility module.
 
 ```sh
 go -C functionalities/tui test ./...
+go -C functionalities/googlepinyin test ./...
 GOWORK=off go -C functionalities/latexpdf test ./...
 make test-tui                 # all client/helper modules, no graphical stack
 make test                    # also native audio and graphical integration

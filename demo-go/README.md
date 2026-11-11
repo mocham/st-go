@@ -60,7 +60,8 @@ Other portability boundaries remain: entry points use Unix TTY/PTY/signal APIs;
 file-browser and GoLS use bundled SQLite/cgo. File-browser has **no ALSA/native
 audio linkage**: MP3 playback is an authenticated terminal request, handled by
 st-go's `functionalities/audio` service. Metadata remains available on hosts
-without audio support. The optional Pinyin helper alone owns its native decoder.
+without audio support. The optional Pinyin helper and its dictionary frontend
+are pure Go.
 These are OS/runtime constraints, not graphical dependencies. On the web backend
 the clients, PTYs, and native audio still run on the Linux server.
 

@@ -360,7 +360,7 @@ Ctrl-J consumes the next <++> stop. Enter remains a newline.
 CJK INSERT: [[[ starts Pinyin; +/- pages; 1..5 chooses; ]]] ends.
 Normal ]]] removes both triples; Escape/failure keeps them for recovery.
 Candidates appear in the command row. A helper is spawned only on demand.
-govim-pinyind isolates native faults; typed spelling survives failures.
+govim-pinyind uses a bounded pure-Go decoder; typed spelling survives failures.
 
 PREVIEW: LaTeX/Markdown opens st-go's retained right panel automatically.
 Save to refresh; %cursor wins, otherwise follow the cursor saved with :w.

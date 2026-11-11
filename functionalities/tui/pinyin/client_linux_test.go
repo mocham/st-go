@@ -6,25 +6,24 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func builtHelper(t *testing.T) string {
 	t.Helper()
 	path := os.Getenv("GOVIM_PINYIN_HELPER")
 	if path == "" {
-		path = "../../BINARIES/govim-pinyind"
+		path = "../../../BINARIES/govim-pinyind"
 	}
 	path, err := filepath.Abs(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm()&0111 == 0 {
-		t.Skip("run make govim-pinyind for native integration")
+		t.Skip("run make govim-pinyind for helper integration")
 	}
 	return path
 }
-func TestNativePinyinExampleAndPrivateSocket(t *testing.T) {
+func TestPureGoPinyinExampleAndPrivateSocket(t *testing.T) {
 	client, err := Start(context.Background(), builtHelper(t))
 	if err != nil {
 		t.Fatal(err)
@@ -45,35 +44,26 @@ func TestNativePinyinExampleAndPrivateSocket(t *testing.T) {
 		t.Fatal("socket has a filesystem path")
 	}
 	if _, err := client.Lookup(context.Background(), Request{ID: 3, Prompt: strings.Repeat("a", MaxPrompt+1)}); err == nil {
-		t.Fatal("oversized prompt reached native code")
+		t.Fatal("oversized prompt reached the helper")
 	}
 }
-func TestNativePinyinCrashIsIsolatedAndFreshSessionWorks(t *testing.T) {
+func TestPureGoPinyinFormerCrashPromptKeepsSessionAlive(t *testing.T) {
 	helper := builtHelper(t)
 	client, err := Start(context.Background(), helper)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The pinned upstream decoder actually aborts on this prompt. It is sent
-	// only to a disposable child, never to code linked into the test/editor.
-	_, err = client.Lookup(context.Background(), Request{ID: 1, Prompt: strings.Repeat("a", 32)})
-	if err == nil {
-		client.Close()
-		t.Fatal("expected upstream crash regression was not exercised")
-	}
-	client.Close()
-	select {
-	case <-client.Exited():
-	case <-time.After(2 * time.Second):
-		t.Fatal("crashed helper not reaped")
-	}
-	fresh, err := Start(context.Background(), helper)
+	defer client.Close()
+	boundary := Request{ID: 1, Prompt: strings.Repeat("a", MaxPrompt)}
+	response, err := client.Lookup(context.Background(), boundary)
 	if err != nil {
+		t.Fatalf("former native crash prompt: %v", err)
+	}
+	if err := response.Validate(boundary); err != nil {
 		t.Fatal(err)
 	}
-	defer fresh.Close()
-	response, err := fresh.Lookup(context.Background(), Request{ID: 1, Prompt: "nihao"})
-	if err != nil || response.Candidates[0] != "你好" {
-		t.Fatalf("fresh helper failed after native crash: %+v %v", response, err)
+	response, err = client.Lookup(context.Background(), Request{ID: 2, Prompt: "nihao"})
+	if err != nil || len(response.Candidates) == 0 || response.Candidates[0] != "你好" {
+		t.Fatalf("session failed after boundary prompt: %+v %v", response, err)
 	}
 }

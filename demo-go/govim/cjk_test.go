@@ -227,7 +227,7 @@ func cjkBuiltHelper(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Skip("run make govim-pinyind for native integration")
+		t.Skip("run make govim-pinyind for helper integration")
 	}
 	return path
 }
@@ -334,22 +334,25 @@ func TestCJKSpawnsLazilyOnlyOnLiveTriple(t *testing.T) {
 		t.Fatal("live triple did not lazily spawn Pinyin")
 	}
 }
-func TestCJKNativeAbortLeavesEditorAliveAndAllowsRestart(t *testing.T) {
+func TestCJKPureGoMaximumPromptStaysAliveAndAllowsRestart(t *testing.T) {
 	helper := cjkBuiltHelper(t)
 	e := memoryEditor("\n")
 	defer e.close(false)
 	e.newPinyinWorker = func() *pinyin.Worker {
 		return pinyin.NewWorker(func(ctx context.Context) (pinyin.Service, error) { return pinyin.Start(ctx, helper) })
 	}
-	editKeys(e, "i[[["+strings.Repeat("a", 32))
-	awaitCJK(t, e, func() bool { return e.cjk == nil })
-	if !strings.Contains(e.message, "CJK stopped") || !strings.Contains(editorText(e), strings.Repeat("a", 32)) {
-		t.Fatal("native abort lost input or did not cancel IME")
+	prompt := strings.Repeat("a", pinyin.MaxPrompt)
+	editKeys(e, "i[[["+prompt)
+	awaitCJK(t, e, func() bool {
+		return e.cjk != nil && e.cjk.ready && e.cjk.response.Prompt == prompt
+	})
+	if strings.Contains(e.message, "CJK stopped") || !strings.Contains(editorText(e), prompt) {
+		t.Fatal("bounded pure-Go lookup stopped the helper or lost input")
 	}
-	editKeys(e, " ]]][[[nh++3]]]<Esc>")
+	editKeys(e, "<Esc>a ]]][[[nh++3]]]<Esc>")
 	awaitCJK(t, e, func() bool { return e.mode == normalMode && e.cjk == nil })
 	if !strings.Contains(editorText(e), "浓厚") {
-		t.Fatalf("editor could not restart IME after native abort: %q", editorText(e))
+		t.Fatalf("editor could not restart the pure-Go IME: %q", editorText(e))
 	}
 	var r renderer
 	if err := e.draw(&r, io.Discard); err != nil {

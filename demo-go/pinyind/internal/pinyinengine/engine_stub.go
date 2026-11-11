@@ -1,4 +1,4 @@
-//go:build !googlepinyin || !cgo || !linux
+//go:build !googlepinyin
 
 package pinyinengine
 
@@ -10,9 +10,9 @@ import (
 type Engine struct{}
 
 func Open() (*Engine, error) {
-	return nil, fmt.Errorf("build the isolated helper with make govim-pinyind")
+	return nil, fmt.Errorf("build the Pinyin helper with make govim-pinyind")
 }
 func (*Engine) Close() {}
 func (*Engine) Lookup(pinyin.Request) (pinyin.Response, error) {
-	return pinyin.Response{}, fmt.Errorf("Google Pinyin not built")
+	return pinyin.Response{}, fmt.Errorf("pure-Go Pinyin not built")
 }

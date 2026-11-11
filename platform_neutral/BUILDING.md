@@ -13,7 +13,7 @@ index](README.md) for architecture, usage, protocols, and backend guides.
 ## Build
 
 ```sh
-make            # same as make all: every terminal, demo, and native helper
+make            # same as make all: every terminal, demo, and helper
 make st         # full X11 terminal: BINARIES/st
 make st-min     # text-only X11 terminal
 make st-web     # embedded HTTP server and browser client
@@ -138,8 +138,10 @@ against the bundled static libjpeg. The decoder remains in that client rather
 than the terminal. File-browser and GoLS need a C compiler
 for bundled SQLite, **not** graphical codecs or ALSA. File-browser sends audio
 requests to st-go, whose audio module owns libasound and MP3 playback. The optional
-Pinyin helper keeps its native decoder isolated. Distribution binaries remain
-static, including terminal-owned audio with `alsa_static` and `zat-djvu`.
+Pinyin helper uses the pure-Go `st-go/googlepinyin` decoder and only derives its
+architecture-independent corpus asset from the pinned upstream text data.
+Distribution binaries remain static, including terminal-owned audio with
+`alsa_static` and `zat-djvu`.
 
 Go's `./...` does not cross module boundaries. The root pattern tests only the
 host; `make test` additionally tests every shared/demo module, including the

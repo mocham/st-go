@@ -1,6 +1,6 @@
 //go:build linux
 
-// govim-pinyind is a disposable native-code worker, never linked into govim.
+// govim-pinyind is a bounded pure-Go input-method worker.
 package main
 
 import (
@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/sys/unix"
 	"st-go/demo-go/pinyind/internal/pinyinengine"
 	"st-go/tui/pinyin"
 )
@@ -34,7 +33,6 @@ func run(args []string) error {
 	if flags.NArg() != 0 || !strings.HasPrefix(*address, "@govim-pinyin-") || len(*address) > 100 || *parent < 1 {
 		return fmt.Errorf("requires --socket @govim-pinyin-... --parent PID")
 	}
-	unix.Setrlimit(unix.RLIMIT_CORE, &unix.Rlimit{})
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: *address, Net: "unix"})
 	if err != nil {
 		return err

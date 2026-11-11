@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 )
 
-const MaxPrompt = 32 // below Google Pinyin's 40-step native workspace
+const MaxPrompt = 32 // shared protocol and pure-Go decoder bound
 const PageSize = 5
 const MaxCandidates = 4096
 const MaxPage = (MaxCandidates - 1) / PageSize

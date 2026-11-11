@@ -13,6 +13,7 @@ use (
 	./demo-go/zat-djvu
 	./functionalities/audio
 	./functionalities/config
+	./functionalities/googlepinyin
 	./functionalities/latexpdf
 	./functionalities/limits
 	./functionalities/pdfmeta

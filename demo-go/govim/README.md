@@ -7,7 +7,7 @@ this implementation. This is an initial implementation, **not complete Vim 7
 compatibility**; the supported commands and limits are listed below.
 
 ```sh
-make govim                 # editor plus isolated native Pinyin helper
+make govim                 # editor plus pure-Go Pinyin helper
 go -C demo-go/govim build -o ../../BINARIES/govim .  # pure-Go editor only
 ./BINARIES/govim document.tex
 ./BINARIES/govim +42 document.tex
@@ -172,13 +172,15 @@ command row. The saved timestamp returns when composition finishes.
 `make govim` builds the separate static **`govim-pinyind`** helper. It is spawned
 **lazily**, only on a live Insert-mode `[[[` trigger, never at editor startup.
 CJK mode does not activate if the helper cannot be found or spawned; all
-subsequent input then stays ordinary text. Native initialization is asynchronous.
-Its native decoder and generated dictionary never run inside govim or st-go. A native
-crash, timeout, or malformed reply cancels CJK mode, preserves typed text, and
-does not kill either application; type a new `[[[` to retry. Inputs/queues are
-bounded (32-byte spelling limit), and helpers are canceled/reaped on exit.
-The helper uses private abstract Unix sockets and anonymous in-memory
-dictionaries on Linux. No SCIM desktop service or extra font package is needed.
+subsequent input then stays ordinary text. Dictionary initialization is
+asynchronous. The helper uses the bounded pure-Go `st-go/googlepinyin` decoder;
+no C++ decoder or cgo code runs in the helper, govim, or st-go. A timeout,
+malformed reply, or process failure cancels CJK mode, preserves typed text, and
+does not kill either application; type a new `[[[` to retry. Inputs, dictionary
+records, decompression, candidates, frames, and queues are bounded (including a
+32-byte spelling limit), and helpers are canceled/reaped on exit. The helper
+uses a private abstract Unix socket on Linux. No SCIM desktop service, native IM
+library, or extra font package is needed.
 See [`pinyind`](../pinyind/README.md) for optional dictionary bundling, generated
 assets, source provenance, license notices, and packaging both executables.
 
