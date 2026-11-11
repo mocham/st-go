@@ -1,8 +1,7 @@
 # `st-go/googlepinyin`
 
 This module is the pure-Go dictionary and search frontend used directly by the
-universal readline and govim input paths. It replaces the previous helper
-process, cgo bridge, and upstream C++ decoder. It has no display,
+universal readline and govim input paths. It has no display,
 input-method-framework, cgo, or OS dependency.
 
 The package provides bounded build and lookup APIs:
@@ -29,7 +28,7 @@ go -C functionalities/tui test ./pinyin ./readline
 `-raw`, `-valid`, and `-output` paths; it is not called by the Makefile.
 
 The real-corpus compatibility tests preserve representative leading candidates
-from the replaced Google Pinyin engine, including abbreviations (`nh`, `zgr`),
+including abbreviations (`nh`, `zgr`),
 full spellings (`nihao`, `zhongguo`), partial final syllables (`nih`), and the
 `xian`/`xi'an` segmentation distinction. The corpus license and pinned source
 details are in [`assets/NOTICE`](assets/NOTICE).

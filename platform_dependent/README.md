@@ -5,19 +5,20 @@ Xproto and XGBUtil imports are confined here. The root executable selects it by 
 neutral terminal and frontend code use the interfaces in
 [`platform_neutral/api`](../platform_neutral/api).
 
-[`web/`](web/README.md) is an embedded HTTP/WebSocket/canvas implementation of
-the same interfaces. `make st-web` selects it with the `backend_web` build tag;
-its production dependency graph has no X11 backend or XGB packages.
+[`web/`](web/README.md) serves semantic scenes and media over HTTP/WebSocket.
+The browser owns Canvas text, image decoding, and PDF.js rendering.
+`make st-web` selects `backend_web` and builds without cgo or XGB.
 
 [`fb/`](fb/README.md) implements Linux fbdev output, console keyboard input and
 evdev mice. `make st-fb` selects it with `backend_fb`. It uses kernel ioctls and
 mmap directly in Go; no X server, libdrm, libinput or GPM is needed.
 
-Only native resource/protocol operations belong here. Terminal parsing,
-key/mouse escape encoding, clipboard authorization, layout policy, software
-composition and preview state remain outside the driver. Event handling and
-painting share the existing native connection rather than opening a connection
-per subsystem. The pre-existing XGBUtil auxiliary connection is unchanged.
+Backends own display resources, event decoding, retained presentation, and
+backend-specific composition. Terminal parsing, key/mouse escape encoding,
+clipboard authorization, and application layout policy belong to shared code.
+Native raster adaptation remains in the shared frontend; browser media resources
+and document rendering belong to the web backend. X11 preview surfaces share
+the driver's connection and event loop.
 
 See the [architecture and documentation index](../platform_neutral/README.md),
 [build guide](../platform_neutral/BUILDING.md), and

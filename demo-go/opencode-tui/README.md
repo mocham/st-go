@@ -1,241 +1,85 @@
 # OpenCode TUI
 
-A minimal OpenCode V2 terminal client with an st-go rich-response pane. The left
-pane lists sessions as a **soft-pink workdir** followed by a **soft-blue session
-name**. Click a session to activate it and expand its prompts; the others fold.
-Initially the latest 10 prompts are shown, newest first. Click **More** to reveal
-10 older prompts at a time. The session catalog and prompt history are paged
-from the server, so the list is not limited to the first API page.
+An OpenCode V2 client with a session sidebar and rich Markdown/math responses.
+OpenCode's server owns agents, tools, models, and permissions; this client owns
+the terminal interface.
 
-The fixed header shows the current **model**, **variant** (including `default`),
-and **context percentage**, including while a picker is open. Default models are
-resolved from the server. Context usage follows the official frontend: the latest
-assistant step's input/output/reasoning/cache tokens divided by its model's context
-limit, after compaction and before a staged revert. An unavailable limit is shown
-as `—`. The old `OpenCode`/agent-name prefix is removed.
-
-Each session header has a **[Delete]** button. It deletes that session and its
-children on the server, then selects a remaining session if the active one was
-deleted. **+ New session** also works after deleting the last session.
-
-Click a prompt to show its response on the right as selectable PDF text with
-vector mathematics, or browser-native HTML with `--web`. Multi-step assistant
-messages are grouped under their prompt. In particular, Markdown answers can
-define and use LaTeX macros such as:
-
-```markdown
-\newcommand{\RR}{\mathbb{R}}
-
-The map $f:\RR\to\RR$ is continuous.
-```
-
-The client reuses two existing components rather than embedding an agent:
-
-- the official headless `opencode serve` V2 server for sessions, models,
-  providers, tools, plugins, and permissions;
-- st-go's `tui/preview` and retained display-region protocol for Markdown,
-  LaTeX, and PDF presentation.
-
-## Build and run
-
-Connect to a configured, running OpenCode V2 HTTP server. The client only needs
-its URL and authentication; the OpenCode binary is not needed on the client
-machine. Build and launch the client inside st-go:
+## Build and connect
 
 ```sh
 make st opencode-tui
-./BINARIES/st -e ./BINARIES/opencode-tui --server http://127.0.0.1:4096 /path/to/project
+./BINARIES/st -e ./BINARIES/opencode-tui --server http://127.0.0.1:4096 /path/on/server
 ```
 
-Use the server's actual listening address. Bare addresses such as
-`--server 127.0.0.1:4096` use HTTP; use `https://` explicitly for TLS.
-`--server` is required unless `OPENCODE_TUI_SERVER` is set.
-Exiting detaches the client; the server and any
-active session execution continue independently. Ctrl-C explicitly interrupts
-active work.
+Use the running server's actual URL. `DIRECTORY` is a server-side path; use an
+absolute path for remote projects. `--session ses_...` resumes a session in its
+existing location. The OpenCode executable is not required on the client machine.
+Exiting detaches; server execution continues independently.
 
-`DIRECTORY` is a path on the server. For a remote server, pass its absolute
-project path; the client does not require that path to exist locally. Omitted
-or relative paths resolve against the client's current directory. With
-`--session`, the existing session's location is used.
+Environment settings:
 
-Resume a session by ID:
+- `OPENCODE_TUI_SERVER`: default endpoint; otherwise `--server` is required.
+- `OPENCODE_TUI_PASSWORD`: HTTP Basic password, with username `opencode` by default.
+- `OPENCODE_TUI_USERNAME`: override the Basic username.
+- `OPENCODE_TUI_AUTHORIZATION`: complete authorization header; overrides Basic settings.
 
-```sh
-./BINARIES/st -e ./BINARIES/opencode-tui --server http://127.0.0.1:4096 --session ses_...
-```
+Use the server operator's authentication settings. A `401` means credentials are
+needed; EOF before a response usually indicates an address, port, or HTTP/HTTPS
+mismatch. Browser sign-in is not inherited by this client. For containers, use
+a reachable server address rather than another container's loopback address.
 
-Set the endpoint and authentication through the environment:
+## Rich responses
 
-```sh
-export OPENCODE_TUI_SERVER='127.0.0.1:4096'
-read -rsp 'OpenCode server password: ' OPENCODE_TUI_PASSWORD
-echo
-export OPENCODE_TUI_PASSWORD
-./BINARIES/opencode-tui /path/on/server/to/project
-```
-
-Use the password printed by the server at startup or configured by its operator.
-`OPENCODE_TUI_PASSWORD` enables HTTP Basic auth; `OPENCODE_TUI_USERNAME`
-defaults to `opencode`. For an unauthenticated server, leave it unset.
-
-For other authentication setups, `OPENCODE_TUI_AUTHORIZATION` accepts a complete
-header value (`Basic ...` or `Bearer ...`) and takes precedence over the password
-variables. Unset it when switching to password authentication. Authentication
-and connection errors are reported before entering the TUI. The client does
-not inspect OpenCode's service registration or credential files.
-
-For a plain terminal, use `--no-preview` for a text response pane. Without that
-flag, a terminal that does not answer st-go's display-region query falls back
-to the same session/response layout using text after two seconds.
-The full st-go profile is needed to display the generated
-PDF; the OpenCode server and client remain backend-neutral.
-Run directly inside st-go unless an intervening multiplexer is configured to
-pass DCS sequences through.
-
-### Browser-native responses (`--web`)
+Native previews use selectable-text PDFs and vector math. Browser mode skips
+PDF generation and sends HTML/SVG to st-web:
 
 ```sh
 make st-web opencode-tui
-./BINARIES/st-web -e ./BINARIES/opencode-tui --web --server http://127.0.0.1:4096 /path/to/project
+./BINARIES/st-web -e ./BINARIES/opencode-tui --web --server http://127.0.0.1:4096 /project
 ```
 
-`--web` reserves the usual rich-response pane and sends HTML/CSS as base64 JSON
-through st-go's DCS region protocol. st-web displays semantic Markdown and inline
-SVG mathematics in a positioned HTML overlay, with native selection and scrolling.
-Responses update as they stream; F2 toggles the pane and restores its latest
-content. Esc returns keyboard focus from the preview to the composer.
+Responses update while streaming. F2 toggles rich/text display; Esc returns focus
+from browser previews to the composer. `--no-preview` uses text only and takes
+precedence over `--web`. Unsupported terminals automatically fall back to text.
 
-This mode bypasses PDF creation and rasterization. Framebuffer/X11 reserve a blank
-pane and discard the HTML content. `--no-preview` takes precedence over `--web`.
-Large HTML responses use chunked transfers with a 64 MiB JSON document budget;
-each DCS message stays within the terminal's 1 MiB control-message limit.
+## Navigation and controls
 
-### Docker connections and EOF
-
-With Docker publishing `-p 4096:4096`, the server inside the container normally
-needs `opencode serve --hostname 0.0.0.0 --port 4096`. A listener bound only to
-the container's `127.0.0.1` is not reachable through that port mapping. When the
-client also runs in a container, its `127.0.0.1` refers to that container; use
-the server container's network name/address instead.
-
-From the same host or container as the TUI, check the actual API endpoint:
-
-```sh
-curl --noproxy '*' --max-time 5 -i http://127.0.0.1:4096/api/info
-```
-
-A `401` response proves HTTP connectivity and means credentials are required.
-An EOF before an HTTP response means the connection was closed; check the
-listening address, port mapping, and HTTP/HTTPS scheme. Use the exact scheme
-and port that work in your browser. Opening the web page alone does not verify
-the API, and browser authentication is not inherited by the TUI.
-
-## Keys
+The sidebar groups prompts by session, showing workdir and title. Click a session
+to expand it, a prompt to read its response, or **More** for older prompts.
+**+ New session** creates one; **Delete** removes a session and its children.
+The header displays model, variant, and context usage.
 
 | Key | Action |
 | --- | --- |
 | Enter | Send the single-line prompt |
-| Up / Down | Browse prompt history |
-| Click a session | Activate it and expand its latest 10 prompts; fold the other sessions |
-| [Delete] | Delete that session and its child sessions |
-| + New session | Create and activate a session in the current project directory |
-| Click a prompt | Select its response; wrapped lines are clickable too |
-| More / F3 | Reveal 10 older prompts from the active session |
-| Mouse wheel | Scroll the pane under the pointer |
-| PgUp / PgDn | Scroll the session/prompt list |
-| Alt-Up / Alt-Down | Select the newer / older prompt |
-| Alt-PgUp / Alt-PgDn | Scroll the selected response |
-| F2 | Switch between rich and text response panes |
+| Up/Down | Prompt history |
+| More / F3 | Load 10 older prompts |
+| PgUp/PgDn | Scroll session/prompt list |
+| Alt-Up/Down | Select newer/older prompt |
+| Alt-PgUp/PgDn | Scroll response |
+| Mouse wheel | Scroll pane under pointer |
+| F2 | Toggle rich/text response |
 | Ctrl-C | Interrupt active work; quit while idle |
 | Ctrl-Q | Quit |
-| `y` / `a` / `n` | Allow once / always / reject a permission request |
+| `y` / `a` / `n` | Allow once / always / reject permission request |
 
-Bracketed paste is accepted and normalized into the bounded single-line
-composer. DCS-looking pasted text is never interpreted as a terminal command.
-The selected response updates while it streams. Selecting an older prompt
-keeps it selected as newer responses arrive; sending a new prompt selects it.
-The composer stays available below the list. Empty, queued, or failed prompts
-show a response placeholder instead of another prompt's answer.
-While a clicked session loads, sending is paused; Esc cancels the switch. A
-failed switch restores the current session. New sessions and session title/path
-changes refresh the catalog automatically.
+`/sessions`, `/models`, and `/variants` open searchable pickers. Type to filter,
+use arrows to select, Enter to apply, and Esc to cancel. Ctrl-R reloads.
+Model/variant selections persist on the server. Bracketed paste is supported;
+multiline pasted text is normalized to the single-line composer.
 
-## Transport and recovery
+## Responsiveness and limits
 
-The client uses HTTP JSON requests and a live SSE connection to `/api/event`.
-Sending a prompt admits an input; the response itself arrives through events and
-saved message history. There is no WebSocket emulation.
+HTTP requests and SSE events run independently of terminal rendering. Reconnect
+reloads session state, with periodic history refresh as a fallback. Ambiguous
+prompt failures reconcile with server history rather than automatically resending
+and risking duplicate work. Long-running sessions have no prompt-duration cutoff.
 
-Prompt requests no longer have the old 20-second HTTP / 30-second operation
-cutoffs. Waiting for HTTP response headers is bounded at 60 seconds; once headers
-arrive, the response body has no fixed total deadline. A long-running session is
-independent of that request. Prompts are sent in order with stable IDs, and a late
-HTTP failure cannot overwrite a server acknowledgement. An ambiguous transport
-failure is shown as unconfirmed while history/inbox reads reconcile it, rather
-than falsely marking an accepted prompt failed or automatically resending it.
-
-SSE connections require a handshake within 10 seconds. A 45-second idle watchdog
-counts **all received bytes**, including keepalive comments, and reconnects stalled
-streams. Reconnection reloads session state. A fallback refresh checks history
-every 5 seconds while working, pending, or disconnected, and every 30 seconds while
-idle, so missing updates do not require switching sessions manually.
-
-This follows the official V2 frontend/client implementations reviewed in
-[`solid/connection.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/client/src/solid/connection.ts),
-[`solid/data.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/client/src/solid/data.ts),
-[`request-queue.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/app/src/runtime/server/request-queue.ts),
-and the TUI's
-[`util/session.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/tui/src/util/session.ts).
-
-## Slash commands
-
-Type a command and press Enter:
-
-| Command | Action |
-| --- | --- |
-| `/sessions` | Search and attach to an existing session, or create a new one in the current session's directory |
-| `/models` | Choose an enabled model from the current session's project configuration |
-| `/variants` | Choose a variant of the current model, including **Default (no variant)** |
-
-Pickers support typing to filter, Up/Down and PgUp/PgDn to navigate, Enter to
-apply, Esc or Ctrl-C to cancel, and Ctrl-R to reload/retry. You can start with
-a filter, such as `/models gpt` or `/sessions math`. Session searches run on the
-server across non-archived sessions, with **Load more sessions** for older pages.
-The session list includes project paths so you can distinguish projects.
-
-Model and variant selections are saved on the server for subsequent turns and
-shown in the chat header. `/variants` resolves the server's default model when
-the session has no explicit selection. Switching to a different model resets
-the variant; selecting the same model preserves it. A pending permission request
-takes keyboard focus until answered. Switching sessions leaves their executions
-running and loads the selected session's prompts, permissions, and response.
-
-## Scope
-
-This demo intentionally implements a small useful slice: session create/resume/search,
-an expandable session sidebar, paged prompt history, live assistant text,
-reconnect/resync, tool status
-after each turn, model/variant selection, prompt/response navigation, interrupts,
-and permission replies. It does not yet provide a multiline editor, attachments,
-forms, diffs, or PTY views. Those can be layered on the same V2 API
-without changing the rich-rendering boundary.
-
-The OpenCode V2 HTTP surface is currently experimental. This client is tested
-against the repository's current V2 contract and keeps its API adapter isolated
-in `api.go` so schema changes do not leak into terminal rendering.
-
-## Test
+The client supports session management, live responses, model selection, and
+permissions. Attachments, multiline editing, forms, diffs, and PTY views are not
+implemented. API integration is isolated in [`api.go`](api.go); see the
+[OpenCode V2 client documentation](https://opencode.ai/v2/docs/build/client).
 
 ```sh
 GOWORK=off go -C demo-go/opencode-tui test ./...
 ```
-
-Tests cover the API subset, searchable pickers, persisted model/variant changes,
-session-switch isolation, deletion, persistent model/context display, sidebar
-paging/folding, mouse hit testing, SSE framing/keepalives/stall recovery,
-input/DCS isolation, display geometry,
-and actual Markdown responses containing user-defined LaTeX macros rendered to
-PDF and HTML/SVG, including web-pane streaming, hide/restore, and clearing. A
-31-second delayed-acknowledgement regression exercises both removed timeout
-cutoffs and verifies that the response appears without switching sessions.

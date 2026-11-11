@@ -1,37 +1,24 @@
 # X11 backend
 
-X11 is the default build-time backend:
-
 ```sh
 make st
-./BINARIES/st
 ./BINARIES/st -dir /path/to/project -e /bin/bash
 ```
 
-Run commands from the repository root. [Reduced media builds](../../platform_neutral/BUILDING.md#build-targets)
-are available as `st-min` and `st-pdf`.
+X11 is the default backend. It uses pure-Go XGB for window/input/clipboard
+operations and the shared native renderer for text and media. Retained preview
+surfaces reuse pixels during scrolling instead of uploading entire panes.
+Keyboard lookup uses the X server's mapping; no XIM is required.
 
-The driver uses pure-Go [`xgb`](https://github.com/BurntSushi/xgb), without a
-runtime libX11 dependency. It owns X resources and native event decoding,
-keyboard lookup, clipboard/PRIMARY selection ownership and INCR transfers,
-window-manager interactions, and pixel/pane presentation. Keyboard handling
-does not require XIM and uses the Linux-console keymap.
+Clipboard/PRIMARY selection and large transfers are supported. Cross-process
+clipboard synchronization starts disabled and uses the authenticated
+[shared-clipboard protocol](../../platform_neutral/stterminal/clipboard_sync.go).
 
-The shared frontend owns PTYs, terminal key/mouse encoding, glyph/media
-rendering, and retained preview state. [Window geometry requests](../../platform_neutral/stterminal/README.md#window-geometry)
-use the terminal's authenticated DCS protocol; application clients do not open
-their own X connections. Selection and clipboard retain the terminal's normal
-authorization and bracketed-paste policy.
+[Window geometry requests](../../platform_neutral/stterminal/escape.go)
+support placement and click-to-restore. Window-manager policy may override them.
 
-Shared clipboard synchronization starts disabled and has no X11 toolbar or
-configuration switch. A trusted client must use the authenticated
-[`clipboard-sync` DCS](../../platform_neutral/stterminal/README.md#shared-clipboard)
-with the per-PTY `ST_GO_CLIPBOARD_SYNC_TOKEN`. Enabled windows coordinate through
-the existing SQLite cache. One enabled window per X display temporarily owns a
-private X selection and projects cache updates to `CLIPBOARD`/`PRIMARY`; XFixes
-owner notifications import external X selections. The role moves automatically
-when that window closes or disables synchronization. It is not a daemon and
-does not remain after the participating X11 sessions exit.
+See [build profiles and tests](../../platform_neutral/BUILDING.md),
+[configuration](../../platform_neutral/frontend/README.md#configuration), and
+[backend ownership](../README.md).
 
-See [shared usage/configuration](../../platform_neutral/frontend/README.md),
-[backend ownership](../README.md), and [X11 implementation caveats](../../CAVEAT.md#1-xgb-library-traps).
+For driver work, read [XGB caveats and regression traps](CAVEATS.md).

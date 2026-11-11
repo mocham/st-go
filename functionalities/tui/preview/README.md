@@ -1,37 +1,18 @@
-# Saved-document preview
+# Document preview
 
-`preview` provides backend-neutral saved-source preparation and the existing
-pure-Go `latexpdf` PDF pipeline for govim. It does not own a display connection,
-spawn an editor/typesetter, watch files, or read terminal input.
+`st-go/tui/preview` prepares source snapshots and renders them through the shared
+Go [latexpdf engine](../../latexpdf/README.md). Applications own input, refresh
+policy, asynchronous scheduling, and preview lifetime.
 
-`Load(path, reader)` accepts a bounded/encoding-aware reader supplied by the
-application. It expands local LaTeX `\input`/`\include`, resolves fragment
-`%main=...` directives, records dependencies and source-line mappings, and finds
-the first `%cursor` comment. Markdown markers outside literal code are omitted
-from rendered output. Treat the returned snapshot as immutable.
+- `Load`: expand local TeX inputs and `%main` roots, recording dependencies,
+  source-line mappings, and `%cursor` markers.
+- `Position` / `ExpandedPosition`: approximate source-to-scroll navigation.
+- `Render`: selectable PDF text and vector math; `FontScaleForPane` keeps
+  file-browser text consistent with govim's preview.
+- `LoadWeb` / `RenderHTML`: HTML/SVG output, including direct HTML/XHTML and
+  escaped CSS/JSON source views.
+- `EncodeHTML` / `SendHTML`: bounded HTML/CSS encoding and atomic chunked transfer.
 
-`Position(path, line)` and `ExpandedPosition(line)` return millionths of the
-preview's scroll range. These are proportional source-line estimates, not
-SyncTeX coordinates. Included-file mappings refer to their first occurrence.
-
-`Render(snapshot)` uses a compact 140 mm / **0.6848×** font preview layout (7%
-larger than the shared 0.64× setting). `FontScaleForPane` maps that size to pane-sized
-file-browser PDFs, relative to govim's default 60%-width preview on the same
-terminal. Text remains native selectable PDF text; math uses vector paths. The
-existing renderer's supported LaTeX/Markdown subset applies. No TeX installation
-or system font packages are needed.
-
-`LoadWeb` additionally accepts HTML, CSS and JSON source files. `RenderHTML`
-returns semantic HTML and inline SVG math directly, bypassing PDF generation;
-`HTMLStyle` supplies the default document stylesheet. HTML input is preserved,
-while CSS/JSON source is escaped. The browser host owns isolated presentation.
-
-`EncodeHTML` prepares a bounded HTML/CSS JSON document without unnecessary HTML
-escaping. `SendHTML` emits the single-command protocol for small documents and
-begin/chunk/commit commands for larger ones, using the application's DCS writer.
-The full JSON document may occupy up to 64 MiB; each control message stays below
-1 MiB. The terminal publishes only complete documents.
-
-Applications own save hooks, render coalescing, stale-result rejection, private
-atomic PDF publication, retained-region protocol output, and cleanup. Source and
-expanded-output budgets are 64 MiB, with bounded include depth/file/line counts.
+Source and assembled documents are limited to 64 MiB. Includes are bounded.
+Callers coalesce work, reject stale results, and publish complete replacements.
+For wire behavior, see [`region_html.go`](../../../platform_neutral/stterminal/region_html.go).

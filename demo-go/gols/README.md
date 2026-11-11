@@ -18,7 +18,7 @@ TeX documents expand archived `\input`/`\include` records. Markdown, including
 inline/display LaTeX math, uses the shared [`latexpdf`](../../functionalities/latexpdf/README.md)
 vector-PDF pipeline; other archived text is displayed as source. The final
 level is an outline whose entries jump to exact rendered PDF pages. The preview
-uses a **3.23×** font scale, compared with the file browser's **1.7×**.
+uses a **3.23×** font scale.
 
 ## Navigation
 
@@ -48,9 +48,7 @@ Search uses embedded PDF text; vector-only math without text cannot be matched.
 
 Fixed-page search uses the terminal's native Poppler matcher, not an external
 converter. Its tokenized/chunked replies and digest-checked highlights are
-documented with the [terminal protocols](../../platform_neutral/stterminal/README.md#fixed-page-pdf-search).
-Use a rebuilt terminal that supports this protocol; corpus browsing stays
-read-only.
+implemented in [`pdf_search.go`](../../platform_neutral/stterminal/pdf_search.go).
 
 ## Caches and recent databases
 

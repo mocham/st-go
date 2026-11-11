@@ -1,10 +1,8 @@
 # Embedded TeX insert mappings
 
 `tex.json` is build-time data consumed by `tui/imap`, not a Vim plugin or runtime
-configuration file. Its Greek variants and quote/accent protections follow the
-supplied `TEST-ASSETS/vim91/ftplugin/latex-suite/main.vim`. The lowercase `w`
-remains `\omega` for the Greek mapping instead of the suite's later wedge alias;
-uppercase `P` supplies `\Pi` too.
+configuration file. Greek variants and quote/accent protections follow Vim-LaTeX
+conventions, with `w` mapped to `\omega` and uppercase `P` to `\Pi`.
 
 All IMAP strings, supported extensions, placeholder spelling, and F5 environment/
 package bodies are declared here. The editor adapter only chooses a context,

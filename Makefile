@@ -381,7 +381,7 @@ $(BINARY_NAMES): %: $(OUTPUT_DIR)/%
 $(OUTPUT_DIR)/st: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(GO_SRC)
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
-# Embedded HTTP/canvas client; terminal, fonts and media decoders stay native.
+# CGO-free server; browser Canvas, image decoding and bundled PDF.js presentation.
 $(OUTPUT_DIR)/st-web: $(GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -tags 'backend_web netgo osusergo $(TAB_GO_TAGS)' -o $@ .
 

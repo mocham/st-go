@@ -1,7 +1,7 @@
 # Embedded PDF fonts
 
-`DroidSansFallbackFull.ttf` is embedded in the GoLS executable and used only
-for native PDF text. It provides a compact Unicode/CJK TrueType face that the
+`DroidSansFallbackFull.ttf` is embedded by `latexpdf` consumers for PDF text.
+It provides a Unicode/CJK TrueType face that the
 PDF writer can embed without consulting host fonts.
 
 - Source: <https://github.com/luanti-org/luanti/blob/master/fonts/DroidSansFallbackFull.ttf>

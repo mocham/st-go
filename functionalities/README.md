@@ -1,9 +1,7 @@
 # Reusable Go modules
 
-These modules are independent of the st-go graphical host. Import paths stay
-unchanged; `go.work` selects their local directories while developing this
-repository. Each consumer also declares its own local `replace` directives,
-so ordinary Go commands work with **`GOWORK=off`**, not just in the workspace.
+These modules are independent of the graphical host. `go.work` selects local
+directories; each consumer also supports standalone **`GOWORK=off`** builds.
 
 | Directory | Module | Responsibility |
 | --- | --- | --- |
@@ -21,7 +19,7 @@ so ordinary Go commands work with **`GOWORK=off`**, not just in the workspace.
 
 The terminal engine and neutral protocol contracts remain under
 [`platform_neutral/`](../platform_neutral/README.md), with their own modules.
-The old `st-go/term` import remains a separate compatibility module.
+`st-go/term` is a separate compatibility module for the terminal engine.
 
 ```sh
 go -C functionalities/tui test ./...

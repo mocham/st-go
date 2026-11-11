@@ -41,4 +41,3 @@ line is discarded.
 
 Consumers: govim commands/searches, zat commands/searches/open-path entry,
 GoLS document searches/commands/corpus search, file-browser path/command entry.
-Vimtex has no independent line prompt: input editing belongs to its child Vim.
