@@ -94,7 +94,9 @@ browsers open `.pdf` with [zat](../zat/README.md), `.djvu` with
 [zat-djvu](../zat-djvu/README.md), and text, source, and configuration files
 with [govim](../govim/README.md), when the tool is in `PATH`. This includes
 `.sh`, `.txt`, syntax-highlighted formats, dotfiles, and extensionless scripts;
-extensions are case-insensitive. With supported, enabled
+extensions are case-insensitive. On the web backend (`ST_GO_BACKEND=web`), both
+browsers launch `govim --web` for browser-native previews, including new-tab and
+same-terminal launches. With supported, enabled
 st-go tabs, the **Go browser** requests a new focused tab:
 the first successful open lazily initializes tabs, retains the browser in tab 1,
 and appends the new PTY last, selecting it only after a successful launch. The

@@ -217,7 +217,8 @@ type Term struct {
 	strescseq STREscape
 
 	// image display (DCS DSL)
-	pwd string // base directory for relative image paths (setpwd)
+	pwd          string // base directory for relative image paths (setpwd)
+	htmlTransfer *regionHTMLTransfer
 
 	// animated image playback (open DSL `anim` option)
 	anim        *animation

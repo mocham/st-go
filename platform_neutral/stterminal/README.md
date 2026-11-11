@@ -188,6 +188,9 @@ apply, and failures use the bounded diagnostic log.
 | `region secondary open '<path>' viewer [fit-width\|fit-height\|native\|zoom N]` | Show a retained, pannable raster image viewer at its initial scale |
 | `region secondary clear` | Clear the preview, retaining the split |
 | `region secondary html BASE64` | Browser-native HTML/CSS preview encoded as base64 JSON; discarded on fb/X11 |
+| `region secondary html begin BYTES` | Begin a chunked HTML document; BYTES is its decoded JSON size (up to 64 MiB) |
+| `region secondary html chunk OFFSET BASE64` | Append a chunk at the exact next decoded byte offset |
+| `region secondary html commit` | Publish the complete HTML document atomically |
 | `region secondary list BASE64` | Overlay a retained, smoothly scrollable text list encoded as base64 JSON |
 | `region secondary list restore` | Restore the previous image/PDF and navigation without changing layout |
 | `region secondary scroll report\|edges\|pages` | Report all navigation, report only raster-viewer edge crossings, or use default scrolling |
@@ -255,7 +258,16 @@ for worker, strip-cache, and presentation details.
 
 `region secondary html BASE64` accepts UTF-8 JSON with `html` and optional `css`
 strings. Base64 protects semicolons, quotes and control bytes from the DCS grammar.
-The complete command must fit the 1 MiB control-message limit. st-web renders the
+Each command must fit the 1 MiB control-message limit. Larger documents use
+`html begin BYTES`, followed by `html chunk OFFSET BASE64` commands and
+`html commit`. Encode each chunk independently; offsets and BYTES refer to
+decoded UTF-8 JSON bytes. Documents are bounded to 64 MiB, with only one pending
+transfer per terminal. Gaps, duplicate offsets, oversized chunks, and incomplete
+commits discard the transfer without replacing the visible preview. A new begin,
+content replacement, region clear/reset, terminal reset, or screen switch cancels
+pending data. Native backends discard these commands without assembling HTML.
+
+st-web renders the
 document in a script-disabled iframe positioned within the retained secondary
 surface; native pixel backends discard the document. Position (millionths) and
 scroll commands navigate the browser document. Clear/reset, tab visibility and

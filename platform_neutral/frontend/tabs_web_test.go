@@ -58,6 +58,8 @@ func TestWebFileBrowserFocusedTabsAndOriginalPTYExit(t *testing.T) {
 	pidFile := filepath.Join(tools, "browser-pid")
 	script := `#!/bin/bash
 stty -echo -icanon min 1 time 0
+[[ $# == 2 && $1 == --web ]] || exit 83
+shift
 printf '%s|%s|%s' "$1" "$PWD" "$ST_GO_TABS" > "$TAB_READY"
 while IFS= read -r -n 1 key; do
   printf '%s' "$key" >> "$TAB_INPUT"

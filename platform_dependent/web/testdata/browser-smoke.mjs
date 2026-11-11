@@ -259,11 +259,13 @@ try {
 
   // Real govim --web: no PDF preview, genuine HTML/CSS, save refresh, resize,
   // reconnect and teardown use the same retained secondary-pane lifecycle.
-  await fs.writeFile(path.join(dir, "web.html"), '<h1 id="web-probe" style="color:rgb(20,80,140)">OLD web preview</h1><script>parent.previewScriptRan=true</script>');
+  const htmlPadding = ("<!-- " + "padding".repeat(128) + " -->\n").repeat(1500);
+  await fs.writeFile(path.join(dir, "web.html"), '<h1 id="web-probe" style="color:rgb(20,80,140)">OLD web preview</h1>\n' + htmlPadding + '<p id="web-tail">Document end</p><script>parent.previewScriptRan=true</script>');
   await fs.writeFile(path.join(dir, "web.md"), "# Markdown web preview\n\nSelectable **HTML** and $x^2$.\n");
   await type(path.join(root, "BINARIES/govim") + " --web --preview-gap 0s web.html");
   const preview = 'document.querySelector("iframe.html-preview")';
   await wait(() => evaluate(`${preview}?.contentDocument?.getElementById("web-probe")?.textContent === "OLD web preview"`), "govim HTML preview");
+  if (!await evaluate(`${preview}.contentDocument.body.innerHTML.length > 1048576 && ${preview}.contentDocument.getElementById("web-tail")?.textContent === "Document end"`)) throw new Error("Large HTML preview was truncated at the DCS limit");
   if (!await evaluate(`(() => { const f = ${preview}, r = f.getBoundingClientRect(), c = document.querySelector("canvas").getBoundingClientRect(); return r.left > c.left + c.width * 0.35 && r.right <= c.right && f.contentWindow.getComputedStyle(f.contentDocument.getElementById("web-probe")).color === "rgb(20, 80, 140)" && !window.previewScriptRan; })()`)) {
     throw new Error("HTML overlay geometry, CSS or document isolation is incorrect");
   }

@@ -77,7 +77,7 @@ ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat
 	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
 GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
 GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
-OPENCODE_TUI_GO_SRC = $(wildcard demo-go/opencode-tui/*.go functionalities/tui/preview/*.go) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
+OPENCODE_TUI_GO_SRC = $(wildcard demo-go/opencode-tui/*.go functionalities/tui/preview/*.go platform_neutral/api/*.go) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # Static C++/Splash rendering, including embedded JPEG images through libjpeg.

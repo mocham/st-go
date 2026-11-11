@@ -39,6 +39,13 @@ func terminalDocumentTool(path string) string {
 	return tool
 }
 
+func terminalDocumentOptions(tool string) []string {
+	if browserBackend() == "web" && filepath.Base(tool) == "govim" {
+		return []string{"--web"}
+	}
+	return nil
+}
+
 // Content classification covers every text syntax preset, dotfiles/startup
 // files, extensionless scripts and plain text, without duplicating a lexer list.
 // Keep native/binary formats on their existing routes, including empty fixtures.

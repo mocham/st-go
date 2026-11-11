@@ -109,6 +109,12 @@ func TestBackendAwareOpenersPTY(t *testing.T) {
 					}
 					for _, tool := range []string{"zat", "govim"} {
 						writeDocumentTool(t, tools, tool, `[[ -t 0 && -t 1 && -t 2 ]] || exit 81
+if [[ ${0##*/} == govim && $ST_GO_BACKEND == web ]]; then
+  [[ $# == 2 && $1 == --web ]] || exit 82
+  shift
+else
+  [[ $# == 1 ]] || exit 83
+fi
 printf 'native|%s|%s|%s|%s' "$1" "${1##*/}" "$PWD" "$ST_GO_BACKEND" > "$MARKER"`)
 					}
 					for _, desktop := range []string{"bar", "xdg-open", "st"} {

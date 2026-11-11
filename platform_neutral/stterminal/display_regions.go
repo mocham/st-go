@@ -132,6 +132,7 @@ func (t *Term) dslRegion(args []string) error {
 		if len(args) != 1 {
 			return fmt.Errorf("region reset takes no arguments")
 		}
+		t.htmlTransfer = nil
 		return hooks.SetRegions(nil)
 	case "query":
 		if len(args) != 1 {
@@ -196,6 +197,9 @@ func (t *Term) dslRegion(args []string) error {
 		return fmt.Errorf("region target requires open or clear")
 	}
 	id := RegionID(args[0])
+	if t.htmlTransfer != nil && t.htmlTransfer.id == id && (args[1] == "clear" || args[1] == "open" || args[1] == "list") {
+		t.htmlTransfer = nil
+	}
 	switch args[1] {
 	case "html":
 		return t.dslRegionHTML(id, args[2:])

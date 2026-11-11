@@ -92,7 +92,8 @@ MOUSE
 
 HINTS
   With the default opener, images use goiv, .pdf uses zat, .djvu uses zat-djvu,
-  and text/source/config files use govim when available in PATH. Supported st-go hosts open them in new
+  and text/source/config files use govim when available in PATH (govim --web on the web backend).
+  Supported st-go hosts open them in new
   focused tabs after successful launch; the first open creates the tab bar and keeps
   this browser in tab 1. Click the bar or use Ctrl+Shift+PageUp/PageDown to return.
   Middle-click a tab or Ctrl+Shift+W closes it. Without tab support (or with

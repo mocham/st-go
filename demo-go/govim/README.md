@@ -110,8 +110,9 @@ pretty-printed). Preview scripts are disabled; Esc returns focus from the previe
 to the editor. Refresh coalescing still uses `--preview-gap`.
 
 On framebuffer/X11, the split is reserved and the HTML payload is discarded,
-leaving a blank preview. `--no-preview` disables the panel entirely. HTML payloads
-are bounded by the 1 MiB terminal control-message budget. The existing Shift-Tab
+leaving a blank preview. `--no-preview` disables the panel entirely. Large HTML
+previews use chunked DCS transfers, with a 64 MiB JSON document budget and a
+1 MiB limit per control message. The existing Shift-Tab
 table-of-contents view remains available for LaTeX/Markdown documents.
 
 ## Recovery and saving

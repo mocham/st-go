@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"st-go/limits"
 	"st-go/platform_neutral/api"
 )
 
@@ -32,5 +33,16 @@ func TestWebPreviewPublishesHTMLInsteadOfPDF(t *testing.T) {
 	settlePreview(t, e)
 	if !strings.Contains(out.String(), prefix) || strings.Contains(out.String(), "region secondary open ") {
 		t.Fatal("saving web preview did not publish fresh HTML")
+	}
+}
+
+func TestWebPreviewLargerThanControlLimit(t *testing.T) {
+	text := "<h1>Large preview</h1>\n" + strings.Repeat("<!-- padding -->\n", limits.ControlBytes/16) + "<p>Document end</p>"
+	e, out, _ := newPreviewTestEditor(t, "large.html", text)
+	e.preview.options.web = true
+	e.preview.render = renderPreview
+	settlePreview(t, e)
+	if !strings.Contains(out.String(), "region secondary html begin ") || !strings.Contains(out.String(), "region secondary html commit\x1b\\") || e.preview.directory != "" {
+		t.Fatal("large HTML preview was not published through chunked DCS")
 	}
 }

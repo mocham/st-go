@@ -311,6 +311,7 @@ func (t *Term) tcursor(mode int) {
 }
 
 func (t *Term) treset() {
+	t.htmlTransfer = nil
 	if t.hooks != nil {
 		t.hooks.ImageClearAll()
 	}
@@ -350,6 +351,7 @@ func (t *Term) New(col, row int) {
 }
 
 func (t *Term) tswapscreen() {
+	t.htmlTransfer = nil
 	t.line, t.alt = t.alt, t.line
 	t.mode ^= termModeAltScreen
 	t.tfulldirt()

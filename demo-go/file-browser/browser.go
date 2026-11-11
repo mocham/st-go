@@ -1041,8 +1041,9 @@ func (b *Browser) openPath(path string, minimize int) {
 				return
 			}
 			if tool := terminalDocumentTool(path); tool != "" {
-				if !b.requestTerminalTab(tool, path) {
-					b.runTerminalTool(tool, path)
+				options := terminalDocumentOptions(tool)
+				if !b.requestTerminalTab(tool, path, options...) {
+					b.runTerminalTool(tool, path, options...)
 				}
 				return
 			}

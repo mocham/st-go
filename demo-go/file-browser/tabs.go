@@ -15,6 +15,7 @@ import (
 
 type pendingTab struct {
 	tool, path, directory, name string
+	options                     []string
 	transfer                    string
 	deadline                    time.Time
 	probe                       bool
@@ -23,7 +24,7 @@ type pendingTab struct {
 
 // An absent/disabled capability follows the existing same-terminal opener
 // immediately. An accepted request never shares the browser PTY or input loop.
-func (b *Browser) requestTerminalTab(tool, path string) bool {
+func (b *Browser) requestTerminalTab(tool, path string, options ...string) bool {
 	token := os.Getenv("ST_GO_TAB_TOKEN")
 	if b.tabsUnavailable || os.Getenv("ST_GO_TABS") != "1" || !tabprotocol.Capability(token) {
 		return false
@@ -39,8 +40,10 @@ func (b *Browser) requestTerminalTab(tool, path string) bool {
 		return false
 	}
 	id := hex.EncodeToString(nonce[:])
-	request := api.TabSpawnRequest{Command: []string{tool, path}, Directory: b.dir, Title: displayText(baseName(path)), Detached: false}
-	pending := pendingTab{tool: tool, path: path, directory: b.dir, name: baseName(path), deadline: time.Now().Add(5 * time.Second)}
+	command := append([]string{tool}, options...)
+	command = append(command, path)
+	request := api.TabSpawnRequest{Command: command, Directory: b.dir, Title: displayText(baseName(path)), Detached: false}
+	pending := pendingTab{tool: tool, path: path, options: append([]string(nil), options...), directory: b.dir, name: baseName(path), deadline: time.Now().Add(5 * time.Second)}
 	// Archive extraction directories can disappear on navigation. Stage the
 	// argument outside that archive, then ask st-go to take its own copy before
 	// acknowledging. Browser exit after acceptance cannot remove the tab's file.
@@ -59,8 +62,8 @@ func (b *Browser) requestTerminalTab(tool, path string) bool {
 			return false
 		}
 		pending.transfer = dir
-		request.Command[1] = staged
-		index := 1
+		index := len(request.Command) - 1
+		request.Command[index] = staged
 		request.CopyFile = &index
 	}
 	pending.request = request
@@ -171,10 +174,10 @@ func (b *Browser) pollTabRequests() {
 		path := pending.path
 		if pending.transfer != "" {
 			if _, err := os.Stat(path); err != nil {
-				path = pending.request.Command[1]
+				path = pending.request.Command[*pending.request.CopyFile]
 			}
 		}
-		b.runTerminalToolIn(pending.directory, pending.tool, path)
+		b.runTerminalToolIn(pending.directory, pending.tool, path, pending.options...)
 		if pending.transfer != "" && path == pending.path {
 			_ = os.RemoveAll(pending.transfer)
 		}

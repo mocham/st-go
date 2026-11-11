@@ -2,8 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -330,13 +328,13 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 		if result.html != nil {
 			document := *result.html
 			document.CSS += "body{background:" + p.options.background + "}"
-			data, err := json.Marshal(document)
-			if err != nil || base64.StdEncoding.EncodedLen(len(data)) > limits.ControlBytes-128 {
-				e.error(fmt.Errorf("HTML preview exceeds protocol limit"))
+			data, err := preview.EncodeHTML(document)
+			if err != nil {
+				e.error(err)
 				p.completed = nil
 				return nil
 			}
-			if err := p.command("region secondary html " + base64.StdEncoding.EncodeToString(data)); err != nil {
+			if err := preview.SendHTML(data, p.command); err != nil {
 				return err
 			}
 			p.lastPublished = now

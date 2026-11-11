@@ -26,6 +26,12 @@ returns semantic HTML and inline SVG math directly, bypassing PDF generation;
 `HTMLStyle` supplies the default document stylesheet. HTML input is preserved,
 while CSS/JSON source is escaped. The browser host owns isolated presentation.
 
+`EncodeHTML` prepares a bounded HTML/CSS JSON document without unnecessary HTML
+escaping. `SendHTML` emits the single-command protocol for small documents and
+begin/chunk/commit commands for larger ones, using the application's DCS writer.
+The full JSON document may occupy up to 64 MiB; each control message stays below
+1 MiB. The terminal publishes only complete documents.
+
 Applications own save hooks, render coalescing, stale-result rejection, private
 atomic PDF publication, retained-region protocol output, and cleanup. Source and
 expanded-output budgets are 64 MiB, with bounded include depth/file/line counts.

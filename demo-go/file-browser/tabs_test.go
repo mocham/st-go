@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,25 @@ func TestRejectedTabFallsBackToExistingTerminalTool(t *testing.T) {
 	waitContains(t, f, "Refreshed", "late reply was not treated as keys")
 }
 
+func TestWebGovimTabAndRejectedFallbackPreserveWebOption(t *testing.T) {
+	dir, tools := t.TempDir(), documentToolTestPath(t)
+	name := "a '; 世界.md"
+	writeFiles(t, dir, name)
+	marker := filepath.Join(tools, "opened")
+	writeDocumentTool(t, tools, "govim", `printf '%s|%s|%s' "$#" "$1" "$2" > "$MARKER"`)
+	env := envWithout(testEnv("PATH="+tools, "MARKER="+marker, "ST_GO_BACKEND=web", "ST_GO_TABS=1", "ST_GO_TAB_TOKEN="+strings.Repeat("ab", 16)), "ST_FILE_BROWSER_OPEN")
+	f := startBrowser(t, env, dir)
+	f.send("\x1b[B\r")
+	id, request := browserTabRequest(t, f)
+	path := filepath.Join(dir, name)
+	if !slices.Equal(request.Command, []string{filepath.Join(tools, "govim"), "--web", path}) {
+		t.Fatal("web opener did not send literal govim arguments", request.Command)
+	}
+	f.send("\x1bPtab-spawn " + id + " error " + base64.RawStdEncoding.EncodeToString([]byte("disabled")) + "\x1b\\")
+	waitFileContent(t, marker, "2|--web|"+path)
+	waitContains(t, f, "govim finished", "web fallback return")
+}
+
 func TestDisabledTabCapabilityUsesCurrentBehavior(t *testing.T) {
 	for _, capability := range []string{"0", ""} {
 		t.Run(capability, func(t *testing.T) {
@@ -157,7 +177,7 @@ func TestArchiveTabRequestStagesFileUntilHostAcknowledgement(t *testing.T) {
 	}
 	var output bytes.Buffer
 	b := &Browser{out: bufio.NewWriter(&output), fd: -1, dir: dir, cacheDir: t.TempDir(), archiveStack: []*archiveCtx{{}}}
-	if !b.requestTerminalTab("/bin/govim", source) {
+	if !b.requestTerminalTab("/bin/govim", source, "--web") {
 		t.Fatal("archive tab request was not sent")
 	}
 	var probeID string
@@ -170,13 +190,13 @@ func TestArchiveTabRequestStagesFileUntilHostAcknowledgement(t *testing.T) {
 	for id, request := range b.pendingTabs {
 		spawnID, pending = id, request
 	}
-	if pending.probe || pending.request.CopyFile == nil || *pending.request.CopyFile != 1 || pending.request.Command[1] == source || pending.path != source {
+	if pending.probe || pending.request.CopyFile == nil || *pending.request.CopyFile != 2 || len(pending.request.Command) != 3 || pending.request.Command[1] != "--web" || pending.request.Command[2] == source || pending.path != source {
 		t.Fatal("archive ownership handoff was not requested", pending.request)
 	}
 	if err := os.Remove(source); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := os.ReadFile(pending.request.Command[1]); err != nil || string(data) != "archive contents" {
+	if data, err := os.ReadFile(pending.request.Command[2]); err != nil || string(data) != "archive contents" {
 		t.Fatal("archive navigation invalidated the pending spawn", err)
 	}
 	b.acceptTabReply("tab-spawn " + spawnID + " accepted 3")

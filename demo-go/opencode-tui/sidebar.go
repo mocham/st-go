@@ -1,0 +1,264 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"st-go/tui/readline"
+)
+
+const (
+	workdirStyle     = "\x1b[0;38;2;239;182;204m"
+	sessionNameStyle = "\x1b[0;38;2;169;204;238m"
+)
+
+type sidebarHit struct{ kind, id string }
+type textSpan struct{ text, style string }
+type catalogResult struct {
+	sequence    uint64
+	first, done bool
+	sessions    []sessionInfo
+}
+
+func (application *app) requestCatalog() {
+	if application.catalogLoading || application.api == nil {
+		return
+	}
+	application.catalogLoading, application.catalogError = true, ""
+	application.catalogSequence++
+	sequence := application.catalogSequence
+	application.dirty = true
+	go func() {
+		cursor, first := "", true
+		seen := make(map[string]bool)
+		for {
+			ctx, cancel := context.WithTimeout(application.ctx, 30*time.Second)
+			page, err := application.api.sessionCatalog(ctx, cursor)
+			cancel()
+			if err == nil && page.Cursor.Next != "" && seen[page.Cursor.Next] {
+				err = fmt.Errorf("OpenCode repeated a session cursor")
+			}
+			done := err != nil || page.Cursor.Next == ""
+			result := operationResult{err: err, catalog: &catalogResult{sequence: sequence, first: first, done: done, sessions: page.Data}}
+			select {
+			case application.operations <- result:
+			case <-application.ctx.Done():
+				return
+			}
+			if done {
+				return
+			}
+			cursor, first = page.Cursor.Next, false
+			seen[cursor] = true
+		}
+	}()
+}
+
+func (application *app) applyCatalog(result operationResult) {
+	page := result.catalog
+	if page.sequence != application.catalogSequence {
+		return
+	}
+	application.catalogLoading = !page.done
+	if result.err != nil {
+		application.catalogError = result.err.Error()
+	} else {
+		if page.first {
+			application.sessions = nil
+		}
+		indexes := make(map[string]int, len(application.sessions))
+		for index, session := range application.sessions {
+			indexes[session.ID] = index
+		}
+		for _, session := range page.sessions {
+			if index, exists := indexes[session.ID]; exists {
+				application.sessions[index] = session
+			} else {
+				indexes[session.ID] = len(application.sessions)
+				application.sessions = append(application.sessions, session)
+			}
+		}
+	}
+	application.dirty = true
+}
+
+func (application *app) cancelAttach() {
+	if application.attachCancel != nil {
+		application.attachCancel()
+		application.attachCancel = nil
+	}
+	application.attachSequence++
+	application.attachTarget = ""
+	application.dirty = true
+}
+
+func (application *app) attachSession(id string) {
+	application.cancelAttach()
+	if id == application.session.ID {
+		application.sidebarFocus = id
+		application.queuePreview()
+		return
+	}
+	application.attachTarget = id
+	application.sidebarFocus = id
+	application.status = "Opening session…"
+	application.queuePreview()
+	sequence, currentID, epoch := application.attachSequence, application.session.ID, application.sessionEpoch
+	ctx, cancel := context.WithTimeout(application.ctx, 30*time.Second)
+	application.attachCancel = cancel
+	go func() {
+		defer cancel()
+		snapshot, err := application.api.snapshot(ctx, id, 10)
+		result := operationResult{kind: "attach", attachToken: sequence, sessionID: currentID, epoch: epoch, sessionSnapshot: snapshot, err: err}
+		select {
+		case application.operations <- result:
+		case <-application.ctx.Done():
+		}
+	}()
+}
+
+func (application *app) applyAttach(result operationResult) {
+	if result.attachToken != application.attachSequence || application.attachTarget == "" {
+		return
+	}
+	if result.err != nil {
+		application.cancelAttach()
+		application.status = result.err.Error()
+		application.queuePreview()
+		return
+	}
+	application.installSession(result.sessionSnapshot)
+}
+
+func (application *app) installSession(snapshot sessionSnapshot) {
+	application.cancelAttach()
+	application.sessionEpoch++
+	application.revision++
+	application.session = *snapshot.session
+	application.busy = snapshot.busy
+	application.syncing, application.permissionBusy = false, false
+	application.permissions = snapshot.permissions
+	application.followPreview, application.selectedPrompt, application.activePrompt = true, "", ""
+	application.messages = nil
+	application.sidebarHits = nil
+	application.promptLimit = 10
+	application.historyCursor = snapshot.messageCursor
+	application.sidebarFocus = application.session.ID
+	application.responseScroll = 0
+	application.previewGeneration = ""
+	application.status = "Attached to " + application.session.ID
+	if err := application.preview.clear(); err != nil {
+		application.status = err.Error()
+	}
+	application.replaceMessages(snapshot.messages)
+	application.queuePreview()
+	// Catch events received while the target session snapshot was loading.
+	application.requestSync()
+}
+
+func (application *app) morePrompts() {
+	if application.attachTarget != "" {
+		return
+	}
+	count := len(application.promptIndexes())
+	if application.promptLimit >= count && application.historyCursor == "" {
+		return
+	}
+	if application.promptLimit <= count {
+		application.promptLimit += 10
+	}
+	if application.promptLimit > count && application.historyCursor != "" {
+		application.requestSync()
+	}
+	application.dirty = true
+}
+
+// Wrap styled headers without inserting control sequences into user text.
+// Every wrapped row remains one hit target for its session.
+func sessionHeader(session sessionInfo, active bool, width int) []displayRow {
+	marker, emphasis := "▸ ", ""
+	if active {
+		marker, emphasis = "▾ ", "\x1b[1m"
+	}
+	title := session.Title
+	if strings.TrimSpace(title) == "" {
+		title = shortID(session.ID)
+	}
+	directory := session.Location.Directory
+	if directory == "" {
+		directory = "(workdir unavailable)"
+	}
+	parts := []textSpan{{marker, dimStyle}, {directory, workdirStyle + emphasis}, {" ", resetStyle}, {title, sessionNameStyle + emphasis}}
+	rows := []displayRow{{sessionID: session.ID}}
+	used := 0
+	for _, part := range parts {
+		for _, r := range strings.ReplaceAll(safeText(part.text), "\n", " ") {
+			cells := readline.CellWidth(r, used)
+			if used > 0 && used+cells > width {
+				rows = append(rows, displayRow{sessionID: session.ID})
+				used = 0
+				cells = readline.CellWidth(r, 0)
+			}
+			row := &rows[len(rows)-1]
+			if cells > width {
+				r, cells = '?', 1
+			}
+			text := string(r)
+			row.text += text
+			if n := len(row.spans); n > 0 && row.spans[n-1].style == part.style {
+				row.spans[n-1].text += text
+			} else {
+				row.spans = append(row.spans, textSpan{text, part.style})
+			}
+			used += cells
+		}
+	}
+	return rows
+}
+
+func (application *app) sidebarRows(width int) []displayRow {
+	sessions := append([]sessionInfo(nil), application.sessions...)
+	found := false
+	for index := range sessions {
+		if sessions[index].ID == application.session.ID {
+			sessions[index] = application.session
+			found = true
+		}
+	}
+	if !found {
+		sessions = append([]sessionInfo{application.session}, sessions...)
+	}
+	expanded := application.session.ID
+	if application.attachTarget != "" {
+		expanded = application.attachTarget
+	}
+	var rows []displayRow
+	for _, session := range sessions {
+		active := session.ID == expanded
+		rows = append(rows, sessionHeader(session, active, width)...)
+		if active {
+			if application.attachTarget != "" {
+				rows = append(rows, displayRow{text: "  Loading prompts…", style: dimStyle})
+			} else {
+				rows = append(rows, application.promptRows(width)...)
+				count := len(application.promptIndexes())
+				if count > application.promptLimit || application.historyCursor != "" {
+					label := "  More (+10 older prompts)"
+					if application.syncing && count < application.promptLimit {
+						label = "  Loading older prompts…"
+					}
+					rows = append(rows, displayRow{text: label, style: sessionNameStyle, action: "more"})
+				}
+			}
+		}
+		rows = append(rows, displayRow{})
+	}
+	if application.catalogError != "" {
+		rows = append(rows, displayRow{text: "Retry session list: " + application.catalogError, style: warningStyle, action: "reload"})
+	} else if application.catalogLoading {
+		rows = append(rows, displayRow{text: "Loading sessions…", style: dimStyle})
+	}
+	return rows
+}

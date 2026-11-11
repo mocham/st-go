@@ -60,6 +60,7 @@ Options:
 CODE is evaluated by `bash -c` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
 By default, .pdf opens in zat, .djvu opens in zat-djvu, and text/source/config files open in govim when available in PATH.
+On the web backend, govim is launched with --web for browser-native previews.
 These tools use this terminal; exiting returns to the browser. Otherwise the
 external fallbacks are used on X11 only. Matching explicit openers take precedence.
 ST_FILE_BROWSER_OPEN_X11, _FB, _WEB, or _ALL register environment openers.
@@ -875,6 +876,7 @@ enter_selected() {
 
 open_path() {
 	local path=$1 minimize=${2:-0} name tool= executable=
+	local -a options=()
 	base_name "$path"
 	name=$REPLY
 	if [[ -z $OPEN_CMD ]]; then
@@ -904,7 +906,8 @@ open_path() {
 				*) if is_editor_text_file "$path"; then tool=govim; fi ;;
 			esac
 			if [[ -n $tool ]] && executable=$(type -P -- "$tool") && [[ -x $executable && ! -d $executable ]]; then
-				run_terminal_tool "$executable" "$path"
+				if [[ $tool == govim && $BACKEND == web ]]; then options=(--web); fi
+				run_terminal_tool "$executable" "$path" "${options[@]}"
 				return
 			fi
 			if [[ $BACKEND != x11 ]]; then
@@ -1477,7 +1480,8 @@ MOUSE
 
 HINTS
   With the default opener, .pdf uses zat, .djvu uses zat-djvu, and text/source/config files use govim
-  when available in PATH. They run in this terminal; exit the tool
+  when available in PATH. On the web backend, govim uses --web for browser-native previews.
+  They run in this terminal; exit the tool
   to return to the same browser location on every backend. Desktop
   fallbacks are X11-only. Register custom code with --open-for PLATFORM CODE
   or ST_FILE_BROWSER_OPEN_X11 / _FB / _WEB / _ALL. Matching empty values

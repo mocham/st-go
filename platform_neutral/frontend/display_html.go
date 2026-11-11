@@ -5,9 +5,13 @@ import (
 	term "st-go/platform_neutral/stterminal"
 )
 
-func (t *Terminal) SetRegionHTML(id term.RegionID, document api.HTMLDocument) error {
+func (t *Terminal) SupportsHTML() bool {
 	host, ok := t.host.(api.HTMLSupport)
-	if !ok || !host.SupportsHTML() {
+	return ok && host.SupportsHTML()
+}
+
+func (t *Terminal) SetRegionHTML(id term.RegionID, document api.HTMLDocument) error {
+	if !t.SupportsHTML() {
 		return nil // fb/X11 reserve the panel, but discard browser content.
 	}
 	s := &t.displayRegions

@@ -93,7 +93,10 @@ selection and scrolling; Esc returns keyboard focus to the editor. Content and
 geometry survive viewport changes and reconnects; hiding a tab or closing the
 region removes its overlay. `region secondary position` and `scroll` navigate
 the HTML document. Framebuffer and X11 discard HTML content, leaving the reserved
-preview blank. Payloads must fit the terminal's 1 MiB DCS control budget.
+preview blank. Documents larger than one control message use `html begin`,
+`html chunk`, and `html commit` transfers (see the terminal-core protocol docs).
+The old preview stays visible until the complete document arrives. JSON documents
+are limited to 64 MiB; individual DCS messages remain limited to 1 MiB.
 
 Clipboard text stays terminal-owned. Selection/OSC 52 writes make the toolbar's
 Copy action available, rather than attempting unsolicited browser clipboard
