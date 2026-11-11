@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestProtocolBounds(t *testing.T) {
+func TestRequestResponseBounds(t *testing.T) {
 	for _, r := range []Request{{ID: 1, Prompt: "nh", Page: 2}, {ID: 2, Prompt: "xi'an"}} {
 		if err := r.Validate(); err != nil {
 			t.Fatal(err)
@@ -29,9 +29,26 @@ func TestProtocolBounds(t *testing.T) {
 	if response.Validate(request) == nil {
 		t.Fatal("accepted candidate control text")
 	}
-	var parsed Request
-	if Read(Scanner(strings.NewReader(strings.Repeat("x", MaxMessage+1))), &parsed) == nil {
-		t.Fatal("accepted oversized frame")
+}
+
+func TestInProcessDecoderCompatibilityAndCrashBoundary(t *testing.T) {
+	response, err := Lookup(context.Background(), Request{ID: 1, Prompt: "nh", Page: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"南海", "农行", "浓厚", "那好", "弄好"}
+	if strings.Join(response.Candidates, ",") != strings.Join(want, ",") {
+		t.Fatalf("nh page 3 = %q, want %q", response.Candidates, want)
+	}
+	for length := 1; length <= MaxPrompt; length++ {
+		request := Request{ID: uint64(length + 1), Prompt: strings.Repeat("a", length)}
+		response, err := Lookup(context.Background(), request)
+		if err != nil {
+			t.Fatalf("%d letters: %v", length, err)
+		}
+		if err := response.Validate(request); err != nil {
+			t.Fatalf("%d letters: %v", length, err)
+		}
 	}
 }
 

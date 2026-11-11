@@ -7,7 +7,6 @@ use (
 	./demo-go/goiv
 	./demo-go/gols
 	./demo-go/govim
-	./demo-go/pinyind
 	./demo-go/vimtex
 	./demo-go/zat
 	./demo-go/zat-djvu

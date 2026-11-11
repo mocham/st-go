@@ -1055,6 +1055,7 @@ func (e *Editor) playRegisterMacro(value register, count int) {
 
 func (e *Editor) tick(now time.Time) {
 	e.pollCJK()
+	e.pollPrompt()
 	if read := e.clipboardRead; read != nil && !now.Before(read.deadline) {
 		e.finishClipboard(&clipboardReply{selection: read.selection, err: fmt.Errorf("terminal clipboard query timed out or was denied; internal registers unchanged")})
 	}
@@ -1067,6 +1068,9 @@ func (e *Editor) tick(now time.Time) {
 }
 func (e *Editor) close(normalExit bool) error {
 	e.closeCJK()
+	if e.promptEditor != nil {
+		e.promptEditor.Close()
+	}
 	e.syntax.close()
 	var first error
 	for _, b := range e.buffers {

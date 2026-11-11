@@ -32,6 +32,7 @@ const (
 	dimStyle      = "\x1b[2m"
 	headerStyle   = "\x1b[38;5;231m\x1b[48;5;24m\x1b[1m"
 	selectedStyle = "\x1b[38;5;231m\x1b[48;5;31m\x1b[1m"
+	imeStyle      = "\x1b[38;5;220m\x1b[48;5;236m\x1b[1m"
 	dirStyle      = "\x1b[38;5;81m\x1b[1m"
 	imageStyle    = "\x1b[38;5;213m"
 	pdfStyle      = "\x1b[38;5;203m"

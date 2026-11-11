@@ -7,8 +7,8 @@ this implementation. This is an initial implementation, **not complete Vim 7
 compatibility**; the supported commands and limits are listed below.
 
 ```sh
-make govim                 # editor plus pure-Go Pinyin helper
-go -C demo-go/govim build -o ../../BINARIES/govim .  # pure-Go editor only
+make govim                 # editor with in-process pure-Go Pinyin
+go -C demo-go/govim build -o ../../BINARIES/govim .
 ./BINARIES/govim document.tex
 ./BINARIES/govim +42 document.tex
 ./BINARIES/govim -r document.tex    # recover after a crash
@@ -169,20 +169,21 @@ do not activate it. Accepted Unicode is journaled and participates in undo,
 recovery, insert repeats, and macros. Candidate-only updates repaint only the
 command row. The saved timestamp returns when composition finishes.
 
-`make govim` builds the separate static **`govim-pinyind`** helper. It is spawned
-**lazily**, only on a live Insert-mode `[[[` trigger, never at editor startup.
-CJK mode does not activate if the helper cannot be found or spawned; all
-subsequent input then stays ordinary text. Dictionary initialization is
-asynchronous. The helper uses the bounded pure-Go `st-go/googlepinyin` decoder;
-no C++ decoder or cgo code runs in the helper, govim, or st-go. A timeout,
-malformed reply, or process failure cancels CJK mode, preserves typed text, and
-does not kill either application; type a new `[[[` to retry. Inputs, dictionary
-records, decompression, candidates, frames, and queues are bounded (including a
-32-byte spelling limit), and helpers are canceled/reaped on exit. The helper
-uses a private abstract Unix socket on Linux. No SCIM desktop service, native IM
-library, or extra font package is needed.
-See [`pinyind`](../pinyind/README.md) for optional dictionary bundling, generated
-assets, source provenance, license notices, and packaging both executables.
+Govim links the bounded pure-Go `st-go/googlepinyin` decoder directly. Corpus
+initialization and lookups run on a coalescing goroutine after the first live
+trigger; no helper executable, daemon, socket, C++, or cgo is involved. A
+decoder failure cancels CJK mode and preserves typed text. Inputs, corpus
+decompression, records, candidates, and queues are independently bounded,
+including a 32-byte spelling limit. No SCIM desktop service, native IM library,
+or extra font package is needed. See the
+[`googlepinyin` module](../../functionalities/googlepinyin) for format,
+provenance, license notices, and tests.
+
+The same delimiter behavior is built into `st-go/tui/readline`, so govim's
+single-line command and search prompts also support Pinyin. Their numbered
+candidates appear immediately after the insertion cursor in a contrasting
+color. Escape leaves only IME mode and preserves the opening delimiter; `]]]`
+removes both delimiter triples.
 
 ## Fixed preferences
 

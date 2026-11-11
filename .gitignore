@@ -1,7 +1,5 @@
-# Generated executables and input-method data
+# Generated executables
 /BINARIES/
-/demo-go/pinyind/internal/pinyinengine/assets/*.dat
-/demo-go/pinyind/internal/pinyinengine/assets/*.txt.gz
 
 # Editor swap files
 .*.swp

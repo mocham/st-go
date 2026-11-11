@@ -46,6 +46,15 @@ func (b *Browser) modalPrompt(mode string, init []byte) {
 		key, st := b.in.readByte(100 * time.Millisecond)
 		switch st {
 		case inTimeout:
+			if b.promptEditor != nil {
+				result := b.promptEditor.Poll()
+				if result.Handled || result.Err != nil {
+					b.applyPromptResult(result)
+					if b.promptActive && !b.promptAbort && result.DisplayChanged {
+						b.drawPrompt()
+					}
+				}
+			}
 			continue
 		case inEOF:
 			b.promptActive = false
@@ -63,6 +72,9 @@ func (b *Browser) modalPrompt(mode string, init []byte) {
 		b.status = "Entry cancelled"
 		b.renderAll()
 	}
+	if b.promptEditor != nil {
+		b.promptEditor.Close()
+	}
 }
 
 func (b *Browser) drawPrompt() {
@@ -76,7 +88,7 @@ func (b *Browser) drawPrompt() {
 func (b *Browser) handlePromptKey(k byte) {
 	switch k {
 	case 0, '\r', '\n':
-		b.submitPrompt()
+		b.promptEdit("<Enter>")
 	case '\x7f', '\b':
 		b.promptBackspace()
 	case 0x01: // Ctrl+A
@@ -84,7 +96,7 @@ func (b *Browser) handlePromptKey(k byte) {
 	case 0x05: // Ctrl+E
 		b.promptEdit("<End>")
 	case 0x03: // Ctrl+C
-		b.promptAbort = true
+		b.promptEdit("\x03")
 	case '\t':
 		if b.promptMode == "path" {
 			b.completePathPrompt()
@@ -100,21 +112,21 @@ func (b *Browser) handlePromptKey(k byte) {
 			if st2 == inData {
 				b.handlePromptCSI(first)
 			} else {
-				b.promptAbort = true
+				b.promptEdit("<Esc>")
 			}
 		} else if st == inData {
 			if key := map[byte]string{'b': "<A-b>", 'f': "<A-f>", 'd': "<A-d>", 0x7f: "<A-BS>"}[next]; key != "" {
 				b.promptEdit(key)
 			} else {
-				b.promptAbort = true
+				b.promptEdit("<Esc>")
 			}
 		} else {
-			b.promptAbort = true
+			b.promptEdit("<Esc>")
 		}
 	default:
 		b.ensurePromptEditor()
 		result := b.promptEditor.FeedByte(k)
-		b.syncPromptEditor(result)
+		b.applyPromptResult(result)
 	}
 }
 
@@ -122,12 +134,18 @@ func (b *Browser) handlePromptCSI(first byte) {
 	switch first {
 	case 'A':
 		if b.promptMode == "path" {
+			if b.promptEditor != nil && b.promptEditor.IMEActive() {
+				b.promptEdit("<Esc>")
+			}
 			b.pathSelectDelta(-1)
 		} else {
 			b.promptEdit("<Up>")
 		}
 	case 'B':
 		if b.promptMode == "path" {
+			if b.promptEditor != nil && b.promptEditor.IMEActive() {
+				b.promptEdit("<Esc>")
+			}
 			b.pathSelectDelta(1)
 		} else {
 			b.promptEdit("<Down>")
@@ -201,6 +219,9 @@ func (b *Browser) promptDelete() {
 
 func (b *Browser) ensurePromptEditor() {
 	if b.promptEditor == nil || b.promptEditor.Text() != string(b.promptBuffer) {
+		if b.promptEditor != nil {
+			b.promptEditor.Close()
+		}
 		b.promptEditor = readline.New(string(b.promptBuffer), 0, readline.DefaultLimit)
 	}
 }
@@ -216,7 +237,17 @@ func (b *Browser) syncPromptEditor(result readline.Result) {
 }
 func (b *Browser) promptEdit(key string) {
 	b.ensurePromptEditor()
-	b.syncPromptEditor(b.promptEditor.Handle(key))
+	b.applyPromptResult(b.promptEditor.Handle(key))
+}
+func (b *Browser) applyPromptResult(result readline.Result) {
+	b.syncPromptEditor(result)
+	if result.Cancel {
+		b.promptAbort = true
+		return
+	}
+	if result.Submit {
+		b.submitPrompt()
+	}
 }
 func promptMeasure(r rune, column int) int {
 	size := 0
@@ -225,18 +256,10 @@ func promptMeasure(r rune, column int) int {
 	}
 	return size
 }
-func (b *Browser) promptParts() (string, string) {
+func (b *Browser) promptParts() (string, string, string) {
 	b.ensurePromptEditor()
-	shown, cursor := b.promptEditor.View(max(1, b.cols-6), promptMeasure)
-	column, at := 0, 0
-	for index, r := range shown {
-		if column >= cursor {
-			at = index
-			return shown[:at], shown[at:]
-		}
-		column += promptMeasure(r, column)
-	}
-	return shown, ""
+	display := b.promptEditor.ViewDisplay(max(1, b.cols-6), promptMeasure)
+	return display.Before, strings.TrimPrefix(display.Candidates, " "), display.After
 }
 
 func (b *Browser) refreshPromptMatches() {
@@ -390,8 +413,12 @@ func (b *Browser) drawPathPrompt() {
 		}
 		b.drawText(row, 1, b.cols, style, shown)
 	}
-	before, after := b.promptParts()
-	shown := " / " + displayText(before) + selectedStyle + " " + resetStyle + statusStyle + displayText(after)
+	before, candidates, after := b.promptParts()
+	shown := " / " + displayText(before) + selectedStyle + " " + resetStyle + statusStyle
+	if candidates != "" {
+		shown += imeStyle + displayText(candidates) + resetStyle + statusStyle
+	}
+	shown += displayText(after)
 	if b.pathMessage != "" {
 		shown += "  [" + b.pathMessage + "]"
 	}
@@ -444,8 +471,12 @@ func (b *Browser) commandPrompt() { b.modalPrompt("cmd", []byte(":")) }
 func (b *Browser) drawCommandPrompt() {
 	b.paintStop()
 	b.paintAffectedRows()
-	before, after := b.promptParts()
-	shown := " " + displayText(before) + selectedStyle + " " + resetStyle + statusStyle + displayText(after)
+	before, candidates, after := b.promptParts()
+	shown := " " + displayText(before) + selectedStyle + " " + resetStyle + statusStyle
+	if candidates != "" {
+		shown += imeStyle + displayText(candidates) + resetStyle + statusStyle
+	}
+	shown += displayText(after)
 	if b.cmdMessage != "" {
 		shown += "  [" + b.cmdMessage + "]"
 	}

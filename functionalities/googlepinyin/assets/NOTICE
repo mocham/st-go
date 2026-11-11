@@ -1,0 +1,19 @@
+Google Pinyin dictionary corpus
+Copyright (C) 2009 The Android Open Source Project
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Source: https://github.com/tchaikov/scim-googlepinyin
+Pinned revision: 0b9407ef8e4e5fbf74d5ff4e42ea20025a1483fc
+Archive SHA-256: 60f1c4396807e27ba9952611b3ffd523c6773e1ea910b158fee9bccaf6d0327e
+Portable dictionary SHA-256: dca2023c043c01d9df9a05aedb1fd1ce85a720b29c8acf56368790ea0d21106b
+
+The checked-in dict_pinyin.txt.gz is a deterministic transformation of
+src/data/rawdict_utf16_65105_freq.txt filtered with src/data/valid_utf16.txt by
+the pure-Go st-go/googlepinyin builder. Normal builds do not download, unpack,
+or compile the upstream source. The portable format, runtime parser,
+segmentation, ranking, and asynchronous worker are separate Go code outside
+upstream.
+
+Distributions containing this corpus must include this notice and LICENSE. Do
+not claim to license a separately obtained replacement dictionary; retain its
+supplier's notices.

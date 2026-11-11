@@ -20,6 +20,7 @@ const activeStatusStyle = "\x1b[1;38;5;223;48;5;240m"
 const selectionStyle = "\x1b[0;38;5;231;48;5;60m"
 const searchStyle = "\x1b[0;30;48;5;220m"
 const activeSearchStyle = "\x1b[0;30;48;5;214m"
+const imeCandidateStyle = "\x1b[0;38;5;220;48;5;236m"
 
 type screenCell struct {
 	text               string
@@ -425,6 +426,7 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 		}
 	}
 	message := e.message
+	promptCandidates := ""
 	if message == "" {
 		message = savedTimeLabel(b)
 	}
@@ -444,10 +446,16 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 		message = e.cjkStatus(e.cols)
 	}
 	if e.prompt != "" {
-		message, cursorX = e.promptLine(e.cols - 1)
+		display := e.promptDisplay(e.cols - 1)
+		message = display.Before + display.Candidates + display.After
+		promptCandidates = display.Candidates
+		cursorX = display.Cursor
 		cursorY = e.rows - 1
 	}
 	putCanvas(canvas, 0, e.rows-1, truncateCells(message, e.cols-1), baseStyle, e.cols-1)
+	if promptCandidates != "" {
+		putCanvas(canvas, cursorX, e.rows-1, promptCandidates, imeCandidateStyle, max(0, e.cols-1-cursorX))
+	}
 	if len(e.pager) > 0 {
 		for y := range canvas {
 			for x := range canvas[y] {

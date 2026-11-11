@@ -215,35 +215,14 @@ func (v *viewer) zoomTo(zoom int) {
 func (v *viewer) key(key string) {
 	if v.prompt != "" {
 		if v.promptEditor == nil || v.promptEditor.Text() != v.prompt {
+			if v.promptEditor != nil {
+				v.promptEditor.Close()
+			}
 			v.promptEditor = readline.New(v.prompt, 1, 4096)
 			v.promptEditor.CancelEmptyBackspace = true
 			v.promptEditor.SetHistory(v.promptHistory)
 		}
-		result := v.promptEditor.Handle(key)
-		v.prompt = v.promptEditor.Text()
-		if result.Err != nil {
-			v.message = result.Err.Error()
-		}
-		if result.Cancel {
-			v.prompt = ""
-		}
-		if result.Submit {
-			command, mode := strings.TrimSpace(v.prompt[1:]), v.prompt[0]
-			v.promptHistory = append(v.promptHistory, v.prompt)
-			if len(v.promptHistory) > 100 {
-				v.promptHistory = v.promptHistory[1:]
-			}
-			v.prompt = ""
-			if mode == ':' {
-				v.execute(command)
-			} else {
-				if command != "" {
-					v.search = command
-				}
-				v.searchBackward = mode == '?'
-				v.find(false, false)
-			}
-		}
+		v.applyPromptResult(v.promptEditor.Handle(key))
 		return
 	}
 	if key == "escape" || key == "\x03" {
@@ -380,6 +359,47 @@ func (v *viewer) key(key string) {
 		}
 	}
 	v.count = ""
+}
+
+func (v *viewer) applyPromptResult(result readline.Result) {
+	if v.promptEditor == nil {
+		return
+	}
+	v.prompt = v.promptEditor.Text()
+	if result.Err != nil {
+		v.message = result.Err.Error()
+	}
+	if result.Cancel {
+		v.prompt = ""
+		v.promptEditor.Close()
+		return
+	}
+	if !result.Submit {
+		return
+	}
+	prompt := v.prompt
+	command, mode := strings.TrimSpace(prompt[1:]), prompt[0]
+	v.promptHistory = append(v.promptHistory, prompt)
+	if len(v.promptHistory) > 100 {
+		v.promptHistory = v.promptHistory[1:]
+	}
+	v.prompt = ""
+	v.promptEditor.Close()
+	if mode == ':' {
+		v.execute(command)
+	} else {
+		if command != "" {
+			v.search = command
+		}
+		v.searchBackward = mode == '?'
+		v.find(false, false)
+	}
+}
+
+func (v *viewer) pollPrompt() {
+	if v.prompt != "" && v.promptEditor != nil {
+		v.applyPromptResult(v.promptEditor.Poll())
+	}
 }
 
 func (v *viewer) help() {
@@ -652,6 +672,7 @@ func (v *viewer) modeName() string {
 
 func (v *viewer) draw() {
 	v.drawPanel()
+	const promptStyle = "\x1b[0;38;5;252;48;5;236m"
 	text := fmt.Sprintf(" %d/%d  %s %d%%  [%d%%]  %s", v.page, v.pages, v.modeName(), v.zoom, v.position/10000, filepath.Base(v.file))
 	if v.loading() {
 		text += "  loading..."
@@ -671,10 +692,18 @@ func (v *viewer) draw() {
 			v.promptEditor.CancelEmptyBackspace = true
 			v.promptEditor.SetHistory(v.promptHistory)
 		}
-		shown, cursor := v.promptEditor.View(max(1, v.cols-1), func(rune, int) int { return 1 })
-		text = shown
-		v.lastStatus = ""
-		defer func() { v.write(fmt.Sprintf("\x1b[1;%dH\x1b[?25h", cursor+1)) }()
+		display := v.promptEditor.ViewDisplay(max(1, v.cols-1), readline.CellWidth)
+		key := fmt.Sprintf("%d\x00%s\x00%s\x00%s", display.Cursor, display.Before, display.Candidates, display.After)
+		if key != v.lastStatus {
+			v.lastStatus = key
+			v.write("\x1b[H" + promptStyle + "\x1b[2K" + display.Before)
+			if display.Candidates != "" {
+				v.write("\x1b[38;5;220m" + display.Candidates + promptStyle)
+			}
+			v.write(display.After + "\x1b[0m")
+		}
+		v.write(fmt.Sprintf("\x1b[1;%dH\x1b[?25h", display.Cursor+1))
+		return
 	} else if v.promptEditor != nil {
 		v.write("\x1b[?25l")
 		v.promptEditor = nil
@@ -684,7 +713,7 @@ func (v *viewer) draw() {
 		return
 	}
 	v.lastStatus = text
-	v.write("\x1b[H\x1b[0;38;5;252;48;5;236m\x1b[2K" + text + "\x1b[0m")
+	v.write("\x1b[H" + promptStyle + "\x1b[2K" + text + "\x1b[0m")
 }
 
 func statusText(text string, width int) string {

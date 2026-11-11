@@ -48,7 +48,7 @@ func newWorker(ctx context.Context, cancel context.CancelFunc, start func(contex
 			case <-ctx.Done():
 				return
 			case <-service.Exited():
-				w.publish(ctx, Result{Err: fmt.Errorf("pinyin helper exited; CJK mode stopped")})
+				w.publish(ctx, Result{Err: fmt.Errorf("pinyin decoder stopped; input mode stopped")})
 				return
 			case request := <-w.requests:
 				response, err := service.Lookup(ctx, request)
@@ -80,7 +80,7 @@ func (w *Worker) Submit(r Request) error {
 	}
 	select {
 	case <-w.done:
-		return fmt.Errorf("pinyin helper is stopped")
+		return fmt.Errorf("pinyin decoder is stopped")
 	default:
 	}
 	select {

@@ -28,7 +28,7 @@ The sibling `demo-go` module contains architecture/dependency guards only.
 
 | Application | Guide |
 | --- | --- |
-| Native Go modal editor, recovery journals, retained document preview, and lazy CJK input | [govim](govim/README.md), [roadmap](govim/ROADMAP.md), [Pinyin helper](pinyind/README.md) |
+| Native Go modal editor, recovery journals, retained document preview, and lazy CJK input | [govim](govim/README.md), [roadmap](govim/ROADMAP.md), [Pinyin frontend](../functionalities/googlepinyin/README.md) |
 | Real Vim with a saved-document LaTeX preview | [vimtex](vimtex/README.md) |
 | Native, smoothly scrolling PDF viewer | [zat](zat/README.md), [performance notes](zat/PERFORMANCE.md) |
 | DjVuLibre-backed DjVu viewer with retained page rasters, outline, text, and search | [zat-djvu](zat-djvu/README.md) |
@@ -60,8 +60,8 @@ Other portability boundaries remain: entry points use Unix TTY/PTY/signal APIs;
 file-browser and GoLS use bundled SQLite/cgo. File-browser has **no ALSA/native
 audio linkage**: MP3 playback is an authenticated terminal request, handled by
 st-go's `functionalities/audio` service. Metadata remains available on hosts
-without audio support. The optional Pinyin helper and its dictionary frontend
-are pure Go.
+without audio support. Universal readline Pinyin and its dictionary frontend
+are pure Go and run in process.
 These are OS/runtime constraints, not graphical dependencies. On the web backend
 the clients, PTYs, and native audio still run on the Linux server.
 

@@ -137,9 +137,10 @@ pinned DjVuLibre source is downloaded, checksum-verified, and statically built
 against the bundled static libjpeg. The decoder remains in that client rather
 than the terminal. File-browser and GoLS need a C compiler
 for bundled SQLite, **not** graphical codecs or ALSA. File-browser sends audio
-requests to st-go, whose audio module owns libasound and MP3 playback. The optional
-Pinyin helper uses the pure-Go `st-go/googlepinyin` decoder and only derives its
-architecture-independent corpus asset from the pinned upstream text data.
+requests to st-go, whose audio module owns libasound and MP3 playback. Universal
+readline and govim use the in-process pure-Go `st-go/googlepinyin`
+decoder with a checked-in architecture-independent corpus transformation. The
+build performs no Google Pinyin source download or native generation.
 Distribution binaries remain static, including terminal-owned audio with
 `alsa_static` and `zat-djvu`.
 
@@ -165,5 +166,5 @@ See [LICENSE](../LICENSE). This repository does not ship downloaded third-party
 binaries or library sources. The Makefile builds those libraries on demand under
 the gitignored `third_party/` directory, and their own licenses apply. A
 distributed binary's combined work is subject to the most restrictive linked-library
-license. The [Pinyin helper guide](../demo-go/pinyind/README.md) also documents
-its bundled source/data notices and redistribution obligations.
+license. The [Pinyin frontend guide](../functionalities/googlepinyin/README.md)
+also documents its bundled data notices and redistribution obligations.

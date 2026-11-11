@@ -35,6 +35,11 @@ func run(o options, in *os.File, out io.Writer) error {
 	signal.Notify(signals, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
 	v := &viewer{options: o, out: out, cols: 80, marks: make(map[string]int)}
+	defer func() {
+		if v.promptEditor != nil {
+			v.promptEditor.Close()
+		}
+	}()
 	resize := func() {
 		if ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ); err == nil {
 			v.cols = max(1, int(ws.Col))
@@ -78,6 +83,7 @@ func run(o options, in *os.File, out io.Writer) error {
 		now := time.Now()
 		parser.expire(now, key)
 		v.expireMetadata(now)
+		v.pollPrompt()
 		if !ready && now.After(deadline) {
 			return fmt.Errorf("no stacked-region reply; run zat inside the updated st-go with PDF support (at least two rows)")
 		}

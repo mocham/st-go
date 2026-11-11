@@ -36,6 +36,7 @@ replace (
 	github.com/mocham/GoLS/latexpdf => ./functionalities/latexpdf
 	st-go/audio => ./functionalities/audio
 	st-go/config => ./functionalities/config
+	st-go/googlepinyin => ./functionalities/googlepinyin
 	st-go/limits => ./functionalities/limits
 	st-go/pdfmeta => ./functionalities/pdfmeta
 	st-go/platform_neutral/api => ./platform_neutral/api

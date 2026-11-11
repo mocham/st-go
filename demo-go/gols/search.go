@@ -31,6 +31,9 @@ func (browser *Browser) startDocumentSearchPrompt(mode byte) {
 		return
 	}
 	browser.searchPromptBuffer = []byte{mode}
+	if browser.searchLine != nil {
+		browser.searchLine.Close()
+	}
 	browser.searchLine = readline.New(string(browser.searchPromptBuffer), 1, 4097)
 	browser.searchLine.SetHistory(browser.searchHistory)
 	fmt.Fprint(browser.out, "\x1b[?25h")
@@ -40,14 +43,31 @@ func (browser *Browser) startDocumentSearchPrompt(mode byte) {
 func (browser *Browser) handleSearchPromptKey(character byte) {
 	buffer := browser.searchPromptBuffer
 	if browser.searchLine == nil || browser.searchLine.Text() != string(buffer) {
+		if browser.searchLine != nil {
+			browser.searchLine.Close()
+		}
 		browser.searchLine = readline.New(string(buffer), 1, 4097)
 		browser.searchLine.SetHistory(browser.searchHistory)
 	}
-	finish := func() { browser.searchPromptBuffer = nil; fmt.Fprint(browser.out, "\x1b[?25l") }
-	result := browser.editInputByte(browser.searchLine, character)
+	browser.applySearchPromptResult(browser.editInputByte(browser.searchLine, character))
+}
+
+func (browser *Browser) applySearchPromptResult(result readline.Result) {
+	if browser.searchLine == nil {
+		return
+	}
 	browser.searchPromptBuffer = []byte(browser.searchLine.Text())
+	if result.Err != nil {
+		browser.status = result.Err.Error()
+	}
+	finish := func() {
+		browser.searchPromptBuffer = nil
+		browser.searchLine.Close()
+		browser.searchLine = nil
+		fmt.Fprint(browser.out, "\x1b[?25l")
+	}
 	if result.Submit {
-		buffer = browser.searchPromptBuffer
+		buffer := browser.searchPromptBuffer
 		browser.searchHistory = append(browser.searchHistory, string(buffer))
 		if len(browser.searchHistory) > 100 {
 			browser.searchHistory = browser.searchHistory[1:]
@@ -73,6 +93,7 @@ func (browser *Browser) handleSearchPromptKey(character byte) {
 	if result.Cancel {
 		finish()
 		browser.drawStatus()
+		return
 	}
 	if len(browser.searchPromptBuffer) > 0 {
 		browser.drawPrompt(string(browser.searchPromptBuffer))

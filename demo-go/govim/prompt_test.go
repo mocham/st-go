@@ -164,6 +164,49 @@ func TestPromptHorizontalScrollAndRenderedCursor(t *testing.T) {
 	}
 }
 
+func TestPromptPinyinAsyncSelectionRenderingAndEscape(t *testing.T) {
+	e := memoryEditor("document\n")
+	defer e.close(false)
+	e.rows, e.cols = 6, 80
+	e.beginPrompt(":")
+	editKeys(e, "[[[nh")
+	deadline := time.Now().Add(3 * time.Second)
+	for e.promptEditor.ViewDisplay(e.cols-1, runeCells).Candidates == "" && time.Now().Before(deadline) {
+		e.tick(time.Now())
+		time.Sleep(time.Millisecond)
+	}
+	display := e.promptEditor.ViewDisplay(e.cols-1, runeCells)
+	if !strings.Contains(display.Candidates, "1:你好") || !strings.Contains(display.Candidates, "5:男孩") {
+		t.Fatalf("prompt candidates=%q", display.Candidates)
+	}
+	var output strings.Builder
+	if err := e.draw(&renderer{}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), imeCandidateStyle) {
+		t.Fatal("prompt candidates did not use the distinct IME style")
+	}
+	e.promptKey("<Esc>")
+	if e.prompt != ":[[[nh" || e.promptEditor.IMEActive() {
+		t.Fatalf("first Escape canceled prompt or changed trace: %q", e.prompt)
+	}
+	e.promptKey("<Esc>")
+	if e.prompt != "" {
+		t.Fatal("second Escape did not cancel the ordinary prompt")
+	}
+
+	e.beginPrompt(":")
+	editKeys(e, "[[[nh++3]]]")
+	deadline = time.Now().Add(3 * time.Second)
+	for e.prompt != ":浓厚" && time.Now().Before(deadline) {
+		e.tick(time.Now())
+		time.Sleep(time.Millisecond)
+	}
+	if e.prompt != ":浓厚" || e.promptEditor.IMEActive() {
+		t.Fatalf("prompt Pinyin selection=%q active=%v", e.prompt, e.promptEditor.IMEActive())
+	}
+}
+
 func TestPromptInputReadlineKeysFragmented(t *testing.T) {
 	input := "\x1b[D\x1b[C\x01\x05\x1b[1;5D\x1b[1;5C\x1bb\x1bf\x1bd\x1b\x7f"
 	want := []string{"<Left>", "<Right>", "\x01", "\x05", "<C-Left>", "<C-Right>", "<A-b>", "<A-f>", "<A-d>", "<A-BS>"}

@@ -216,23 +216,7 @@ func TestCJKAcceptedTextIsJournaledAndRecoverable(t *testing.T) {
 	}
 }
 
-func cjkBuiltHelper(t *testing.T) string {
-	t.Helper()
-	path := os.Getenv("GOVIM_PINYIN_HELPER")
-	if path == "" {
-		path = "../../BINARIES/govim-pinyind"
-	}
-	path, err := filepath.Abs(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Skip("run make govim-pinyind for helper integration")
-	}
-	return path
-}
 func TestPTYCJKRealGooglePinyinExample(t *testing.T) {
-	t.Setenv("GOVIM_PINYIN_HELPER", cjkBuiltHelper(t))
 	path := filepath.Join(t.TempDir(), "notes.txt")
 	if err := os.WriteFile(path, []byte("\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -279,35 +263,7 @@ func TestCJKNormalExitRemovesDelimitersButEscapePreservesThem(t *testing.T) {
 	}
 }
 
-func TestCJKUnavailableHelperDoesNotActivate(t *testing.T) {
-	for _, mode := range []string{"missing", "not-executable", "bad-executable"} {
-		t.Run(mode, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "helper")
-			if mode != "missing" {
-				permission := os.FileMode(0600)
-				if mode == "bad-executable" {
-					permission = 0700
-				}
-				if err := os.WriteFile(path, []byte("not an executable"), permission); err != nil {
-					t.Fatal(err)
-				}
-			}
-			t.Setenv("GOVIM_PINYIN_HELPER", path)
-			e := memoryEditor("\n")
-			defer e.close(false)
-			editKeys(e, "i[[[")
-			if e.cjk != nil || len(e.pinyinClosing) != 0 {
-				t.Fatal("failed spawn activated CJK or started a worker")
-			}
-			editKeys(e, "nh++3]]]<Esc>")
-			if got := editorText(e); got != "[[[nh++3]]]\n" {
-				t.Fatalf("unavailable helper intercepted ordinary insertion: %q", got)
-			}
-		})
-	}
-}
-
-func TestCJKSpawnsLazilyOnlyOnLiveTriple(t *testing.T) {
+func TestCJKStartsLazilyOnlyOnLiveTriple(t *testing.T) {
 	e := memoryEditor("\n")
 	defer e.close(false)
 	starts := 0
@@ -321,7 +277,7 @@ func TestCJKSpawnsLazilyOnlyOnLiveTriple(t *testing.T) {
 	var r renderer
 	e.draw(&r, io.Discard)
 	if starts != 0 {
-		t.Fatal("editor startup spawned Pinyin")
+		t.Fatal("editor startup started Pinyin")
 	}
 	editKeys(e, "i")
 	e.Feed(keyEvent{Key: "<Paste>", Paste: "[[[literal]]]"})
@@ -331,23 +287,19 @@ func TestCJKSpawnsLazilyOnlyOnLiveTriple(t *testing.T) {
 	}
 	editKeys(e, "[")
 	if starts != 1 || e.cjk == nil {
-		t.Fatal("live triple did not lazily spawn Pinyin")
+		t.Fatal("live triple did not lazily start Pinyin")
 	}
 }
 func TestCJKPureGoMaximumPromptStaysAliveAndAllowsRestart(t *testing.T) {
-	helper := cjkBuiltHelper(t)
 	e := memoryEditor("\n")
 	defer e.close(false)
-	e.newPinyinWorker = func() *pinyin.Worker {
-		return pinyin.NewWorker(func(ctx context.Context) (pinyin.Service, error) { return pinyin.Start(ctx, helper) })
-	}
 	prompt := strings.Repeat("a", pinyin.MaxPrompt)
 	editKeys(e, "i[[["+prompt)
 	awaitCJK(t, e, func() bool {
 		return e.cjk != nil && e.cjk.ready && e.cjk.response.Prompt == prompt
 	})
 	if strings.Contains(e.message, "CJK stopped") || !strings.Contains(editorText(e), prompt) {
-		t.Fatal("bounded pure-Go lookup stopped the helper or lost input")
+		t.Fatal("bounded pure-Go lookup stopped the decoder or lost input")
 	}
 	editKeys(e, "<Esc>a ]]][[[nh++3]]]<Esc>")
 	awaitCJK(t, e, func() bool { return e.mode == normalMode && e.cjk == nil })

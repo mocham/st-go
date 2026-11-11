@@ -4,8 +4,8 @@ go 1.26.0
 
 require (
 	github.com/mocham/GoLS/latexpdf v0.0.0
-	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
+	st-go/googlepinyin v0.0.0
 	st-go/limits v0.0.0
 	st-go/platform_neutral/api v0.0.0
 )
@@ -19,6 +19,7 @@ require (
 
 replace (
 	github.com/mocham/GoLS/latexpdf => ../latexpdf
+	st-go/googlepinyin => ../googlepinyin
 	st-go/limits => ../limits
 	st-go/platform_neutral/api => ../../platform_neutral/api
 )

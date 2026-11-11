@@ -39,6 +39,11 @@ func run(options options, input *os.File, output io.Writer) error {
 	}()
 
 	viewer := newViewer(options, backend, pages, output)
+	defer func() {
+		if viewer.promptEditor != nil {
+			viewer.promptEditor.Close()
+		}
+	}()
 	resize := func() {
 		if size, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ); err == nil {
 			viewer.cols = max(1, int(size.Col))
@@ -80,6 +85,7 @@ func run(options options, input *os.File, output io.Writer) error {
 	resultsDrained:
 		now := time.Now()
 		parser.expire(now, viewer.key)
+		viewer.pollPrompt()
 		if !ready && now.After(deadline) {
 			return fmt.Errorf("no image-region reply; run zat-djvu inside the updated st-go (at least two rows)")
 		}

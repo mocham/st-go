@@ -27,11 +27,7 @@ type cjkInput struct {
 }
 
 func defaultPinyinWorker() (*pinyin.Worker, error) {
-	helper, err := pinyin.HelperPath()
-	if err != nil {
-		return nil, err
-	}
-	return pinyin.NewProcessWorker(helper)
+	return pinyin.NewLocalWorker(), nil
 }
 
 func (e *Editor) startCJK() {
@@ -240,7 +236,7 @@ func (e *Editor) cjkKey(key string) bool {
 }
 
 // Only an explicit, successful ]]] exit removes the delimiters. Escape,
-// navigation, missing/crashed helpers and other cancellation keep the trace.
+// navigation, decoder failures and other cancellation keep the trace.
 func (e *Editor) finishCJK(c *cjkInput) {
 	b, end := e.buffer(), e.pos()
 	if c.openAt < 0 || end < c.openAt+6 || end > len(b.text) || string(b.text[c.openAt:c.openAt+3]) != "[[[" || string(b.text[end-3:end]) != "]]]" {

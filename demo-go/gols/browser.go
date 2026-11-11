@@ -474,33 +474,23 @@ func (browser *Browser) toggleNavigationPin() {
 func (browser *Browser) searchPrompt() {
 	browser.clearDocumentSearch()
 	line := readline.New("Search: ", 8, 4104)
+	defer line.Close()
 	line.SetHistory(browser.searchHistory)
 	fmt.Fprint(browser.out, "\x1b[?25h")
 	defer func() {
 		fmt.Fprint(browser.out, "\x1b[?25l")
 		browser.out.Flush()
 	}()
-	for {
-		browser.drawInputPrompt(line)
-		character, status := browser.in.readByte(100 * time.Millisecond)
-		if status == inTimeout {
-			browser.processSignals()
-			if !browser.running {
-				return
-			}
-			continue
+	apply := func(result readline.Result) bool {
+		if result.Err != nil {
+			browser.status = result.Err.Error()
 		}
-		if status == inEOF {
-			browser.running = false
-			return
-		}
-		result := browser.editInputByte(line, character)
 		if result.Submit {
 			value := strings.TrimSpace(line.Text()[8:])
 			if value == "" {
 				browser.status = "Search cancelled"
 				browser.renderAll()
-				return
+				return true
 			}
 			corpusIndex := -1
 			if browser.view.corpusIndex >= 0 {
@@ -512,11 +502,34 @@ func (browser *Browser) searchPrompt() {
 				browser.searchHistory = browser.searchHistory[1:]
 			}
 			browser.setView(viewState{kind: viewSearch, corpusIndex: corpusIndex, query: value})
-			return
+			return true
 		}
 		if result.Cancel {
 			browser.status = "Search cancelled"
 			browser.renderAll()
+			return true
+		}
+		return false
+	}
+	for {
+		browser.drawInputPrompt(line)
+		character, status := browser.in.readByte(100 * time.Millisecond)
+		if status == inTimeout {
+			if apply(line.Poll()) {
+				return
+			}
+			browser.processSignals()
+			if !browser.running {
+				return
+			}
+			continue
+		}
+		if status == inEOF {
+			browser.running = false
+			return
+		}
+		result := browser.editInputByte(line, character)
+		if apply(result) {
 			return
 		}
 	}
@@ -708,9 +721,20 @@ func (browser *Browser) mouseEvent(code, x, y int, final byte) {
 
 func (browser *Browser) loop() {
 	browser.running = true
+	defer func() {
+		if browser.searchLine != nil {
+			browser.searchLine.Close()
+		}
+	}()
 	for browser.running {
 		browser.processSignals()
 		browser.expireDocumentSearch(time.Now())
+		if browser.searchLine != nil {
+			result := browser.searchLine.Poll()
+			if result.Handled || result.Err != nil {
+				browser.applySearchPromptResult(result)
+			}
+		}
 		if browser.resized {
 			browser.resized = false
 			browser.status = "Resized"

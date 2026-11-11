@@ -321,8 +321,12 @@ func (browser *Browser) drawPrompt(prompt string) {
 	browser.out.Flush()
 }
 func (browser *Browser) drawInputPrompt(line *readline.Line) {
-	shown, cursor := line.View(max(1, browser.cols-3), readline.CellWidth)
-	fmt.Fprintf(browser.out, "\x1b[%d;1H%s%*s\x1b[%d;2H%s%s\x1b[%d;%dH", browser.rows, statusStyle, browser.cols, "", browser.rows, shown, resetStyle, browser.rows, cursor+2)
+	display := line.ViewDisplay(max(1, browser.cols-3), readline.CellWidth)
+	fmt.Fprintf(browser.out, "\x1b[%d;1H%s%*s\x1b[%d;2H%s", browser.rows, statusStyle, browser.cols, "", browser.rows, display.Before)
+	if display.Candidates != "" {
+		fmt.Fprintf(browser.out, "\x1b[38;5;220m%s%s", display.Candidates, statusStyle)
+	}
+	fmt.Fprintf(browser.out, "%s%s\x1b[%d;%dH", display.After, resetStyle, browser.rows, display.Cursor+2)
 	browser.out.Flush()
 }
 

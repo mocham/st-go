@@ -18,10 +18,12 @@ require (
 	github.com/d2lang/mathjax-go v0.1.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
+	st-go/googlepinyin v0.0.0 // indirect
 )
 
 replace (
 	github.com/mocham/GoLS/latexpdf => ../../functionalities/latexpdf
+	st-go/googlepinyin => ../../functionalities/googlepinyin
 	st-go/limits => ../../functionalities/limits
 	st-go/pdfmeta => ../../functionalities/pdfmeta
 	st-go/platform_neutral/api => ../../platform_neutral/api

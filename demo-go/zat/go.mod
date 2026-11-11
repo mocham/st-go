@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	st-go/googlepinyin v0.0.0 // indirect
 	st-go/platform_neutral/api v0.0.0 // indirect
 	st-go/platform_neutral/stterminal v0.0.0 // indirect
 )
@@ -21,6 +22,7 @@ require (
 replace (
 	github.com/mocham/GoLS/latexpdf => ../../functionalities/latexpdf
 	st-go/config => ../../functionalities/config
+	st-go/googlepinyin => ../../functionalities/googlepinyin
 	st-go/limits => ../../functionalities/limits
 	st-go/pdfmeta => ../../functionalities/pdfmeta
 	st-go/platform_neutral/api => ../../platform_neutral/api

@@ -359,8 +359,8 @@ F5 expands a standalone environment name (or a package in the preamble).
 Ctrl-J consumes the next <++> stop. Enter remains a newline.
 CJK INSERT: [[[ starts Pinyin; +/- pages; 1..5 chooses; ]]] ends.
 Normal ]]] removes both triples; Escape/failure keeps them for recovery.
-Candidates appear in the command row. A helper is spawned only on demand.
-govim-pinyind uses a bounded pure-Go decoder; typed spelling survives failures.
+Candidates appear in the command row; lookup starts in process only on demand.
+Pinyin uses a bounded pure-Go decoder; typed spelling survives failures.
 
 PREVIEW: LaTeX/Markdown opens st-go's retained right panel automatically.
 Save to refresh; %cursor wins, otherwise follow the cursor saved with :w.

@@ -21,6 +21,9 @@ func (e *Editor) beginPrompt(value string) {
 	e.syncPrompt()
 }
 func (e *Editor) cancelPrompt() {
+	if e.promptEditor != nil {
+		e.promptEditor.Close()
+	}
 	e.prompt = ""
 	e.promptCursor, e.promptView = 0, 0
 	e.substitute = nil
@@ -40,8 +43,16 @@ func (e *Editor) promptKey(key string) {
 	if e.prompt == "" {
 		return
 	}
-	result := e.promptEditor.Handle(key)
+	e.applyPromptResult(e.promptEditor.Handle(key))
+}
+func (e *Editor) applyPromptResult(result readline.Result) {
+	if e.prompt == "" || e.promptEditor == nil {
+		return
+	}
 	e.syncPrompt()
+	if result.Changed || result.DisplayChanged {
+		e.dirty = true
+	}
 	if result.Err != nil {
 		e.error(result.Err)
 	}
@@ -75,11 +86,25 @@ func (e *Editor) promptKey(key string) {
 	}
 	e.reset()
 }
+
+func (e *Editor) pollPrompt() {
+	if e.prompt != "" && e.promptEditor != nil {
+		e.applyPromptResult(e.promptEditor.Poll())
+	}
+}
 func (e *Editor) promptLine(width int) (string, int) {
 	if e.prompt == "" {
 		return "", 0
 	}
-	text, cursor := e.promptEditor.View(width, runeCells)
+	display := e.promptEditor.ViewDisplay(width, runeCells)
 	e.syncPrompt()
-	return text, cursor
+	return display.Before + display.Candidates + display.After, display.Cursor
+}
+func (e *Editor) promptDisplay(width int) readline.Display {
+	if e.prompt == "" {
+		return readline.Display{}
+	}
+	display := e.promptEditor.ViewDisplay(width, runeCells)
+	e.syncPrompt()
+	return display
 }
