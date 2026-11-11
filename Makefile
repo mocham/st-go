@@ -33,13 +33,13 @@ FT_A        = $(FT_DIR)/libfreetype.a
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
-BINARY_NAMES = st st-min st-pdf st-web st-fb file-browser gols vimtex zat zat-djvu goiv govim
+BINARY_NAMES = st st-min st-pdf st-web st-fb file-browser gols vimtex zat zat-djvu goiv govim opencode-tui
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
-DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gols demo-go/govim demo-go/vimtex demo-go/zat $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/vimtex demo-go/zat $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
 MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
 CFG         = functionalities/config/config.json
@@ -77,6 +77,7 @@ ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat
 	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
 GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
 GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
+OPENCODE_TUI_GO_SRC = $(wildcard demo-go/opencode-tui/*.go functionalities/tui/preview/*.go) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # Static C++/Splash rendering, including embedded JPEG images through libjpeg.
@@ -435,6 +436,10 @@ $(OUTPUT_DIR)/goiv: $(GOIV_GO_SRC)
 # Native Go TUI editor, with terminal clipboard protocol and recovery journal.
 $(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/govim build -trimpath -o $(abspath $@) .
+
+# OpenCode V2 API client with a retained Markdown/LaTeX response pane.
+$(OUTPUT_DIR)/opencode-tui: $(OPENCODE_TUI_GO_SRC)
+	CGO_ENABLED=0 go -C demo-go/opencode-tui build -trimpath -o $(abspath $@) .
 
 # --- dummy objects (no-op stubs for dropped libraries) --------------------
 $(DUMMY_DIR)/dummy-pdf.o: third_party_wrapper/dummy-pdf.c

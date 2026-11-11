@@ -23,6 +23,8 @@ const (
 	systemBarVolumeUpIcon       = byte(0x85)
 	systemBarBrightnessDownIcon = byte(0x86)
 	systemBarBrightnessUpIcon   = byte(0x87)
+	systemBarScreenshotIcon     = byte(0x88)
+	systemBarCropIcon           = byte(0x89)
 )
 
 const (
@@ -67,6 +69,8 @@ type systemBar struct {
 	brightnessOptimistic  bool
 	brightnessDownLeft    int
 	brightnessUpLeft      int
+	screenshotLeft        int
+	screenshotRight       int
 	clipboardLeft         int
 	clipboardRight        int
 }
@@ -115,6 +119,7 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	brightnessLevel, brightnessMaximum := b.brightnessLevel, b.brightnessMaximum
 	brightnessKnown, brightnessOptimistic := b.brightnessValid, b.brightnessOptimistic
 	overrideMode, overrideValid := b.audioMode, b.audioModeValid
+	screenshotActive := d.screenshot.stage != screenshotIdle
 	d.mu.Unlock()
 	if !brightnessOptimistic && readBrightness != nil {
 		brightnessLevel, brightnessMaximum, brightnessKnown = readBrightness()
@@ -151,6 +156,14 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 		brightnessUpLeft = len(text)
 		text += string([]byte{systemBarBrightnessUpIcon})
 	}
+	text += "  "
+	screenshotLeft := len(text)
+	if screenshotActive {
+		text += string([]byte{systemBarCropIcon})
+	} else {
+		text += string([]byte{systemBarScreenshotIcon})
+	}
+	screenshotRight := len(text)
 	audioLeft := -1
 	displayMode, displayKnown := 0, false
 	if output != nil {
@@ -196,6 +209,8 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	b.volumeUpLeft = -1
 	b.brightnessDownLeft = -1
 	b.brightnessUpLeft = -1
+	b.screenshotLeft = -1
+	b.screenshotRight = -1
 	b.clipboardLeft = -1
 	b.clipboardRight = -1
 	if audioLeft >= 0 {
@@ -209,6 +224,8 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 		b.brightnessDownLeft = b.textLeft + brightnessDownLeft*systemBarFontCellWidth
 		b.brightnessUpLeft = b.textLeft + brightnessUpLeft*systemBarFontCellWidth
 	}
+	b.screenshotLeft = b.textLeft + screenshotLeft*systemBarFontCellWidth
+	b.screenshotRight = b.textLeft + screenshotRight*systemBarFontCellWidth
 	if clipboardLeft >= 0 {
 		b.clipboardLeft = b.textLeft + clipboardLeft*systemBarFontCellWidth
 		b.clipboardRight = b.textLeft + clipboardRight*systemBarFontCellWidth
@@ -253,6 +270,15 @@ func (d *Driver) systemBarClick(x, y int) {
 	point := image.Pt(x+b.bounds.Min.X, y+b.bounds.Min.Y)
 	if !point.In(b.bounds) {
 		d.mu.Unlock()
+		return
+	}
+	screenshot := b.screenshotLeft >= 0 && point.X >= b.screenshotLeft && point.X < b.screenshotRight
+	if screenshot {
+		d.screenshot.stage = screenshotFirstPoint
+		d.screenshot.first = image.Point{}
+		b.nextRefresh = time.Time{}
+		d.mu.Unlock()
+		d.refreshSystemBar(time.Now())
 		return
 	}
 	down := b.volumeDownLeft >= 0 && point.X >= b.volumeDownLeft && point.X < b.volumeDownLeft+systemBarFontCellWidth

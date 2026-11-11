@@ -115,6 +115,13 @@ The bundled sources are `square-check.svg`, regular `square.svg`,
 `headphones.svg`, `battery-three-quarters.svg`, `volume-low.svg`, and
 `volume-high.svg`, `circle-half-stroke.svg`, and `sun.svg` from the Font Awesome
 Free 6.x SVG tree.
+
+The camera button starts a crop screenshot and changes to a crop-corner icon
+while active. The next two left clicks select opposite pixel corners; those
+clicks are consumed instead of reaching terminal applications. The resulting
+crop excludes the pointer and is atomically written as a private PNG to
+`/tmp/screenshot.png` when that location is writable.
+
 The switch matches `TEST-ASSETS/plugin-snd.c`: it uses the `Headphone` and
 `Speaker` playback switches on the highest of the first two discovered cards,
 muting one before unmuting the other. Set `ST_GO_AUDIO_OUTPUT_CARD=0` to override

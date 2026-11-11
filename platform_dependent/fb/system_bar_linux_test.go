@@ -102,7 +102,7 @@ func TestSystemBarLocalDateTimeAndOptionalBattery(t *testing.T) {
 			t.Fatalf("missing glyph %q", ch)
 		}
 	}
-	for _, icon := range []byte{systemBarBatteryIcon, systemBarVolumeDownIcon, systemBarVolumeUpIcon, systemBarBrightnessDownIcon, systemBarBrightnessUpIcon} {
+	for _, icon := range []byte{systemBarBatteryIcon, systemBarVolumeDownIcon, systemBarVolumeUpIcon, systemBarBrightnessDownIcon, systemBarBrightnessUpIcon, systemBarScreenshotIcon, systemBarCropIcon} {
 		glyph := systemBarIcons[icon]
 		ink := false
 		for _, pixel := range glyph {
@@ -332,7 +332,7 @@ func TestSystemBarRefreshIntervalAndShrinkingDamage(t *testing.T) {
 		t.Fatal("system bar refreshed before 30 seconds elapsed")
 	}
 	d.refreshSystemBar(now.Add(30 * time.Second))
-	if !bytes.HasSuffix([]byte(d.systemBar.text), []byte{systemBarBatteryIcon, ' ', '9', '%'}) || d.systemBar.bounds.Min.X <= oldBounds.Min.X {
+	if !bytes.Contains([]byte(d.systemBar.text), []byte{systemBarBatteryIcon, ' ', '9', '%'}) || d.systemBar.bounds.Min.X <= oldBounds.Min.X {
 		t.Fatal("system bar did not refresh/shrink on its deadline")
 	}
 	if pixelAt(d, oldBounds.Min.X, oldBounds.Min.Y) != 0x446688 {
@@ -358,7 +358,7 @@ func TestSystemBarInactiveVTReacquireAndClosedSuppression(t *testing.T) {
 	before := slices.Clone(d.screen.memory)
 	writePowerSupply(t, root, "BAT0", map[string]string{"capacity": "72"})
 	d.refreshSystemBar(now.Add(systemBarInterval))
-	if !bytes.Equal(before, d.screen.memory) || !bytes.HasSuffix([]byte(d.systemBar.text), []byte{systemBarBatteryIcon, ' ', '7', '2', '%'}) {
+	if !bytes.Equal(before, d.screen.memory) || !bytes.Contains([]byte(d.systemBar.text), []byte{systemBarBatteryIcon, ' ', '7', '2', '%'}) {
 		t.Fatal("inactive update wrote scanout or lost new system information")
 	}
 	d.console = &console{fd: -1, number: 1, ops: consoleOps{
@@ -457,7 +457,7 @@ func TestSystemBarRefreshesInRunWithoutApplicationDamage(t *testing.T) {
 		for {
 			select {
 			case text := <-updates:
-				if strings.HasSuffix(text, want) {
+				if strings.Contains(text, want) {
 					return
 				}
 			case <-deadline:

@@ -48,7 +48,59 @@ func loadSystemBarIcons() map[byte][]uint32 {
 		}
 		icons[kind] = glyph
 	}
+	icons[systemBarScreenshotIcon] = systemBarCameraGlyph()
+	icons[systemBarCropIcon] = systemBarCropGlyph()
 	return icons
+}
+
+func blankSystemBarIcon() []uint32 {
+	glyph := make([]uint32, systemBarFontCellWidth*systemBarFontCellHeight)
+	for i := range glyph {
+		glyph[i] = systemBarBackground
+	}
+	return glyph
+}
+
+func systemBarIconLine(glyph []uint32, x0, y0, x1, y1 int) {
+	for y := max(0, y0); y < min(systemBarFontCellHeight, y1); y++ {
+		for x := max(0, x0); x < min(systemBarFontCellWidth, x1); x++ {
+			glyph[y*systemBarFontCellWidth+x] = systemBarForeground
+		}
+	}
+}
+
+func systemBarCameraGlyph() []uint32 {
+	glyph := blankSystemBarIcon()
+	// Camera body, viewfinder bump, and lens. These are kept procedural so the
+	// framebuffer build does not acquire another font or icon dependency.
+	systemBarIconLine(glyph, 1, 11, 20, 14)
+	systemBarIconLine(glyph, 1, 14, 4, 28)
+	systemBarIconLine(glyph, 17, 14, 20, 28)
+	systemBarIconLine(glyph, 1, 25, 20, 28)
+	systemBarIconLine(glyph, 7, 7, 14, 11)
+	for y := 14; y < 25; y++ {
+		for x := 5; x < 16; x++ {
+			distance := (x-10)*(x-10) + (y-19)*(y-19)
+			if distance >= 12 && distance <= 28 {
+				glyph[y*systemBarFontCellWidth+x] = systemBarForeground
+			}
+		}
+	}
+	return glyph
+}
+
+func systemBarCropGlyph() []uint32 {
+	glyph := blankSystemBarIcon()
+	// Four open corners distinguish capture mode from the idle camera.
+	for _, line := range [][4]int{
+		{2, 7, 10, 10}, {2, 7, 5, 16},
+		{12, 7, 20, 10}, {17, 7, 20, 16},
+		{2, 25, 10, 28}, {2, 19, 5, 28},
+		{12, 25, 20, 28}, {17, 19, 20, 28},
+	} {
+		systemBarIconLine(glyph, line[0], line[1], line[2], line[3])
+	}
+	return glyph
 }
 
 func loadSystemBarGlyphs() [128][]uint32 {

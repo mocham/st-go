@@ -28,6 +28,7 @@ The sibling `demo-go` module contains architecture/dependency guards only.
 
 | Application | Guide |
 | --- | --- |
+| Minimal OpenCode V2 chat client with a retained Markdown/LaTeX response pane | [opencode-tui](opencode-tui/README.md) |
 | Native Go modal editor, recovery journals, retained document preview, and lazy CJK input | [govim](govim/README.md), [roadmap](govim/ROADMAP.md), [Pinyin frontend](../functionalities/googlepinyin/README.md) |
 | Real Vim with a saved-document LaTeX preview | [vimtex](vimtex/README.md) |
 | Native, smoothly scrolling PDF viewer | [zat](zat/README.md), [performance notes](zat/PERFORMANCE.md) |

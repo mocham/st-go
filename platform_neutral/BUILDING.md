@@ -26,7 +26,8 @@ make distclean  # removes binaries and downloaded/built third_party/ files
 ```
 
 Generated executables live in **`BINARIES/`**, which is gitignored. Targets such
-as `make st`, `make govim`, and `make file-browser` keep their familiar names.
+as `make st`, `make govim`, `make opencode-tui`, and `make file-browser` keep
+their familiar names.
 To make the demo tools available by name, including default file-browser openers:
 
 ```sh

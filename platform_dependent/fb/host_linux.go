@@ -82,6 +82,7 @@ type Driver struct {
 	grabMouse               bool
 	lastScan                time.Time
 	buttonCounts            [12]int
+	screenshot              screenshotState
 	mouseFailures           map[string]string
 	nativeJobs              chan nativeVideoJob
 	nativeBusy              bool
@@ -164,7 +165,26 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 	return d, nil
 }
 
-func (d *Driver) Bind(c api.Callbacks)          { d.callbacks = c }
+func (d *Driver) Bind(c api.Callbacks) {
+	press, release := c.PointerPress, c.PointerRelease
+	c.PointerPress = func(button byte, modifiers uint16, x, y int) {
+		if d.screenshotPress(button, image.Pt(x, y)) {
+			return
+		}
+		if press != nil {
+			press(button, modifiers, x, y)
+		}
+	}
+	c.PointerRelease = func(button byte, modifiers uint16, x, y int) {
+		if d.screenshotRelease(button) {
+			return
+		}
+		if release != nil {
+			release(button, modifiers, x, y)
+		}
+	}
+	d.callbacks = c
+}
 func (d *Driver) BackendName() string           { return "fb" }
 func (d *Driver) SetupKeys()                    {}
 func (d *Driver) SetTitle(string)               {}
