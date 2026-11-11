@@ -94,6 +94,13 @@ generated Go source; `make st-fb` regenerates it when its inputs change. Drawing
 remains pure Go and needs no system fonts or packages. No terminal rows are
 reserved until tabs initialize; then the tab band shares its height, with fixed
 20-cell tab labels to the left so neither clock nor tab controls cover each other.
+On narrow screens, the tab strip sits above the system bar instead.
+The **terminal-plus button** beside the camera opens and selects a new shell
+terminal tab. Its first click initializes the tab bar, keeping the existing
+terminal as tab 1; subsequent clicks append tabs. It uses normal shell selection
+(`$SHELL`, login shell, then configured shell) and the terminal's startup working
+directory. The button is available when terminal tabs are enabled (the default
+build; omit `-no-tabs`).
 The bar does not change application input or `BAR_DATA`.
 
 The same 30-second refresh also checks the ALSA mixer output selector, showing a

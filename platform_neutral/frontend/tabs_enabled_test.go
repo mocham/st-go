@@ -18,13 +18,20 @@ import (
 	"st-go/widgets"
 )
 
+type tabButtonTestHost struct {
+	*web.Driver
+	newTerminalTab func()
+}
+
+func (host *tabButtonTestHost) BindNewTerminalTab(handler func()) { host.newTerminalTab = handler }
+
 func tabTestTerminal(t *testing.T) (*Terminal, *terminalTabs, *bytes.Buffer) {
 	t.Helper()
 	d, err := web.New(api.WindowOptions{Cols: 40, Rows: 10, CellWidth: 4, CellHeight: 8, Border: 1}, web.Options{Port: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := widgets.Wrap(d)
+	w, err := widgets.Wrap(&tabButtonTestHost{Driver: d})
 	if err != nil {
 		d.Close()
 		t.Fatal(err)
@@ -188,6 +195,74 @@ func TestFailedTabSpawnDoesNotInitializeOrResize(t *testing.T) {
 	}
 }
 
+func TestNewTerminalButtonInitializesTabsAndOpensIndependentShells(t *testing.T) {
+	root, m, replies := tabTestTerminal(t)
+	button := widgets.Unwrap(root.host).(*tabButtonTestHost).newTerminalTab
+	if button == nil {
+		t.Fatal("native new-terminal button was not bound")
+	}
+	original, bounds := root.termCore, root.Widget().Bounds()
+	t.Setenv("SHELL", "/nonexistent/st-go-shell-test")
+	button()
+	tabWindow(t, m, func() {
+		if m.bar != nil || len(m.entries) != 1 || root.Widget().Bounds() != bounds {
+			t.Error("failed shell launch changed the original terminal")
+		}
+	})
+	directory := t.TempDir()
+	shell, marker := filepath.Join(directory, "shell"), filepath.Join(directory, "started")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf '%s|%s\\n' \"$PWD\" \"$ST_GO_TABS\" >> \"$ST_GO_TEST_SHELL_MARKER\"\nIFS= read -r line\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+	t.Setenv("ST_GO_TEST_SHELL_MARKER", marker)
+	pids := make(map[int]bool)
+	for count := 2; count <= 3; count++ {
+		button()
+		tabWindow(t, m, func() {
+			if m.bar == nil || len(m.entries) != count || m.active != count-1 || root.termCore != original {
+				t.Error("button did not append and select a tab while preserving the original PTY")
+				return
+			}
+			child := m.entries[m.active].terminal
+			if !child.Widget().Visible() || root.Widget().Visible() || child.session.child.Path != shell || pids[child.session.child.Process.Pid] {
+				t.Error("new tab did not get an independent, focused shell")
+			}
+			pids[child.session.child.Process.Pid] = true
+		})
+	}
+	// The window-owned button must still work after the original tab closes.
+	root.closeSession()
+	button()
+	tabWindow(t, m, func() {
+		if len(m.entries) != 3 || m.active != 2 || m.entries[m.active].terminal.closed() {
+			t.Error("closing tab 1 disabled the native new-terminal button")
+		}
+	})
+	root.mu.Lock()
+	reply := replies.String()
+	root.mu.Unlock()
+	if reply != "" {
+		t.Fatal("native button wrote a protocol reply into the original PTY", reply)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(cwd+"|1\n", 3)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		data, err := os.ReadFile(marker)
+		if err == nil && string(data) == want {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shells did not start with the normal cwd and tab environment", string(data), err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestTabsFocusSuccessfulLaunchAndKeepFixedWidthLabels(t *testing.T) {
 	root, m, _ := tabTestTerminal(t)
 	request := api.TabSpawnRequest{Command: []string{"/bin/bash", "-c", "IFS= read -r key"}, Directory: t.TempDir(), Title: "document"}
@@ -262,6 +337,30 @@ func TestTabsShareBottomBandWithPassiveSystemBar(t *testing.T) {
 	tabWindow(t, m, func() {
 		if m.bar.Bounds().Max.X != m.control.WindowBounds().Dx() || m.bar.Bounds().Dy() != m.renderer.ch+4 {
 			t.Error("hidden system bar still reserved tab space", m.bar.Bounds())
+		}
+	})
+}
+
+func TestNewTerminalButtonKeepsTabsUsableBesideFullWidthSystemBar(t *testing.T) {
+	root, m, _ := tabTestTerminal(t)
+	t.Setenv("SHELL", "/bin/sh")
+	var passive api.Widget
+	tabWindow(t, m, func() {
+		bounds := m.control.WindowBounds()
+		var err error
+		passive, err = m.container.NewWidget(api.WidgetOptions{Kind: api.BarWidget, Bounds: image.Rect(0, bounds.Dy()-24, bounds.Dx(), bounds.Dy()), Passive: true})
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	widgets.Unwrap(root.host).(*tabButtonTestHost).newTerminalTab()
+	tabWindow(t, m, func() {
+		if m.bar == nil || len(m.entries) != 2 || m.active != 1 {
+			t.Error("full-width system bar prevented a new terminal")
+			return
+		}
+		if m.bar.Bounds().Max.Y != passive.Bounds().Min.Y || m.bar.Bounds().Dx() != passive.Bounds().Dx() || m.entries[1].widget.Bounds().Max.Y != m.bar.Bounds().Min.Y || len(m.hits) == 0 {
+			t.Error("narrow layout did not put usable tab controls above the system bar")
 		}
 	})
 }

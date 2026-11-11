@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"st-go/limits"
+	"st-go/platform_neutral/api"
 	term "st-go/platform_neutral/stterminal"
 )
 
@@ -49,6 +50,7 @@ type regionReply struct {
 }
 
 type regionSurface struct {
+	html                  api.HTMLView
 	list                  *regionListSurface
 	listSelected          int
 	request               *term.RegionImage
@@ -329,6 +331,7 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 		surface.seekPage = nil
 	}
 	surface.request = &request
+	surface.html = api.HTMLView{}
 	surface.search, surface.pendingSearch = nil, nil
 	surface.searchAnchored = false
 	surface.dirty = true
@@ -348,6 +351,10 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 func (t *Terminal) ClearRegion(id term.RegionID) error {
 	t.displayRegions.mu.Lock()
 	defer t.displayRegions.mu.Unlock()
+	return t.clearRegion(id)
+}
+
+func (t *Terminal) clearRegion(id term.RegionID) error {
 	if t.termCore != nil {
 		t.displayRegions.paused = t.termCore.IsPaintPaused()
 	}
@@ -359,6 +366,7 @@ func (t *Terminal) ClearRegion(id term.RegionID) error {
 	t.displayRegions.documentRevision++
 	t.cancelRegionDecode()
 	surface.request = nil
+	surface.html = api.HTMLView{}
 	surface.list = nil
 	t.displayRegions.listPreview = nil
 	t.displayRegions.listVisible = nil
@@ -907,6 +915,24 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 	}
 	if event.Value < -limits.MaxBytes || event.Value > limits.MaxBytes || (event.Kind == "seek" && event.Value < 1) {
 		return fmt.Errorf("invalid region navigation event")
+	}
+	if surface.html.Document != nil {
+		switch event.Kind {
+		case "position":
+			if event.Value < 0 || event.Value > 1000000 {
+				return fmt.Errorf("invalid HTML position")
+			}
+			surface.html.PositionID++
+			surface.html.Position = event.Value
+			surface.html.Scroll = 0
+		case "scroll":
+			surface.html.Scroll += event.Value
+		default:
+			return fmt.Errorf("unsupported HTML navigation")
+		}
+		surface.dirty = true
+		t.requestRegionPaint()
+		return nil
 	}
 	if surface.list != nil {
 		switch event.Kind {

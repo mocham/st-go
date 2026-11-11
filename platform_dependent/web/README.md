@@ -37,19 +37,63 @@ images/PDFs, and retained previews use the same terminal engine and
 * This driver owns HTTP/WebSocket input decoding, a copied retained pixel
   buffer, retained `api.Surface` panes and browser presentation. It invokes
   uniform callbacks under the frontend lock, never importing frontend internals.
-* The browser receives PNG **damage rectangles**, not a second interpretation of
-  ANSI. A binary frame is `STW1`, six little-endian uint32 values (canvas width,
-  canvas height, x, y, patch width, patch height), then a PNG. Separate dirty
-  rows stay separate; a bounded backlog may collapse to a full refresh. Retained
-  preview panes are composited over underlying terminal updates.
+* The browser caches **rendered glyph cells** and receives compact glyph-ID draws
+  for repeated cells, alongside PNG **damage rectangles** for uncached pixels.
+  FreeType rendering remains server-side; the browser does not interpret ANSI.
+  Exact opaque pixel comparisons include colors, font changes, selection and
+  composited overlays. Wide glyphs occupy two cached cells. Only whole cells
+  reused at different positions are admitted, so repainting an image in place
+  does not turn its tiles into glyph definitions;
+  adjacent identical glyphs use a single repeated-ID run.
+* `STW1` is followed by six little-endian uint32 values (canvas width, canvas
+  height, x, y, patch width, patch height), then a PNG. `STG1` is followed by
+  canvas width, canvas height and operation count, then ordered operations:
+  `0` clears the glyph cache; `2,id,x,y,count` draws a horizontal run;
+  `3,firstID,count,cellWidth,cellHeight,columns,length,PNG` defines consecutive
+  glyph IDs in one row-major PNG atlas. Every integer is uint32 little-endian.
+  The browser decodes each atlas once and draws glyphs from source rectangles.
+  Subsequent draws contain no PNG. Both peers bound the cache (including atlas
+  padding) to 32 MiB of pixels and 16,384 entries. A presentation admits at most
+  256 new glyphs; fragmented fallback damage collapses after four PNG patches.
+* Glyph caches are connection-local and rebuilt on reconnect. Viewport resizing
+  preserves cached bitmaps; definitions/resets from obsolete-size frames still
+  apply, while their screen draws are discarded. Separate dirty rows stay
+  separate; bounded damage fragmentation may collapse to a PNG refresh.
+  Retained preview panes are composited over underlying terminal updates.
 * Input/control messages are bounded JSON. PNG encoding and network writes do
   not hold the terminal lock. Async browser image decoding commits in wire order.
+  The browser opts into flow control with `{"type":"paint_ack","id":0}`.
+  Each presentation ends with `{"type":"paint","id":N}`; the browser returns
+  `paint_ack` for N after queued paints complete. Only one presentation remains
+  in flight, so slow decoding coalesces newer damage on the server instead of
+  building a browser backlog. Input and clipboard controls continue meanwhile.
 * One browser controls the one server session. Disconnecting leaves its PTY
   alive; reconnecting gets a full snapshot. Idle heartbeats expire vanished
   attachments after 90 seconds. Slow writes time out after five seconds.
 * Titles/icon titles and `BAR_DATA` are ignored. Browser viewport resizing
   updates terminal pixel/grid dimensions; desktop placement/collapse/restore is
   deliberately unsupported.
+
+## Browser-native document previews
+
+```sh
+make st-web govim
+./BINARIES/st-web -e ./BINARIES/govim --web notes.md
+```
+
+`govim --web` reserves the normal preview region and emits
+`DCS region secondary html BASE64 ST`, whose payload is UTF-8 JSON
+`{"html":"…","css":"…"}`. The browser displays it in an absolutely positioned
+HTML iframe matching that retained surface's bounds. Markdown/LaTeX uses semantic
+HTML and inline SVG mathematics; HTML files render directly, and CSS/JSON files
+use escaped source views. No preview PDF is created or rasterized.
+
+The iframe has isolated styling and scripts disabled. It supports native text
+selection and scrolling; Esc returns keyboard focus to the editor. Content and
+geometry survive viewport changes and reconnects; hiding a tab or closing the
+region removes its overlay. `region secondary position` and `scroll` navigate
+the HTML document. Framebuffer and X11 discard HTML content, leaving the reserved
+preview blank. Payloads must fit the terminal's 1 MiB DCS control budget.
 
 Clipboard text stays terminal-owned. Selection/OSC 52 writes make the toolbar's
 Copy action available, rather than attempting unsolicited browser clipboard
@@ -90,6 +134,7 @@ provide basic alternatives. HTTP outside loopback may disable Clipboard APIs.
 
 ```sh
 go test -race ./platform_dependent/web
+go test ./platform_dependent/web -run '^$' -bench BenchmarkWebDamage -benchmem
 make test                 # includes built-server PTY/cwd/input/image regression
 make test-web-browser     # optional: Node >=22 and Chromium; no npm packages
 ```

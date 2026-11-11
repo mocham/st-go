@@ -8,6 +8,7 @@ require (
 	golang.org/x/text v0.42.0
 	st-go/config v0.0.0
 	st-go/limits v0.0.0
+	st-go/platform_neutral/api v0.0.0
 	st-go/ptyutil v0.0.0
 	st-go/term v0.0.0
 	st-go/tui v0.0.0
@@ -22,7 +23,6 @@ require (
 	golang.org/x/net v0.60.0 // indirect
 	st-go/googlepinyin v0.0.0 // indirect
 	st-go/pdfmeta v0.0.0 // indirect
-	st-go/platform_neutral/api v0.0.0 // indirect
 	st-go/platform_neutral/stterminal v0.0.0 // indirect
 )
 

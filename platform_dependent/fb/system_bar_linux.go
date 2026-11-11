@@ -25,6 +25,7 @@ const (
 	systemBarBrightnessUpIcon   = byte(0x87)
 	systemBarScreenshotIcon     = byte(0x88)
 	systemBarCropIcon           = byte(0x89)
+	systemBarNewTerminalIcon    = byte(0x8a)
 )
 
 const (
@@ -73,6 +74,21 @@ type systemBar struct {
 	screenshotRight       int
 	clipboardLeft         int
 	clipboardRight        int
+	newTerminalTab        func()
+	newTerminalLeft       int
+	newTerminalRight      int
+}
+
+func (d *Driver) BindNewTerminalTab(handler func()) {
+	d.mu.Lock()
+	if d.closed || d.systemBar == nil {
+		d.mu.Unlock()
+		return
+	}
+	d.systemBar.newTerminalTab = handler
+	d.systemBar.nextRefresh = time.Time{}
+	d.mu.Unlock()
+	d.refreshSystemBar(time.Now())
 }
 
 // AttachWidgets gives the passive bar the same identity, local buffer, and
@@ -120,6 +136,7 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	brightnessKnown, brightnessOptimistic := b.brightnessValid, b.brightnessOptimistic
 	overrideMode, overrideValid := b.audioMode, b.audioModeValid
 	screenshotActive := d.screenshot.stage != screenshotIdle
+	showNewTerminal := b.newTerminalTab != nil
 	d.mu.Unlock()
 	if !brightnessOptimistic && readBrightness != nil {
 		brightnessLevel, brightnessMaximum, brightnessKnown = readBrightness()
@@ -164,6 +181,13 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 		text += string([]byte{systemBarScreenshotIcon})
 	}
 	screenshotRight := len(text)
+	newTerminalLeft, newTerminalRight := -1, -1
+	if showNewTerminal {
+		text += "  "
+		newTerminalLeft = len(text)
+		text += string([]byte{systemBarNewTerminalIcon})
+		newTerminalRight = len(text)
+	}
 	audioLeft := -1
 	displayMode, displayKnown := 0, false
 	if output != nil {
@@ -213,6 +237,7 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	b.screenshotRight = -1
 	b.clipboardLeft = -1
 	b.clipboardRight = -1
+	b.newTerminalLeft, b.newTerminalRight = -1, -1
 	if audioLeft >= 0 {
 		b.audioLeft = b.textLeft + audioLeft*systemBarFontCellWidth
 	}
@@ -229,6 +254,10 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	if clipboardLeft >= 0 {
 		b.clipboardLeft = b.textLeft + clipboardLeft*systemBarFontCellWidth
 		b.clipboardRight = b.textLeft + clipboardRight*systemBarFontCellWidth
+	}
+	if newTerminalLeft >= 0 {
+		b.newTerminalLeft = b.textLeft + newTerminalLeft*systemBarFontCellWidth
+		b.newTerminalRight = b.textLeft + newTerminalRight*systemBarFontCellWidth
 	}
 	b.pixels = make([]uint32, b.bounds.Dx()*b.bounds.Dy())
 	for y := b.bounds.Min.Y; y < b.bounds.Max.Y; y++ {
@@ -270,6 +299,12 @@ func (d *Driver) systemBarClick(x, y int) {
 	point := image.Pt(x+b.bounds.Min.X, y+b.bounds.Min.Y)
 	if !point.In(b.bounds) {
 		d.mu.Unlock()
+		return
+	}
+	if b.newTerminalTab != nil && b.newTerminalLeft >= 0 && point.X >= b.newTerminalLeft && point.X < b.newTerminalRight {
+		open := b.newTerminalTab
+		d.mu.Unlock()
+		open()
 		return
 	}
 	screenshot := b.screenshotLeft >= 0 && point.X >= b.screenshotLeft && point.X < b.screenshotRight

@@ -11,24 +11,26 @@ import (
 )
 
 type serverMessage struct {
-	Type          string `json:"type"`
-	Width         int    `json:"width,omitempty"`
-	Height        int    `json:"height,omitempty"`
-	CellWidth     int    `json:"cellWidth,omitempty"`
-	CellHeight    int    `json:"cellHeight,omitempty"`
-	Border        int    `json:"border,omitempty"`
-	Selection     string `json:"selection,omitempty"`
-	Text          string `json:"text,omitempty"`
-	ID            uint64 `json:"id,omitempty"`
-	SyncEnabled   bool   `json:"syncEnabled,omitempty"`
-	SyncReady     bool   `json:"syncReady,omitempty"`
-	SyncAvailable bool   `json:"syncAvailable,omitempty"`
+	Overlays      []htmlOverlay `json:"overlays,omitempty"`
+	Type          string        `json:"type"`
+	Width         int           `json:"width,omitempty"`
+	Height        int           `json:"height,omitempty"`
+	CellWidth     int           `json:"cellWidth,omitempty"`
+	CellHeight    int           `json:"cellHeight,omitempty"`
+	Border        int           `json:"border,omitempty"`
+	Selection     string        `json:"selection,omitempty"`
+	Text          string        `json:"text,omitempty"`
+	ID            uint64        `json:"id,omitempty"`
+	SyncEnabled   bool          `json:"syncEnabled,omitempty"`
+	SyncReady     bool          `json:"syncReady,omitempty"`
+	SyncAvailable bool          `json:"syncAvailable,omitempty"`
 }
 type client struct {
 	conn     *websocket.Conn
 	controls chan serverMessage
 	pressed  map[byte]inputMessage
 	done     chan struct{}
+	paintAck chan uint64
 }
 type clipboardQuery struct {
 	id     uint64
@@ -40,7 +42,7 @@ type clipboardQuery struct {
 func (d *Driver) serveSocket(conn *websocket.Conn) {
 	// JSON may escape each byte of valid clipboard text as six ASCII bytes.
 	conn.MaxPayloadBytes = 6*limits.ClipboardBytes + 16384
-	c := &client{conn: conn, controls: make(chan serverMessage, 4), pressed: make(map[byte]inputMessage), done: make(chan struct{})}
+	c := &client{conn: conn, controls: make(chan serverMessage, 4), pressed: make(map[byte]inputMessage), done: make(chan struct{}), paintAck: make(chan uint64, 16)}
 	d.mu.Lock()
 	select {
 	case <-d.done:
@@ -113,9 +115,13 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 	if sendJSON(c, hello) != nil {
 		return
 	}
+	glyphs := newGlyphEncoder(hello.CellWidth, hello.CellHeight, hello.Border)
 	var clipboardVersion uint64
 	var syncVersion uint64
 	var lastFrame time.Time
+	var sequence, pending uint64
+	var flowControlled bool
+	var htmlVersion uint64
 	// Repaint immediately on attachment, then coalesce bursts at frame cadence.
 	ticker := time.NewTicker(limits.PreviewFrameInterval)
 	defer ticker.Stop()
@@ -130,6 +136,11 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 				return
 			}
 			continue
+		case id := <-c.paintAck:
+			flowControlled = true
+			if id == pending {
+				pending = 0
+			}
 		case <-d.wake:
 		case <-ticker.C:
 		}
@@ -149,22 +160,39 @@ func (d *Driver) writeSocket(c *client, hello serverMessage) {
 			}
 			clipboardVersion = version
 		}
-		if time.Since(lastFrame) < limits.PreviewFrameInterval {
+		if flowControlled && pending != 0 || time.Since(lastFrame) < limits.PreviewFrameInterval {
 			continue
 		}
 		// Snapshot only at a terminal transaction boundary, so a resize or a
 		// multi-span synchronized paint cannot reach the browser half committed.
 		d.callbacks.Lock()
 		frames := d.frames()
+		version, html := d.htmlSnapshot(htmlVersion)
 		d.callbacks.Unlock()
+		if html != nil {
+			if sendJSON(c, *html) != nil {
+				return
+			}
+			htmlVersion = version
+		}
+		budget := maxGlyphDefinitions
 		for _, frame := range frames {
 			lastFrame = time.Now()
-			data, err := encodeFrame(frame)
+			messages, err := glyphs.encodeWithBudget(frame, &budget)
 			if err != nil {
 				return
 			}
-			c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-			if websocket.Message.Send(c.conn, data) != nil {
+			for _, data := range messages {
+				c.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if websocket.Message.Send(c.conn, data) != nil {
+					return
+				}
+			}
+		}
+		if len(frames) != 0 || html != nil {
+			sequence++
+			pending = sequence
+			if sendJSON(c, serverMessage{Type: "paint", ID: sequence}) != nil {
 				return
 			}
 		}

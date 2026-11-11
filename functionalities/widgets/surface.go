@@ -99,6 +99,24 @@ func (s *surface) Present(pixels []uint32, width, height, scrollRows int, reuse 
 	s.presentLocked(pixels, width, height, scrollRows, reuse)
 }
 
+func (s *surface) PresentHTML(generation uint64, view api.HTMLView) bool {
+	w := s.owner.window
+	w.paintMu.Lock()
+	defer w.paintMu.Unlock()
+	current, visible := s.owner.PresentationState()
+	if s.closed || s.hidden || !visible || current != generation {
+		return false
+	}
+	native, ok := s.native.(api.HTMLSurface)
+	if !ok {
+		return false
+	}
+	if view.Document != nil {
+		s.committed = Buffer{}
+	}
+	return native.PresentHTML(0, view)
+}
+
 func (s *surface) PresentIfCurrent(generation uint64, pixels []uint32, width, height, scrollRows int, reuse bool) bool {
 	w := s.owner.window
 	w.paintMu.Lock()

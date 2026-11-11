@@ -52,6 +52,8 @@ type Driver struct {
 	pixels           []uint32
 	textCursor       api.TextCursor
 	surfaces         []*surface
+	nextSurfaceID    uint64
+	htmlVersion      uint64
 	dirty            []image.Rectangle
 	wake             chan struct{}
 	done             chan struct{}
@@ -209,7 +211,7 @@ func (d *Driver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src blob:; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src blob: data:; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'")
 	if !d.validHost(r.Host) {
 		http.Error(w, "invalid host", http.StatusForbidden)
 		return

@@ -93,6 +93,27 @@ Rendering reuses the existing `latexpdf` subset through the backend-neutral
 browser-based Markdown renderer. The panel itself is owned by the terminal
 frontend; govim communicates using DCS region commands and never assumes X11.
 
+### Browser-native previews (`--web`)
+
+```sh
+make st-web govim
+./BINARIES/st-web -e ./BINARIES/govim --web --preview-gap 100ms notes.md
+```
+
+`--web` keeps the same split, save hooks and source navigation, but sends HTML/CSS
+as base64 JSON in `DCS region secondary html … ST`. st-web renders a genuine HTML
+overlay in the preview rectangle, with selectable text, browser scrolling and
+inline SVG mathematics. The PDF generation/rasterization path is bypassed.
+LaTeX and Markdown retain their existing renderer and include handling. `.html`
+and `.htm` render directly; `.css` and `.json` show escaped source (valid JSON is
+pretty-printed). Preview scripts are disabled; Esc returns focus from the preview
+to the editor. Refresh coalescing still uses `--preview-gap`.
+
+On framebuffer/X11, the split is reserved and the HTML payload is discarded,
+leaving a blank preview. `--no-preview` disables the panel entirely. HTML payloads
+are bounded by the 1 MiB terminal control-message budget. The existing Shift-Tab
+table-of-contents view remains available for LaTeX/Markdown documents.
+
 ## Recovery and saving
 
 The status bar retains the filepath. The bottom command/message row normally

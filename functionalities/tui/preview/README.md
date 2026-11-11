@@ -21,6 +21,11 @@ terminal. Text remains native selectable PDF text; math uses vector paths. The
 existing renderer's supported LaTeX/Markdown subset applies. No TeX installation
 or system font packages are needed.
 
+`LoadWeb` additionally accepts HTML, CSS and JSON source files. `RenderHTML`
+returns semantic HTML and inline SVG math directly, bypassing PDF generation;
+`HTMLStyle` supplies the default document stylesheet. HTML input is preserved,
+while CSS/JSON source is escaped. The browser host owns isolated presentation.
+
 Applications own save hooks, render coalescing, stale-result rejection, private
 atomic PDF publication, retained-region protocol output, and cleanup. Source and
 expanded-output budgets are 64 MiB, with bounded include depth/file/line counts.

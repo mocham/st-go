@@ -187,6 +187,7 @@ apply, and failures use the bounded diagnostic log.
 | `region secondary open '<path>' fit-width continuous [background '#RRGGBB']` | Show a continuous PDF with local animated pixel scrolling and optional paper/canvas color |
 | `region secondary open '<path>' viewer [fit-width\|fit-height\|native\|zoom N]` | Show a retained, pannable raster image viewer at its initial scale |
 | `region secondary clear` | Clear the preview, retaining the split |
+| `region secondary html BASE64` | Browser-native HTML/CSS preview encoded as base64 JSON; discarded on fb/X11 |
 | `region secondary list BASE64` | Overlay a retained, smoothly scrollable text list encoded as base64 JSON |
 | `region secondary list restore` | Restore the previous image/PDF and navigation without changing layout |
 | `region secondary scroll report\|edges\|pages` | Report all navigation, report only raster-viewer edge crossings, or use default scrolling |
@@ -251,6 +252,14 @@ clients should send during cleanup. See [frontend rendering](../frontend/README.
 for worker, strip-cache, and presentation details.
 
 ### Retained lists
+
+`region secondary html BASE64` accepts UTF-8 JSON with `html` and optional `css`
+strings. Base64 protects semicolons, quotes and control bytes from the DCS grammar.
+The complete command must fit the 1 MiB control-message limit. st-web renders the
+document in a script-disabled iframe positioned within the retained secondary
+surface; native pixel backends discard the document. Position (millionths) and
+scroll commands navigate the browser document. Clear/reset, tab visibility and
+viewport resize follow the same surface lifetime as raster previews.
 
 `region secondary list BASE64` accepts base64-encoded JSON:
 

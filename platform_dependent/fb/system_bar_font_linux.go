@@ -50,6 +50,7 @@ func loadSystemBarIcons() map[byte][]uint32 {
 	}
 	icons[systemBarScreenshotIcon] = systemBarCameraGlyph()
 	icons[systemBarCropIcon] = systemBarCropGlyph()
+	icons[systemBarNewTerminalIcon] = systemBarNewTerminalGlyph()
 	return icons
 }
 
@@ -97,6 +98,19 @@ func systemBarCropGlyph() []uint32 {
 		{12, 7, 20, 10}, {17, 7, 20, 16},
 		{2, 25, 10, 28}, {2, 19, 5, 28},
 		{12, 25, 20, 28}, {17, 19, 20, 28},
+	} {
+		systemBarIconLine(glyph, line[0], line[1], line[2], line[3])
+	}
+	return glyph
+}
+
+func systemBarNewTerminalGlyph() []uint32 {
+	glyph := blankSystemBarIcon()
+	// A terminal window with a prompt and a plus in its lower-right corner.
+	for _, line := range [][4]int{
+		{1, 7, 20, 9}, {1, 9, 3, 27}, {18, 9, 20, 18}, {1, 25, 10, 27},
+		{5, 12, 7, 14}, {7, 14, 9, 16}, {5, 16, 7, 18},
+		{15, 19, 17, 29}, {11, 23, 21, 25},
 	} {
 		systemBarIconLine(glyph, line[0], line[1], line[2], line[3])
 	}

@@ -7,8 +7,10 @@
   const copy = document.getElementById("copy");
   const sync = document.getElementById("sync");
   const ctx = screen.getContext("2d", { alpha: false });
+  const htmlPanes = new Map();
+  let htmlState;
   let socket, metrics, composing = false, clipboard = "", reconnect, screenRatio = 0, syncEnabled = false;
-  let paintQueue = Promise.resolve(), resizeTimer, requestedWidth = 0, requestedHeight = 0, wheel = 0;
+  let resizeTimer, requestedWidth = 0, requestedHeight = 0, wheel = 0;
   const utf8 = new TextEncoder();
   const message = text => { status.textContent = text; };
   const syncState = data => {
@@ -61,6 +63,7 @@
     // presentation size without resizing/rerasterizing the terminal buffer.
     screen.style.width = width / ratio + "px"; screen.style.height = height / ratio + "px";
     screenRatio = ratio;
+    placeHTML();
   };
   const resize = () => {
     if (!metrics) return;
@@ -70,6 +73,7 @@
     if (width === requestedWidth && height === requestedHeight) return;
     if (width * height * 4 > 64 * 1024 * 1024) { message("Viewport exceeds pixel budget"); return; }
     requestedWidth = width; requestedHeight = height;
+    placeHTML();
     send({ type: "resize", width, height });
   };
   new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 60); }).observe(viewport);
@@ -79,24 +83,137 @@
     if (ratio !== screenRatio) { screenRatio = ratio; resize(); }
   }, 250);
 
-  async function paint(data) {
-    if (data.byteLength < 28) throw new Error("Short pixel frame");
+  function placeHTML() {
+    if (!htmlState) return;
+    const ratio = window.devicePixelRatio || 1;
+    for (const pane of htmlPanes.values()) {
+      const r = pane.data;
+      pane.element.hidden = requestedWidth !== htmlState.width || requestedHeight !== htmlState.height;
+      Object.assign(pane.element.style, { left: r.x / ratio + "px", top: r.y / ratio + "px", width: r.width / ratio + "px", height: r.height / ratio + "px" });
+    }
+  }
+  function scrollHTML(pane) {
+    if (!pane.loaded) return;
+    const scroll = pane.element.contentDocument.scrollingElement, view = pane.data.view;
+    if (pane.positionID !== view.positionID) {
+      if (view.positionID) scroll.scrollTop = Math.max(0, scroll.scrollHeight - scroll.clientHeight) * view.position / 1000000;
+      pane.positionID = view.positionID; pane.scroll = 0;
+    }
+    scroll.scrollTop += (view.scroll - pane.scroll) * metrics.cellHeight / (window.devicePixelRatio || 1);
+    pane.scroll = view.scroll;
+  }
+  function renderHTML(data) {
+    htmlState = data;
+    const live = new Set();
+    for (const overlay of data.overlays || []) {
+      live.add(overlay.id);
+      let pane = htmlPanes.get(overlay.id);
+      if (!pane) {
+        const element = document.createElement("iframe");
+        element.className = "html-preview";
+        element.title = "Document preview";
+        // Styles and selectable HTML are local to this pane. Scripts, forms,
+        // popups and top-level navigation from preview documents are disabled.
+        element.setAttribute("sandbox", "allow-same-origin");
+        pane = { element, loaded: false, positionID: -1, scroll: 0 };
+        htmlPanes.set(overlay.id, pane); viewport.appendChild(element);
+      }
+      const doc = overlay.view.document, previous = pane.data?.view.document;
+      pane.data = overlay;
+      if (!previous || previous.html !== doc.html || previous.css !== doc.css) {
+        const oldScroll = pane.loaded ? pane.element.contentDocument.scrollingElement.scrollTop : 0;
+        pane.loaded = false;
+        pane.element.onload = () => {
+          pane.loaded = true; pane.positionID = -1; pane.scroll = 0;
+          const content = pane.element.contentDocument;
+          content.scrollingElement.scrollTop = oldScroll;
+          content.addEventListener("click", e => {
+            const link = e.target.closest?.("a");
+            if (link && !link.getAttribute("href")?.startsWith("#")) e.preventDefault();
+          });
+          content.addEventListener("keydown", e => { if (e.key === "Escape") { e.preventDefault(); focus(); } });
+          scrollHTML(pane);
+        };
+        const css = (doc.css || "").replace(/<\/style/gi, "<\\/style");
+        pane.element.srcdoc = '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; form-action \'none\'; base-uri \'none\'"><style>html{color-scheme:light}body{margin:16px;overflow-wrap:anywhere}img,svg{max-width:100%}pre{white-space:pre-wrap}' + css + '</style>' + doc.html;
+      } else scrollHTML(pane);
+    }
+    for (const [id, pane] of htmlPanes) if (!live.has(id)) { pane.element.remove(); htmlPanes.delete(id); }
+    placeHTML();
+  }
+
+  const clearGlyphs = state => {
+    for (const bitmap of state.atlases) bitmap.close();
+    state.atlases.clear(); state.glyphs.clear(); state.glyphBytes = 0;
+  };
+  async function paint(data, state) {
+    const active = () => socket === state.conn && state.conn.readyState === WebSocket.OPEN;
+    if (!active()) return;
+    if (data.byteLength < 12) throw new Error("Short paint frame");
     const header = new DataView(data);
-    if (header.getUint32(0, false) !== 0x53545731) throw new Error("Unknown pixel frame");
-    const values = Array.from({ length: 6 }, (_, i) => header.getUint32(4 + i * 4, true));
-    const [width, height, x, y, w, h] = values;
-    if (!w || !h || !width || !height || width * height > 16777216 || x + w > width || y + h > height) throw new Error("Invalid frame dimensions");
-    // A viewport/DPI resize can overtake already queued damage. Never present
-    // an obsolete canvas size, which would briefly add scrollbars and feed a
-    // smaller viewport back into the resize calculation.
-    if (requestedWidth && (width !== requestedWidth || height !== requestedHeight)) return;
-    const bitmap = await createImageBitmap(new Blob([data.slice(28)], { type: "image/png" }));
-    try {
-      if (bitmap.width !== w || bitmap.height !== h) throw new Error("Pixel dimensions differ");
-      sizeScreen(width, height);
-      ctx.drawImage(bitmap, x, y);
-      screen.dataset.frames = String(Number(screen.dataset.frames || 0) + 1);
-    } finally { bitmap.close(); }
+    const magic = header.getUint32(0, false);
+    const width = header.getUint32(4, true), height = header.getUint32(8, true);
+    if (!width || !height || width > 65535 || height > 65535 || width * height > 16777216) throw new Error("Invalid frame dimensions");
+    // Recheck after asynchronous decoding as well: a resize or reconnect may
+    // have overtaken it. Cache definitions still apply at obsolete sizes.
+    const visible = () => active() && (!requestedWidth || width === requestedWidth && height === requestedHeight);
+    const bounds = (x, y, w, h) => {
+      if (!w || !h || x + w > width || y + h > height) throw new Error("Invalid patch dimensions");
+    };
+    let painted = false, glyphDefinitions = 0, glyphDraws = 0;
+    if (magic === 0x53545731) { // STW1: ordinary PNG damage.
+      if (data.byteLength < 28) throw new Error("Short pixel frame");
+      const [x, y, w, h] = Array.from({ length: 4 }, (_, i) => header.getUint32(12 + i * 4, true));
+      bounds(x, y, w, h);
+      if (!visible()) return;
+      const bitmap = await createImageBitmap(new Blob([data.slice(28)], { type: "image/png" }));
+      try {
+        if (bitmap.width !== w || bitmap.height !== h) throw new Error("Pixel dimensions differ");
+        if (visible()) { sizeScreen(width, height); ctx.drawImage(bitmap, x, y); painted = true; }
+      } finally { bitmap.close(); }
+    } else if (magic === 0x53544731) { // STG1: ordered glyph definitions and ID draws.
+      let offset = 12;
+      const word = () => {
+        if (offset + 4 > data.byteLength) throw new Error("Short glyph frame");
+        const value = header.getUint32(offset, true); offset += 4; return value;
+      };
+      const count = word();
+      if (count > (data.byteLength - offset) / 4) throw new Error("Invalid glyph operation count");
+      for (let i = 0; i < count; i++) {
+        const op = word();
+        if (op === 0) clearGlyphs(state);
+        else if (op === 3) {
+          const id = word(), count = word(), w = word(), h = word(), columns = word(), length = word();
+          const aw = columns * w, ah = Math.ceil(count / columns) * h;
+          if (!id || !count || !w || !h || !columns || columns > count || id + count > 0x100000000 ||
+              aw > 65535 || ah > 65535 || state.glyphBytes + aw * ah * 4 > 32 * 1024 * 1024 ||
+              state.glyphs.size + count > 16384 || !length || offset + length > data.byteLength) throw new Error("Invalid glyph atlas");
+          for (let n = 0; n < count; n++) if (state.glyphs.has(id + n)) throw new Error("Duplicate glyph ID");
+          const bitmap = await createImageBitmap(new Blob([data.slice(offset, offset + length)], { type: "image/png" }));
+          offset += length;
+          if (!active()) { bitmap.close(); return; }
+          if (bitmap.width !== aw || bitmap.height !== ah) { bitmap.close(); throw new Error("Glyph atlas dimensions differ"); }
+          state.atlases.add(bitmap); state.glyphBytes += aw * ah * 4;
+          for (let n = 0; n < count; n++) state.glyphs.set(id + n, { bitmap, x: n % columns * w, y: Math.floor(n / columns) * h, w, h });
+          glyphDefinitions += count;
+        } else if (op === 2) {
+          const id = word(), x = word(), y = word(), repeat = word();
+          const glyph = state.glyphs.get(id);
+          if (!glyph || !repeat) throw new Error("Unknown glyph ID or empty run");
+          bounds(x, y, glyph.w * repeat, glyph.h);
+          if (visible()) {
+            if (!painted) sizeScreen(width, height);
+            for (let n = 0; n < repeat; n++) ctx.drawImage(glyph.bitmap, glyph.x, glyph.y, glyph.w, glyph.h, x + n * glyph.w, y, glyph.w, glyph.h);
+            painted = true;
+            glyphDraws += repeat;
+          }
+        } else throw new Error("Unknown glyph operation");
+      }
+      if (offset !== data.byteLength) throw new Error("Trailing glyph data");
+    } else throw new Error("Unknown paint frame");
+    if (glyphDefinitions) screen.dataset.glyphDefinitions = String(Number(screen.dataset.glyphDefinitions || 0) + glyphDefinitions);
+    if (glyphDraws) screen.dataset.glyphDraws = String(Number(screen.dataset.glyphDraws || 0) + glyphDraws);
+    if (painted) screen.dataset.frames = String(Number(screen.dataset.frames || 0) + 1);
   }
 
   function connect() {
@@ -105,18 +222,35 @@
     url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
     socket = new WebSocket(url);
     socket.binaryType = "arraybuffer";
+    const state = { conn: socket, glyphs: new Map(), atlases: new Set(), glyphBytes: 0, queue: Promise.resolve() };
     socket.onmessage = event => {
       if (typeof event.data !== "string") {
         // Image decoding is asynchronous; commit damage frames in wire order.
-        paintQueue = paintQueue.then(() => paint(event.data)).catch(error => { message(error.message); socket.close(); });
+        state.queue = state.queue.then(() => paint(event.data, state)).catch(error => {
+          if (socket === state.conn) { message(error.message); state.conn.close(); }
+        });
         return;
       }
       const data = JSON.parse(event.data);
       if (data.type === "hello") {
         metrics = data; requestedWidth = data.width; requestedHeight = data.height;
         message("Connected"); syncState(data); resize();
+        send({ type: "paint_ack", id: 0 }); // Opt into one presentation in flight.
         if (requestedWidth === data.width && requestedHeight === data.height) sizeScreen(data.width, data.height);
         focus(); send({ type: "focus", focused: true });
+      }
+      else if (data.type === "paint") {
+        // ACK only after every PNG/atlas and draw in this presentation has
+        // committed. While waiting, the server coalesces damage into its latest
+        // retained pixels instead of queuing obsolete frames in this browser.
+        state.queue = state.queue.then(() => {
+          if (socket === state.conn && state.conn.readyState === WebSocket.OPEN) state.conn.send(JSON.stringify({ type: "paint_ack", id: data.id }));
+        });
+      }
+      else if (data.type === "html") {
+        state.queue = state.queue.then(() => {
+          if (socket === state.conn && state.conn.readyState === WebSocket.OPEN) renderHTML(data);
+        }).catch(error => { if (socket === state.conn) { message(error.message); state.conn.close(); } });
       }
       else if (data.type === "clipboard_sync") syncState(data);
       else if (data.type === "clipboard") { clipboard = data.text || ""; copy.disabled = false; message("Selection ready to copy"); }
@@ -129,7 +263,14 @@
         })();
       }
     };
-    socket.onclose = () => { message("Disconnected — reconnecting (only one browser may attach)"); reconnect = setTimeout(connect, 1500); };
+    socket.onclose = () => {
+      clearGlyphs(state);
+      if (socket === state.conn) {
+        for (const pane of htmlPanes.values()) pane.element.remove();
+        htmlPanes.clear(); htmlState = null;
+        message("Disconnected — reconnecting (only one browser may attach)"); reconnect = setTimeout(connect, 1500);
+      }
+    };
     socket.onerror = () => message("Connection unavailable");
   }
 

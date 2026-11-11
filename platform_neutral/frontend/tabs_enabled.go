@@ -67,6 +67,34 @@ func configureTerminalTabs(t *Terminal, allowed bool) {
 	t.cfg.TabSpawnToken = token
 	t.tabs = m
 	control.BindWindowHooks(api.WindowHooks{Resize: m.resize, KeyPress: m.keyPress})
+	if host, ok := t.host.(api.TerminalTabButtonHost); ok {
+		host.BindNewTerminalTab(m.newTerminalTab)
+	}
+}
+
+func (m *terminalTabs) newTerminalTab() {
+	m.control.PostWindow(func() {
+		if m.active < 0 || m.active >= len(m.entries) {
+			return
+		}
+		origin := m.entries[m.active].terminal
+		if origin.closed() {
+			return
+		}
+		// Use normal shell selection rather than repeating the original -e
+		// command. createTab preserves the original PTY and lazily adds the bar.
+		program, _, err := ResolveShell(origin.cfg, "")
+		if err == nil {
+			var directory string
+			directory, err = os.Getwd()
+			if err == nil {
+				err = m.createTab(origin, api.TabSpawnRequest{Command: []string{program}, Directory: directory}).err
+			}
+		}
+		if err != nil {
+			limits.Report("tabs", "new terminal: %v", err)
+		}
+	})
 }
 
 func (m *terminalTabs) run(root *Terminal) { go root.run(); m.control.RunWindow() }
@@ -244,13 +272,22 @@ func (m *terminalTabs) createTab(origin *Terminal, request api.TabSpawnRequest) 
 
 func (m *terminalTabs) rectangles(width, height int) (image.Rectangle, image.Rectangle) {
 	barHeight, barWidth := m.renderer.ch+4, width
+	passiveHeight := 0
 	if layout, ok := m.control.(api.WindowBarLayout); ok {
 		for _, passive := range layout.PassiveBarBounds() {
 			if passive.Max == image.Pt(width, height) {
+				passiveHeight = max(passiveHeight, passive.Dy())
 				barHeight = max(barHeight, passive.Dy())
 				barWidth = min(barWidth, max(0, passive.Min.X))
 			}
 		}
+	}
+	// A framebuffer system bar can fill a narrow screen. Keep at least one
+	// usable tab label by giving tabs their own band above the native controls.
+	if passiveHeight > 0 && barWidth < terminalTabWidthCells*max(1, m.renderer.cw) {
+		bottom := max(0, height-passiveHeight)
+		barHeight = min(m.renderer.ch+4, max(0, bottom-1))
+		return image.Rect(0, 0, width, bottom-barHeight), image.Rect(0, bottom-barHeight, width, bottom)
 	}
 	barHeight = min(barHeight, max(0, height-1))
 	return image.Rect(0, 0, width, height-barHeight), image.Rect(0, height-barHeight, barWidth, height)

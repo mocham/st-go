@@ -65,6 +65,13 @@ func (d *Driver) dispatch(c *client, m inputMessage) error {
 		return fmt.Errorf("terminal closed")
 	}
 	switch m.Type {
+	case "paint_ack":
+		select {
+		case c.paintAck <- m.ID:
+		default:
+			return fmt.Errorf("paint acknowledgement backlog")
+		}
+		return nil
 	case "key":
 		key, ok := keyID(m.Key, m.Modifiers)
 		if !ok {

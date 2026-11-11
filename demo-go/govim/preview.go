@@ -2,6 +2,8 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,21 +13,24 @@ import (
 	"time"
 
 	"st-go/limits"
+	"st-go/platform_neutral/api"
 	"st-go/tui/outline"
 	"st-go/tui/preview"
 )
 
 type previewOptions struct {
+	web        bool
 	width      int
 	background string
 	gap        time.Duration
 }
 
 func defaultPreviewOptions() previewOptions {
-	return previewOptions{preview.DefaultWidthPercent, "#f7f5ef", 2100 * time.Millisecond}
+	return previewOptions{width: preview.DefaultWidthPercent, background: "#f7f5ef", gap: 2100 * time.Millisecond}
 }
 
 type previewRequest struct {
+	web        bool
 	id         uint64
 	path       string
 	line       int
@@ -41,6 +46,7 @@ type previewResult struct {
 	request    previewRequest
 	source     *preview.Snapshot
 	pdf        []byte
+	html       *api.HTMLDocument
 	mathErrors int
 	err        error
 }
@@ -107,7 +113,11 @@ func renderPreview(request previewRequest, stop <-chan struct{}) (result preview
 		}
 		return previewText(b), nil
 	}
-	result.source, result.err = preview.Load(request.path, read)
+	if request.web {
+		result.source, result.err = preview.LoadWeb(request.path, read)
+	} else {
+		result.source, result.err = preview.Load(request.path, read)
+	}
 	if result.err != nil {
 		return
 	}
@@ -120,7 +130,13 @@ func renderPreview(request previewRequest, stop <-chan struct{}) (result preview
 	if request.reuse && request.hash == result.source.Hash {
 		return
 	}
-	result.pdf, result.mathErrors, result.err = preview.Render(result.source)
+	if request.web {
+		document := &api.HTMLDocument{CSS: preview.HTMLStyle}
+		document.HTML, result.mathErrors, result.err = preview.RenderHTML(result.source)
+		result.html = document
+	} else {
+		result.pdf, result.mathErrors, result.err = preview.Render(result.source)
+	}
 	return
 }
 
@@ -131,7 +147,7 @@ func quotePreview(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\
 
 func (p *editorPreview) queue(e *Editor, noMove bool, overrides map[string]string) {
 	p.serial++
-	request := &previewRequest{id: p.serial, path: p.path, line: e.buffer().row(e.pos()) + 1, noMove: noMove, navigation: p.navigation, overrides: overrides, reuse: p.published}
+	request := &previewRequest{web: p.options.web, id: p.serial, path: p.path, line: e.buffer().row(e.pos()) + 1, noMove: noMove, navigation: p.navigation, overrides: overrides, reuse: p.published}
 	if p.source != nil {
 		request.hash = p.source.Hash
 	}
@@ -141,7 +157,7 @@ func (p *editorPreview) queue(e *Editor, noMove bool, overrides map[string]strin
 
 func (p *editorPreview) observe(e *Editor) {
 	path := e.buffer().meta.Path
-	if !preview.Supported(path) {
+	if !preview.Supported(path) && !(p.options.web && preview.WebSupported(path)) {
 		path = ""
 	}
 	if path == p.path {
@@ -311,6 +327,20 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 		return p.drawContents(e)
 	}
 	if result := p.completed; result != nil && (result.request.immediate || p.lastPublished.IsZero() || now.Sub(p.lastPublished) >= p.options.gap) {
+		if result.html != nil {
+			document := *result.html
+			document.CSS += "body{background:" + p.options.background + "}"
+			data, err := json.Marshal(document)
+			if err != nil || base64.StdEncoding.EncodedLen(len(data)) > limits.ControlBytes-128 {
+				e.error(fmt.Errorf("HTML preview exceeds protocol limit"))
+				p.completed = nil
+				return nil
+			}
+			if err := p.command("region secondary html " + base64.StdEncoding.EncodeToString(data)); err != nil {
+				return err
+			}
+			p.lastPublished = now
+		}
 		if len(result.pdf) > 0 {
 			if err := p.publish(result.pdf); err != nil {
 				e.error(fmt.Errorf("preview: %w", err))

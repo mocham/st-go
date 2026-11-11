@@ -62,6 +62,10 @@ func (h *Host) BackendName() string {
 	}
 	return "unknown"
 }
+func (h *Host) SupportsHTML() bool {
+	native, ok := h.window.native.(api.HTMLSupport)
+	return ok && native.SupportsHTML()
+}
 func (h *Host) ClipboardSyncState() api.ClipboardSyncState {
 	if native, ok := h.window.native.(api.ClipboardSyncControl); ok {
 		return native.ClipboardSyncState()

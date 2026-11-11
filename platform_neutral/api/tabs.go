@@ -8,6 +8,13 @@ import (
 	"unicode/utf8"
 )
 
+// TerminalTabButtonHost exposes a native new-terminal button. A nil handler
+// hides it. The handler must queue policy work in the window event domain;
+// the backend owns only the button's presentation and click routing.
+type TerminalTabButtonHost interface {
+	BindNewTerminalTab(func())
+}
+
 // TabSpawnRequest launches argv directly on a new PTY, never through a shell.
 // Detached appends a background tab without changing the active tab. CopyFile
 // optionally names an argv index whose temporary file must outlive the client;

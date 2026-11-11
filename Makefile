@@ -484,7 +484,7 @@ test-tui:
 	done
 
 # Optional live canvas check using installed Chromium and Node's built-in CDP.
-test-web-browser: st-web
+test-web-browser: st-web govim
 	node platform_dependent/web/testdata/browser-smoke.mjs
 
 # End-to-end animated-WebP playback through the built browser, PTY, terminal

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"sync"
 
 	"st-go/limits"
 	"st-go/platform_neutral/api"
@@ -93,6 +94,8 @@ func (d *Driver) SetTextCursor(cursor api.TextCursor) {
 }
 
 type surface struct {
+	id     uint64
+	html   api.HTMLView
 	driver *Driver
 	bounds image.Rectangle
 	pixels []uint32
@@ -122,7 +125,8 @@ func (d *Driver) NewWidgetSurfaceVisible(kind api.WidgetKind, bounds image.Recta
 	if kind == api.TerminalWidget && previews >= 8 {
 		return nil, fmt.Errorf("web surface limit reached")
 	}
-	s := &surface{driver: d, bounds: bounds, kind: kind, hidden: !visible}
+	d.nextSurfaceID++
+	s := &surface{id: d.nextSurfaceID, driver: d, bounds: bounds, kind: kind, hidden: !visible}
 	s.fill(background)
 	d.surfaces = append(d.surfaces, s)
 	if visible {
@@ -143,6 +147,9 @@ func (s *surface) SetVisible(visible bool) {
 	defer d.mu.Unlock()
 	if !s.closed && s.hidden == visible {
 		s.hidden = !visible
+		if s.html.Document != nil {
+			d.htmlVersion++
+		}
 		d.damage(s.bounds)
 	}
 }
@@ -158,6 +165,9 @@ func (s *surface) Configure(bounds image.Rectangle, background uint32) {
 	}
 	old := s.bounds
 	s.bounds = bounds
+	if s.html.Document != nil && old != bounds {
+		d.htmlVersion++
+	}
 	if old.Size() != bounds.Size() {
 		s.fill(background)
 	}
@@ -172,6 +182,10 @@ func (s *surface) Present(pixels []uint32, w, h, scrollRows int, reuse bool) {
 		return
 	}
 	copy(s.pixels, pixels)
+	if s.html.Document != nil {
+		s.html = api.HTMLView{}
+		d.htmlVersion++
+	}
 	d.damage(s.bounds)
 }
 func (s *surface) Expose() bool {
@@ -192,6 +206,10 @@ func (s *surface) Close() {
 		return
 	}
 	s.closed = true
+	if s.html.Document != nil {
+		d.htmlVersion++
+		s.html = api.HTMLView{}
+	}
 	s.pixels = nil
 	for i, candidate := range d.surfaces {
 		if candidate == s {
@@ -220,7 +238,7 @@ func (d *Driver) frames() []frame {
 			copy(f.pixels[(y-r.Min.Y)*r.Dx():], d.pixels[y*d.width+r.Min.X:y*d.width+r.Max.X])
 		}
 		for _, s := range d.surfaces {
-			if s.hidden || s.kind == api.BarWidget {
+			if s.hidden || s.kind == api.BarWidget || s.html.Document != nil {
 				continue
 			}
 			clip := s.bounds.Intersect(r)
@@ -254,6 +272,18 @@ func (d *Driver) frames() []frame {
 	return frames
 }
 
+type pngBufferPool struct{ pool sync.Pool }
+
+func (p *pngBufferPool) Get() *png.EncoderBuffer {
+	if buffer := p.pool.Get(); buffer != nil {
+		return buffer.(*png.EncoderBuffer)
+	}
+	return new(png.EncoderBuffer)
+}
+func (p *pngBufferPool) Put(buffer *png.EncoderBuffer) { p.pool.Put(buffer) }
+
+var pngBuffers pngBufferPool
+
 func encodeFrame(f frame) ([]byte, error) {
 	var out bytes.Buffer
 	var header [28]byte
@@ -269,7 +299,7 @@ func encodeFrame(f frame) ([]byte, error) {
 		rgba.Pix[i*4+2] = byte(pixel)
 		rgba.Pix[i*4+3] = 255
 	}
-	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
+	encoder := png.Encoder{CompressionLevel: png.BestSpeed, BufferPool: &pngBuffers}
 	if err := encoder.Encode(&out, rgba); err != nil {
 		return nil, err
 	}

@@ -86,6 +86,37 @@ try {
   const command = (method, params) => call(method, params, sessionId);
   const evaluate = async expression => (await command("Runtime.evaluate", { expression, returnByValue: true })).result.value;
   await command("Runtime.enable"); await command("Page.enable");
+  // Observe the actual wire protocol before the embedded client attaches.
+  await command("Page.addScriptToEvaluateOnNewDocument", { source: `
+    window.paintLog = []; window.paintBatches = 0;
+    const NativeSocket = window.WebSocket;
+    window.WebSocket = class extends NativeSocket {
+      constructor(...args) {
+        super(...args);
+        window.terminalSocket = this;
+        this.addEventListener("message", event => {
+          if (!(event.data instanceof ArrayBuffer)) {
+            if (JSON.parse(event.data).type === "paint") window.paintBatches++;
+            return;
+          }
+          const d = new DataView(event.data);
+          if (d.getUint32(0) === 0x53545731) {
+            window.paintLog.push({ type: "png", x: d.getUint32(12, true), y: d.getUint32(16, true), w: d.getUint32(20, true), h: d.getUint32(24, true) });
+          } else if (d.getUint32(0) === 0x53544731) {
+            let at = 12;
+            const word = () => { const n = d.getUint32(at, true); at += 4; return n; };
+            const count = word();
+            for (let i = 0; i < count; i++) {
+              const op = word();
+              if (op === 3) { const id = word(), count = word(), w = word(), h = word(), columns = word(), n = word(); at += n; window.paintLog.push({ type: "atlas", id, count, w, h, columns }); }
+              else if (op === 2) { const id = word(), x = word(), y = word(), repeat = word(); window.paintLog.push({ type: "draw", id, x, y, repeat }); }
+            }
+          }
+          if (window.paintLog.length > 4096) window.paintLog.splice(0, window.paintLog.length - 4096);
+        });
+      }
+    };
+  ` });
   await command("Emulation.setDeviceMetricsOverride", { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
   await command("Page.navigate", { url: address });
   await wait(() => evaluate('Number(document.querySelector("canvas")?.dataset.frames || 0) > 0'), "canvas pixels");
@@ -115,6 +146,30 @@ try {
   await command("Input.insertText", { text: "中文" });
   await type("' > composition.txt");
   await wait(fileEquals("composition.txt", "中文"), "IME composition commit");
+
+  // Repaint a colored FreeType glyph after erasing it. The second paint must
+  // restore identical pixels through cached IDs, with no PNG for that row.
+  await fs.writeFile(path.join(dir, "glyph.sh"), "printf '\\033[10;1H\\033[38;2;201;113;57mMMMMMMMM\\033[0m\\033[12;1H'\n");
+  const glyphRaster = `(() => {
+    const p = document.querySelector("canvas").getContext("2d").getImageData(1, 253, 128, 28).data;
+    let hash = 2166136261, ink = false;
+    for (let i = 0; i < p.length; i++) hash = Math.imul(hash ^ p[i], 16777619);
+    for (let i = 0; i < p.length; i += 4) if (p[i] > p[i+1] && p[i+1] > p[i+2]) ink = true;
+    return { hash, ink };
+  })()`;
+  await type("sh glyph.sh");
+  await wait(async () => (await evaluate(glyphRaster)).ink, "colored FreeType glyph pixels");
+  const originalGlyphs = await evaluate(glyphRaster);
+  await type("printf '\\033[10;1H\\033[2K\\033[12;1H'");
+  await wait(async () => !(await evaluate(glyphRaster)).ink, "glyph row erase");
+  await evaluate("window.paintLog = []; true");
+  await type("sh glyph.sh");
+  await wait(async () => (await evaluate(glyphRaster)).hash === originalGlyphs.hash, "cached glyph pixels match original FreeType raster");
+  const glyphWire = await evaluate("window.paintLog");
+  if (!glyphWire.some(p => p.type === "draw" && p.y === 253) ||
+      glyphWire.some(p => p.type === "png" && p.x < 129 && p.x + p.w > 1 && p.y < 281 && p.y + p.h > 253)) {
+    throw new Error("Repeated FreeType glyph damage did not use cached IDs exclusively");
+  }
 
   // Exercise real browser clipboard gestures, including the native paste event.
   await call("Browser.grantPermissions", { origin: new URL(address).origin, permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"] });
@@ -168,8 +223,63 @@ try {
   await wait(() => evaluate('!window.__reloadMarker && Number(document.querySelector("canvas")?.dataset.frames || 0) > 0'), "reconnect pixels");
   await type("printf '%s' reconnected > browser.reconnected");
   await wait(fileEquals("browser.reconnected", "reconnected"), "reconnected PTY input");
+  // Also reconnect within the same page: its old ImageBitmaps and pending
+  // decode queue must not leak into the new connection's glyph-ID namespace.
+  await evaluate('window.previousFrames = Number(document.querySelector("canvas").dataset.frames); window.previousSocket = window.terminalSocket; window.terminalSocket.close(); true');
+  await wait(() => evaluate('window.terminalSocket !== window.previousSocket && window.terminalSocket.readyState === WebSocket.OPEN && Number(document.querySelector("canvas").dataset.frames) > window.previousFrames'), "in-page reconnect with fresh glyph cache");
+  await type("printf '%s' resumed > browser.resumed");
+  await wait(fileEquals("browser.resumed", "resumed"), "in-page reconnected PTY input");
+
+  // Stall a real asynchronous decode while the PTY produces many screenfuls.
+  // Input must remain usable and the socket must not queue obsolete paints.
+  let stress = "\x1b[2J";
+  for (let row = 1; row <= 16; row++) {
+    stress += `\x1b[${row};1H`;
+    for (let col = 0; col < 48; col++) stress += `\x1b[38;2;${(row * 31 + col) % 256};${col * 5};${row * 11}m${String.fromCharCode(33 + (row * 48 + col) % 90)}`;
+  }
+  stress += "\x1b[0m\x1b[20;1H";
+  await fs.writeFile(path.join(dir, "stress.ansi"), stress);
+  await fs.writeFile(path.join(dir, "stress.sh"), "for n in $(seq 1 60); do cat stress.ansi; sleep 0.01; done\nprintf '\\033[2J\\033[1;1H\\033[48;2;31;191;79m                                        \\033[0m\\033[3;1H'\ntouch stress.done\n");
+  await evaluate(`window.originalBitmap = window.createImageBitmap; window.paintStalled = false;
+    window.createImageBitmap = async (...args) => {
+      if (!window.paintStalled) { window.paintStalled = true; await new Promise(resolve => window.releasePaint = resolve); }
+      return window.originalBitmap(...args);
+    }; true`);
+  await type("sh stress.sh");
+  await wait(() => evaluate("window.paintStalled"), "stalled image decode");
+  const stalledBatches = await evaluate("window.paintBatches");
+  await wait(fileEquals("stress.done", ""), "sustained PTY output while browser is stalled");
+  const inputStart = Date.now();
+  await type("printf responsive > stress.input");
+  await wait(fileEquals("stress.input", "responsive"), "input during stalled paint");
+  if (Date.now() - inputStart > 1500) throw new Error("Stalled painting blocked keyboard input");
+  if (await evaluate("window.paintBatches") - stalledBatches > 1) throw new Error("Unbounded browser paint backlog");
+  await evaluate("window.createImageBitmap = window.originalBitmap; window.releasePaint(); true");
+  await wait(() => evaluate(`(() => { const p = document.querySelector("canvas").getContext("2d").getImageData(10, 10, 1, 1).data; return p[0] === 31 && p[1] === 191 && p[2] === 79; })()`), "latest pixels after coalescing stalled output");
+
+  // Real govim --web: no PDF preview, genuine HTML/CSS, save refresh, resize,
+  // reconnect and teardown use the same retained secondary-pane lifecycle.
+  await fs.writeFile(path.join(dir, "web.html"), '<h1 id="web-probe" style="color:rgb(20,80,140)">OLD web preview</h1><script>parent.previewScriptRan=true</script>');
+  await fs.writeFile(path.join(dir, "web.md"), "# Markdown web preview\n\nSelectable **HTML** and $x^2$.\n");
+  await type(path.join(root, "BINARIES/govim") + " --web --preview-gap 0s web.html");
+  const preview = 'document.querySelector("iframe.html-preview")';
+  await wait(() => evaluate(`${preview}?.contentDocument?.getElementById("web-probe")?.textContent === "OLD web preview"`), "govim HTML preview");
+  if (!await evaluate(`(() => { const f = ${preview}, r = f.getBoundingClientRect(), c = document.querySelector("canvas").getBoundingClientRect(); return r.left > c.left + c.width * 0.35 && r.right <= c.right && f.contentWindow.getComputedStyle(f.contentDocument.getElementById("web-probe")).color === "rgb(20, 80, 140)" && !window.previewScriptRan; })()`)) {
+    throw new Error("HTML overlay geometry, CSS or document isolation is incorrect");
+  }
+  await type(":%s/OLD/NEW/g");
+  await type(":w");
+  await wait(() => evaluate(`${preview}?.contentDocument?.getElementById("web-probe")?.textContent === "NEW web preview"`), "saved HTML preview refresh");
+  await command("Emulation.setDeviceMetricsOverride", { width: 1200, height: 750, deviceScaleFactor: 1, mobile: false });
+  await wait(() => evaluate(`(() => { const f = ${preview}; return f && document.querySelector("canvas").width === 1200 && f.getBoundingClientRect().width > 650; })()`), "HTML pane follows resize");
+  await command("Page.reload");
+  await wait(() => evaluate(`${preview}?.contentDocument?.getElementById("web-probe")?.textContent === "NEW web preview"`), "HTML pane restored on reconnect");
+  await type(":e web.md");
+  await wait(() => evaluate(`${preview}?.contentDocument?.body?.textContent.includes("Markdown web preview") && !!${preview}?.contentDocument?.querySelector("svg")`), "Markdown and SVG math rendered as HTML");
+  await type(":q!");
+  await wait(() => evaluate(`!${preview}`), "HTML preview removed on editor exit");
   if (pageErrors.length) throw new Error("JavaScript errors: " + pageErrors.join("\n"));
-  console.log("PASS: Chromium device-pixel canvas, keyboard/IME, clipboard/paste, SGR mouse, cwd, image, retained pane, viewport resize and reconnect.");
+  console.log("PASS: Chromium glyph atlases, stalled-decode backpressure/input, govim HTML/CSS/Markdown preview, pixel fidelity, keyboard/IME, clipboard, mouse, resize and reconnect.");
   console.log("Test artifacts: " + dir);
 } catch (error) {
   console.error(serverLog, browserLog);

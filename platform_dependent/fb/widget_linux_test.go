@@ -137,6 +137,47 @@ func TestSystemBarBrightnessClickUsesWidgetRouting(t *testing.T) {
 	}
 }
 
+func TestSystemBarNewTerminalButtonUsesWidgetRouting(t *testing.T) {
+	d := memoryDriver(t, 960, 96)
+	outputClicks, tabClicks, terminalClicks := 0, 0, 0
+	d.systemBar = &systemBar{
+		powerSupplyPath: t.TempDir(),
+		audioOutput:     func() (int, bool) { return 0, true },
+		setAudioOutput:  func(int) bool { outputClicks++; return true },
+	}
+	d.refreshSystemBar(time.Now())
+	root, err := widgets.Wrap(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	root.Bind(api.Callbacks{PointerPress: func(byte, uint16, int, int) { terminalClicks++ }})
+	button := root.(api.TerminalTabButtonHost)
+	button.BindNewTerminalTab(func() {
+		// The backend must release its drawing lock before invoking policy.
+		d.mu.Lock()
+		tabClicks++
+		d.mu.Unlock()
+	})
+	b := d.systemBar
+	if b.newTerminalLeft < b.bounds.Min.X || b.newTerminalRight > b.bounds.Max.X {
+		t.Fatal("new terminal button is not visible", b.bounds)
+	}
+	for _, mouseButton := range []byte{1, 1, 2, 3, 4, 5} {
+		d.callbacks.PointerPress(mouseButton, 0, b.newTerminalLeft+1, b.bounds.Min.Y+2)
+		d.callbacks.PointerRelease(mouseButton, 0, b.newTerminalLeft+1, b.bounds.Min.Y+2)
+	}
+	if tabClicks != 2 || outputClicks != 0 || terminalClicks != 0 || d.screenshot.stage != screenshotIdle {
+		t.Fatal("new-terminal click leaked into another action", tabClicks, outputClicks, terminalClicks)
+	}
+	// Turning off the handler removes the button and restores its space.
+	width := b.bounds.Dx()
+	button.BindNewTerminalTab(nil)
+	if b.newTerminalLeft != -1 || b.newTerminalRight != -1 || b.bounds.Dx() >= width {
+		t.Fatal("unavailable new-terminal button was not hidden")
+	}
+}
+
 func TestPositionedUploadClipsSourceAndDestinationTogether(t *testing.T) {
 	d := memoryDriver(t, 8, 4)
 	d.UploadAt([]uint32{1, 2, 3, 4, 5, 6, 7, 8}, 4, image.Rect(1, 0, 4, 2), image.Pt(-1, 1))
