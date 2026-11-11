@@ -88,9 +88,16 @@ try {
   await command("Runtime.enable"); await command("Page.enable");
   // Observe the actual wire protocol before the embedded client attaches.
   await command("Page.addScriptToEvaluateOnNewDocument", { source: `
-    window.paintLog = []; window.paintBatches = 0;
+    window.paintLog = []; window.paintBatches = 0; window.resizeLog = [];
     const NativeSocket = window.WebSocket;
     window.WebSocket = class extends NativeSocket {
+      send(data) {
+        if (typeof data === "string") {
+          const m = JSON.parse(data);
+          if (m.type === "resize") window.resizeLog.push([m.width, m.height]);
+        }
+        super.send(data);
+      }
       constructor(...args) {
         super(...args);
         window.terminalSocket = this;
@@ -297,6 +304,14 @@ try {
   await type(`printf "\\033Pregion split 50%%; region secondary open 'preview.pdf' continuous\\033\\\\"`);
   await wait(()=>evaluate('document.querySelector(".pdf-page canvas")?.width>0'),"PDF.js page rendering");
   await wait(()=>evaluate('document.querySelector(".textLayer")?.textContent.includes("Browser PDF page 1")'),"PDF text selection layer");
+  // PDF.js resizes a body-level helper canvas while measuring embedded fonts.
+  // Its bitmap must never consume flex space or feed a resize back to the PTY.
+  const beforeMeasure = await evaluate('({width:document.getElementById("viewport").clientWidth,height:document.getElementById("viewport").clientHeight,resizes:window.resizeLog.length})');
+  await evaluate('window.measureCanvas=document.querySelector(".hiddenCanvasElement"); window.measureSize=[measureCanvas.width,measureCanvas.height]; measureCanvas.width=measureCanvas.height=600; true');
+  await delay(350);
+  const duringMeasure = await evaluate('({width:document.getElementById("viewport").clientWidth,height:document.getElementById("viewport").clientHeight,resizes:window.resizeLog.length})');
+  await evaluate('[measureCanvas.width,measureCanvas.height]=window.measureSize; delete window.measureCanvas; delete window.measureSize; true');
+  if (JSON.stringify(beforeMeasure) !== JSON.stringify(duringMeasure)) throw new Error("PDF text measurement resized the terminal: " + JSON.stringify({beforeMeasure,duringMeasure}));
   if(!await evaluate('getComputedStyle(document.querySelector(".textLayer span")).fontSize!=="0px"'))throw new Error("PDF text geometry missing");
   if(await evaluate('document.querySelectorAll(".pdf-page canvas").length')>8)throw new Error("PDF pages were eagerly rasterized");
   await evaluate('document.querySelector(".media-preview").scrollTop=10000;true');
@@ -362,6 +377,9 @@ finally: termios.tcsetattr(0,termios.TCSANOW,saved)
   await fs.writeFile(path.join(files, "d.png"), fixture());
   await fs.writeFile(path.join(files, "e.pdf"), pdf);
   await fs.writeFile(path.join(files, "f.txt"), 'Ordinary text preview');
+  const largePDF = path.join(root, "TEST-ASSETS/neukirch.pdf");
+  const hasLargePDF = await fs.access(largePDF).then(() => true, () => false);
+  if (hasLargePDF) await fs.symlink(largePDF, path.join(files, "neukirch.pdf"));
   const key = async (key, code, windowsVirtualKeyCode, modifiers = 0) => {
     await command("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode, modifiers });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode, modifiers });
@@ -402,6 +420,14 @@ finally: termios.tcsetattr(0,termios.TCSANOW,saved)
   await wait(() => evaluate('document.querySelector(".textLayer")?.textContent.includes("Browser PDF page 2")'), "file-browser PDF next page");
   await down();
   await wait(() => evaluate(`!${preview} && !document.querySelector(".media-preview")`), "file-browser text selection releases media");
+  if (hasLargePDF) {
+    await evaluate('window.resizeLog = []; true');
+    await down();
+    await wait(() => evaluate('document.querySelector(".pdf-page canvas")?.width > 0'), "Neukirch PDF preview");
+    await delay(2500);
+    const resizeLoop = await evaluate('window.resizeLog');
+    if (resizeLoop.length !== 0) throw new Error("PDF preview resize loop: " + JSON.stringify(resizeLoop));
+  }
   await key("Home", "Home", 36);
   await down();
   await wait(() => htmlText("File browser HTML"), "file-browser HTML restored");

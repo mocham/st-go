@@ -16,4 +16,7 @@ button:disabled { opacity: .45; cursor: default; }
 .textLayer span, .textLayer br { color:transparent; position:absolute; white-space:pre; cursor:text; transform-origin:0% 0%; }
 .textLayer ::selection { background:rgba(0,80,255,.3); }
 .textLayer .search-hit { background:rgba(255,200,0,.35); }
+/* PDF.js appends text-measurement canvases to body. Keep their changing bitmap
+   sizes out of the flex layout so PDF rendering cannot resize the terminal. */
+.hiddenCanvasElement { position: absolute; top: 0; left: 0; width: 0; height: 0; visibility: hidden; pointer-events: none; }
 #input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; resize: none; pointer-events: none; }
