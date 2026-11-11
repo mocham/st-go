@@ -7,6 +7,17 @@ Initially the latest 10 prompts are shown, newest first. Click **More** to revea
 10 older prompts at a time. The session catalog and prompt history are paged
 from the server, so the list is not limited to the first API page.
 
+The fixed header shows the current **model**, **variant** (including `default`),
+and **context percentage**, including while a picker is open. Default models are
+resolved from the server. Context usage follows the official frontend: the latest
+assistant step's input/output/reasoning/cache tokens divided by its model's context
+limit, after compaction and before a staged revert. An unavailable limit is shown
+as `—`. The old `OpenCode`/agent-name prefix is removed.
+
+Each session header has a **[Delete]** button. It deletes that session and its
+children on the server, then selects a remaining session if the active one was
+deleted. **+ New session** also works after deleting the last session.
+
 Click a prompt to show its response on the right as selectable PDF text with
 vector mathematics, or browser-native HTML with `--web`. Multi-step assistant
 messages are grouped under their prompt. In particular, Markdown answers can
@@ -127,6 +138,8 @@ the API, and browser authentication is not inherited by the TUI.
 | Enter | Send the single-line prompt |
 | Up / Down | Browse prompt history |
 | Click a session | Activate it and expand its latest 10 prompts; fold the other sessions |
+| [Delete] | Delete that session and its child sessions |
+| + New session | Create and activate a session in the current project directory |
 | Click a prompt | Select its response; wrapped lines are clickable too |
 | More / F3 | Reveal 10 older prompts from the active session |
 | Mouse wheel | Scroll the pane under the pointer |
@@ -147,6 +160,33 @@ show a response placeholder instead of another prompt's answer.
 While a clicked session loads, sending is paused; Esc cancels the switch. A
 failed switch restores the current session. New sessions and session title/path
 changes refresh the catalog automatically.
+
+## Transport and recovery
+
+The client uses HTTP JSON requests and a live SSE connection to `/api/event`.
+Sending a prompt admits an input; the response itself arrives through events and
+saved message history. There is no WebSocket emulation.
+
+Prompt requests no longer have the old 20-second HTTP / 30-second operation
+cutoffs. Waiting for HTTP response headers is bounded at 60 seconds; once headers
+arrive, the response body has no fixed total deadline. A long-running session is
+independent of that request. Prompts are sent in order with stable IDs, and a late
+HTTP failure cannot overwrite a server acknowledgement. An ambiguous transport
+failure is shown as unconfirmed while history/inbox reads reconcile it, rather
+than falsely marking an accepted prompt failed or automatically resending it.
+
+SSE connections require a handshake within 10 seconds. A 45-second idle watchdog
+counts **all received bytes**, including keepalive comments, and reconnects stalled
+streams. Reconnection reloads session state. A fallback refresh checks history
+every 5 seconds while working, pending, or disconnected, and every 30 seconds while
+idle, so missing updates do not require switching sessions manually.
+
+This follows the official V2 frontend/client implementations reviewed in
+[`solid/connection.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/client/src/solid/connection.ts),
+[`solid/data.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/client/src/solid/data.ts),
+[`request-queue.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/app/src/runtime/server/request-queue.ts),
+and the TUI's
+[`util/session.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/tui/src/util/session.ts).
 
 ## Slash commands
 
@@ -192,7 +232,10 @@ GOWORK=off go -C demo-go/opencode-tui test ./...
 ```
 
 Tests cover the API subset, searchable pickers, persisted model/variant changes,
-session-switch isolation, sidebar paging/folding, mouse hit testing, SSE framing,
+session-switch isolation, deletion, persistent model/context display, sidebar
+paging/folding, mouse hit testing, SSE framing/keepalives/stall recovery,
 input/DCS isolation, display geometry,
 and actual Markdown responses containing user-defined LaTeX macros rendered to
-PDF and HTML/SVG, including web-pane streaming, hide/restore, and clearing.
+PDF and HTML/SVG, including web-pane streaming, hide/restore, and clearing. A
+31-second delayed-acknowledgement regression exercises both removed timeout
+cutoffs and verifies that the response appears without switching sessions.

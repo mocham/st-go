@@ -256,6 +256,7 @@ func (application *app) applyPickerResult(result operationResult) {
 		model := result.picker.model
 		application.session.Model = &model
 		application.revision++
+		application.detailsRefresh = time.Now()
 		application.status = "Model selected: " + model.ProviderID + "/" + model.ID
 		if model.Variant != "" {
 			application.status += "#" + model.Variant

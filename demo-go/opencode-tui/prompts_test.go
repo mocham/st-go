@@ -90,8 +90,9 @@ func TestPromptMouseHitMapScrollResizeAndTextPane(t *testing.T) {
 		t.Fatal(err)
 	}
 	left := application.paintedLayout.prompts
+	initialScroll := application.scroll
 	application.handleInput(inputEvent{mouse: &mouseEvent{button: 65, x: 2, y: left.y}})
-	if application.scroll != 3 {
+	if application.scroll != initialScroll+3 {
 		t.Fatal("wheel did not scroll prompt list")
 	}
 	if err := application.draw(); err != nil {
@@ -112,7 +113,7 @@ func TestPromptMouseHitMapScrollResizeAndTextPane(t *testing.T) {
 	before := application.selectedPrompt
 	application.handleInput(inputEvent{mouse: &mouseEvent{x: right.x, y: y}})
 	application.handleInput(inputEvent{mouse: &mouseEvent{button: 65, x: right.x, y: right.y}})
-	if application.selectedPrompt != before || application.scroll != 3 || application.responseScroll == 0 {
+	if application.selectedPrompt != before || application.scroll != initialScroll+3 || application.responseScroll == 0 {
 		t.Fatal("response pane mouse traffic changed prompt selection/scroll")
 	}
 	application.cols = 40 // Simulate SIGWINCH before the next draw.

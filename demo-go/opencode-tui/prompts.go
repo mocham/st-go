@@ -24,6 +24,9 @@ func (application *app) selectedResponse() string {
 	if application.attachTarget != "" {
 		return "Loading selected session…"
 	}
+	if application.session.ID == "" {
+		return "Select a session or click + New session."
+	}
 	var parts []string
 	for _, message := range application.messages {
 		if message.Role == "assistant" && message.PromptID == application.selectedPrompt && strings.TrimSpace(message.Text) != "" {
@@ -35,6 +38,9 @@ func (application *app) selectedResponse() string {
 	}
 	if index, ok := application.messageIndex[application.selectedPrompt]; ok {
 		message := application.messages[index]
+		if message.Uncertain {
+			return "Checking whether the server accepted this prompt…"
+		}
 		if message.Failed {
 			return "This prompt could not be sent or was canceled."
 		}
@@ -92,8 +98,9 @@ type paneLayout struct {
 }
 
 func (application *app) bodyLayout() paneLayout {
-	height := max(1, application.rows-4)
-	layout := paneLayout{prompts: paneRect{1, 2, application.cols, height}}
+	top := application.headerHeight() + 1
+	height := max(1, application.rows-top-2)
+	layout := paneLayout{prompts: paneRect{1, top, application.cols, height}}
 	if application.preview == nil || !application.preview.visible {
 		percent := 58
 		if application.preview != nil && application.preview.width > 0 {
@@ -102,10 +109,10 @@ func (application *app) bodyLayout() paneLayout {
 		left := max(3, min(application.cols-4, application.cols*(100-percent)/100))
 		layout.prompts.width = left
 		layout.divider = left + 1
-		layout.response = paneRect{left + 2, 2, application.cols - left - 1, height}
+		layout.response = paneRect{left + 2, top, application.cols - left - 1, height}
 	}
 	if height >= 3 {
-		layout.titleRow = 2
+		layout.titleRow = top
 		layout.prompts.y++
 		layout.prompts.height--
 		if layout.response.width > 0 {
@@ -200,6 +207,10 @@ func (application *app) handleMouse(mouse mouseEvent) {
 		return
 	}
 	if mouse.button&3 == 0 && application.paintedLayout.prompts.contains(mouse.x, mouse.y) {
+		if id := application.deleteHits[mouse.y]; id != "" && mouse.x >= application.paintedLayout.prompts.width-7 {
+			application.deleteSession(id)
+			return
+		}
 		hit := application.sidebarHits[mouse.y]
 		switch hit.kind {
 		case "session":
@@ -210,6 +221,8 @@ func (application *app) handleMouse(mouse mouseEvent) {
 			application.morePrompts()
 		case "reload":
 			application.requestCatalog()
+		case "new":
+			application.newSession()
 		}
 	}
 }

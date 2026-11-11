@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,7 +29,10 @@ type modelInfo struct {
 	ProviderID string `json:"providerID"`
 	Name       string `json:"name"`
 	Enabled    bool   `json:"enabled"`
-	Variants   []struct {
+	Limit      struct {
+		Context int `json:"context"`
+	} `json:"limit"`
+	Variants []struct {
 		ID string `json:"id"`
 	} `json:"variants"`
 }
@@ -46,6 +50,24 @@ type sessionSnapshot struct {
 	permissions   []permissionRequest
 	busy          bool
 	messageCursor string
+	inbox         []inboxItem
+}
+
+type inboxItem struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Payload struct {
+		Text string `json:"text"`
+	} `json:"payload"`
+}
+
+type tokenUsage struct {
+	Input, Output, Reasoning float64
+	Cache                    struct{ Read, Write float64 }
+}
+
+func (usage tokenUsage) total() float64 {
+	return usage.Input + usage.Output + usage.Reasoning + usage.Cache.Read + usage.Cache.Write
 }
 
 type messagePage struct {
@@ -65,6 +87,10 @@ type sessionInfo struct {
 	Agent    string      `json:"agent"`
 	Model    *modelRef   `json:"model"`
 	Location locationRef `json:"location"`
+	ParentID string      `json:"parentID"`
+	Revert   *struct {
+		MessageID string `json:"messageID"`
+	} `json:"revert"`
 }
 
 type messageContent struct {
@@ -82,6 +108,9 @@ type apiMessage struct {
 	Text    string           `json:"text"`
 	Agent   string           `json:"agent"`
 	Content []messageContent `json:"content"`
+	Model   *modelRef        `json:"model"`
+	Tokens  *tokenUsage      `json:"tokens"`
+	Status  string           `json:"status"`
 	Time    struct {
 		Created float64 `json:"created"`
 	} `json:"time"`
@@ -110,10 +139,12 @@ type eventData struct {
 }
 
 type apiClient struct {
-	base          *url.URL
-	authorization string
-	requests      *http.Client
-	streams       *http.Client
+	base                 *url.URL
+	authorization        string
+	requests             *http.Client
+	streams              *http.Client
+	streamConnectTimeout time.Duration
+	streamIdleTimeout    time.Duration
 }
 
 func newAPIClient(baseURL, authorization string) (*apiClient, error) {
@@ -128,12 +159,30 @@ func newAPIClient(baseURL, authorization string) (*apiClient, error) {
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, fmt.Errorf("OpenCode server URL must be a base address without a query or fragment")
 	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	// Like the official frontend, bound waiting for response headers, not the
+	// lifetime of a request body or a running session.
+	transport.ResponseHeaderTimeout = 60 * time.Second
 	return &apiClient{
-		base:          parsed,
-		authorization: authorization,
-		requests:      &http.Client{Timeout: 20 * time.Second},
-		streams:       &http.Client{},
+		base:                 parsed,
+		authorization:        authorization,
+		requests:             &http.Client{Transport: transport},
+		streams:              &http.Client{Transport: transport},
+		streamConnectTimeout: 10 * time.Second, streamIdleTimeout: 45 * time.Second,
 	}, nil
+}
+
+type apiError struct {
+	status  int
+	message string
+}
+
+func (err *apiError) Error() string { return err.message }
+
+func rejectedPrompt(err error) bool {
+	var failure *apiError
+	return errors.As(err, &failure) && failure.status >= 400 && failure.status < 500 && failure.status != 408
 }
 
 func (client *apiClient) endpoint(path string) string {
@@ -200,7 +249,7 @@ func (client *apiClient) request(ctx context.Context, method, path string, input
 		if problem.Message == "" {
 			problem.Message = response.Status
 		}
-		return fmt.Errorf("OpenCode API %s: %s%s", response.Status, problem.Message, authenticationHint(response))
+		return &apiError{response.StatusCode, fmt.Sprintf("OpenCode API %s: %s%s", response.Status, problem.Message, authenticationHint(response))}
 	}
 	if output == nil {
 		return nil
@@ -242,6 +291,18 @@ func (client *apiClient) getSession(ctx context.Context, id string) (sessionInfo
 		Data sessionInfo `json:"data"`
 	}
 	err := client.request(ctx, http.MethodGet, "/api/session/"+url.PathEscape(id), nil, &response)
+	return response.Data, err
+}
+
+func (client *apiClient) deleteSession(ctx context.Context, id string) error {
+	return client.request(ctx, http.MethodDelete, "/api/session/"+url.PathEscape(id), nil, nil)
+}
+
+func (client *apiClient) inbox(ctx context.Context, id string) ([]inboxItem, error) {
+	var response struct {
+		Data []inboxItem `json:"data"`
+	}
+	err := client.request(ctx, http.MethodGet, "/api/session/"+url.PathEscape(id)+"/inbox", nil, &response)
 	return response.Data, err
 }
 
@@ -405,11 +466,16 @@ var streamTypes = []string{
 	"session.text.started", "session.text.delta", "session.text.ended",
 	"session.execution.started", "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted",
 	"permission.asked", "permission.replied", "session.renamed", "session.model.selected",
+	"session.step.started", "session.step.ended", "session.step.failed", "session.compaction.ended", "session.revert.staged", "session.revert.cleared", "session.revert.committed", "session.status",
 }
 
 // subscribe consumes one live-only OpenCode SSE stream. Reconnection and state
 // resynchronization are deliberately owned by the caller.
 func (client *apiClient) subscribe(ctx context.Context, emit func(apiEvent) error) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	watch := newStreamWatch(client.streamConnectTimeout, client.streamIdleTimeout, cancel)
+	defer watch.stop()
 	query := url.Values{}
 	for _, eventType := range streamTypes {
 		query.Add("types", eventType)
@@ -424,6 +490,9 @@ func (client *apiClient) subscribe(ctx context.Context, emit func(apiEvent) erro
 	}
 	response, err := client.streams.Do(request)
 	if err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
 		return connectionError(err)
 	}
 	defer response.Body.Close()
@@ -431,19 +500,41 @@ func (client *apiClient) subscribe(ctx context.Context, emit func(apiEvent) erro
 		data, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return fmt.Errorf("OpenCode event stream %s: %s%s", response.Status, strings.TrimSpace(string(data)), authenticationHint(response))
 	}
-	return decodeSSE(response.Body, emit)
+	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
+		return fmt.Errorf("OpenCode event stream returned %q instead of text/event-stream", response.Header.Get("Content-Type"))
+	}
+	connected := false
+	err = decodeSSE(activityReader{response.Body, watch.touch}, func(event apiEvent) error {
+		if !connected {
+			if event.Type != "server.connected" {
+				return fmt.Errorf("OpenCode event stream did not start with server.connected")
+			}
+			connected = true
+			watch.connected()
+		}
+		return emit(event)
+	})
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+	return err
 }
 
 func decodeSSE(reader io.Reader, emit func(apiEvent) error) error {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64<<10), 4<<20)
+	scanner.Buffer(make([]byte, 64<<10), maxAPIResponse)
 	var data strings.Builder
+	name := ""
 	flush := func() error {
+		defer func() { name = "" }()
 		if data.Len() == 0 {
 			return nil
 		}
 		payload := strings.TrimSuffix(data.String(), "\n")
 		data.Reset()
+		if name == "effect/http-api/stream/failure" {
+			return fmt.Errorf("OpenCode event stream failure: %s", payload)
+		}
 		var event apiEvent
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
 			return fmt.Errorf("decode OpenCode event: %w", err)
@@ -461,7 +552,13 @@ func decodeSSE(reader io.Reader, emit func(apiEvent) error) error {
 		if strings.HasPrefix(line, ":") {
 			continue
 		}
+		if value, ok := strings.CutPrefix(line, "event:"); ok {
+			name = strings.TrimSpace(value)
+		}
 		if value, ok := strings.CutPrefix(line, "data:"); ok {
+			if data.Len()+len(value) > maxAPIResponse {
+				return fmt.Errorf("OpenCode event exceeds %d bytes", maxAPIResponse)
+			}
 			data.WriteString(strings.TrimPrefix(value, " "))
 			data.WriteByte('\n')
 		}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"testing"
 )
@@ -34,7 +33,7 @@ func TestFailedPromptRestoresIdleState(t *testing.T) {
 	application.busy = true
 	application.messages = []chatMessage{{ID: "local-1", Role: "user", Text: "hello"}}
 	application.rebuildIndex()
-	application.applyOperation(operationResult{kind: "prompt", requestID: "local-1", wasBusy: false, err: errors.New("rejected")})
+	application.applyOperation(operationResult{kind: "prompt", requestID: "local-1", wasBusy: false, err: &apiError{400, "rejected"}})
 	if application.busy || !application.messages[0].Failed || application.messages[0].Text != "hello" || application.status != "rejected" {
 		t.Fatalf("failed prompt state = busy %v, message %q, status %q", application.busy, application.messages[0].Text, application.status)
 	}

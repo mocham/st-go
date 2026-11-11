@@ -102,7 +102,7 @@ func TestModelAndVariantCommandsPersistSelection(t *testing.T) {
 	application.handleInput(inputEvent{paste: "high"})
 	application.handleInput(inputEvent{key: "<Enter>"})
 	awaitOperation(t, application, "picker-model")
-	if application.session.Model.Variant != "high" || !strings.Contains(application.header(), "p/chat#high") {
+	if application.session.Model.Variant != "high" || !strings.Contains(application.header(), "p/chat") || !strings.Contains(application.detailsLine(), "high") {
 		t.Fatal("selected variant missing from current session/header")
 	}
 

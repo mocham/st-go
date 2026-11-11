@@ -32,6 +32,7 @@ type displayRow struct {
 	sessionID string
 	action    string
 	spans     []textSpan
+	deleteID  string
 }
 
 func safeText(value string) string {
@@ -135,26 +136,10 @@ func shortID(id string) string {
 }
 
 func (application *app) header() string {
-	title := strings.TrimSpace(application.session.Title)
-	if title == "" {
-		title = shortID(application.session.ID)
+	if application.headerHeight() == 1 {
+		return application.compactDetails()
 	}
-	model := "default model"
-	if application.session.Model != nil {
-		model = application.session.Model.ProviderID + "/" + application.session.Model.ID
-		if application.session.Model.Variant != "" {
-			model += "#" + application.session.Model.Variant
-		}
-	}
-	agent := application.session.Agent
-	if agent == "" {
-		agent = "default agent"
-	}
-	state := "idle"
-	if application.busy {
-		state = "working"
-	}
-	return fmt.Sprintf(" OpenCode · %s · %s · %s · %s ", title, agent, model, state)
+	return " Model: " + application.modelLabel()
 }
 
 func (application *app) statusLine() (string, string) {
@@ -242,6 +227,7 @@ func (application *app) drawPanes(output *strings.Builder) {
 	layout := application.bodyLayout()
 	application.paintedLayout = layout
 	application.sidebarHits = make(map[int]sidebarHit)
+	application.deleteHits = make(map[int]string)
 	if layout.titleRow != 0 {
 		drawCells(output, 1, layout.titleRow, layout.prompts.width, dimStyle, "SESSIONS · click to activate")
 		if layout.response.width > 0 {
@@ -249,7 +235,7 @@ func (application *app) drawPanes(output *strings.Builder) {
 		}
 	}
 	if layout.divider != 0 {
-		for row := 2; row <= application.rows-3; row++ {
+		for row := application.headerHeight() + 1; row <= application.rows-3; row++ {
 			drawCells(output, layout.divider, row, 1, dimStyle, "│")
 		}
 	}
@@ -277,6 +263,14 @@ func (application *app) drawPanes(output *strings.Builder) {
 				x += width
 			}
 		}
+		if row.deleteID != "" {
+			label := "[Delete]"
+			if application.deleting[row.deleteID] {
+				label = "[Wait…]"
+			}
+			drawCells(output, layout.prompts.width-7, y, 8, warningStyle, label)
+			application.deleteHits[y] = row.deleteID
+		}
 		switch {
 		case row.sessionID != "":
 			application.sidebarHits[y] = sidebarHit{"session", row.sessionID}
@@ -299,20 +293,23 @@ func (application *app) drawPanes(output *strings.Builder) {
 func (application *app) draw() error {
 	application.rows = max(5, min(500, application.rows))
 	application.cols = max(8, min(1000, application.cols))
-	bodyHeight := max(1, application.rows-4)
+	headers := application.headerHeight()
+	bodyHeight := max(1, application.rows-headers-3)
 	var visible []displayRow
 	header := application.header()
 	if application.picker != nil {
-		visible = application.picker.rows(bodyHeight)
-		header = " /" + application.picker.kind + " · " + application.session.Title
+		visible = append([]displayRow{{text: " /" + application.picker.kind + " · " + application.session.Title, style: headerStyle}}, application.picker.rows(max(0, bodyHeight-1))...)
 	}
 
 	var output strings.Builder
 	output.Grow(application.rows * (application.cols + 32))
 	output.WriteString("\x1b[?2026h\x1b[?25l")
 	drawAt(&output, 1, headerStyle, padCells(header, application.cols), application.cols)
+	if headers == 2 {
+		drawAt(&output, 2, headerStyle, padCells(application.detailsLine(), application.cols), application.cols)
+	}
 	for slot := 0; slot < bodyHeight; slot++ {
-		row := slot + 2
+		row := slot + headers + 1
 		if slot < len(visible) {
 			drawAt(&output, row, visible[slot].style, visible[slot].text, application.cols)
 		} else {
@@ -323,6 +320,7 @@ func (application *app) draw() error {
 		application.drawPanes(&output)
 	} else {
 		application.sidebarHits = nil
+		application.deleteHits = nil
 	}
 	status, style := application.statusLine()
 	drawAt(&output, application.rows-2, style, padCells(status, application.cols), application.cols)

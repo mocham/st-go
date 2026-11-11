@@ -20,15 +20,17 @@ import (
 const promptPrefix = "› "
 
 type chatMessage struct {
-	ID       string
-	Role     string
-	Text     string
-	Rich     string
-	Aux      string
-	Parts    map[int]string
-	PromptID string
-	Pending  bool
-	Failed   bool
+	ID           string
+	Role         string
+	Text         string
+	Rich         string
+	Aux          string
+	Parts        map[int]string
+	PromptID     string
+	Pending      bool
+	Failed       bool
+	Acknowledged bool
+	Uncertain    bool
 }
 
 type streamItem struct {
@@ -48,6 +50,7 @@ type operationResult struct {
 	picker      *pickerResult
 	catalog     *catalogResult
 	attachToken uint64
+	details     *sessionDetails
 }
 
 type app struct {
@@ -103,6 +106,15 @@ type app struct {
 	revision                 uint64
 	picker                   *picker
 	pickerSequence           uint64
+	nextSync                 time.Time
+	detailsRefresh           time.Time
+	detailsLoading           bool
+	details                  sessionDetails
+	usage                    *contextUsage
+	sending                  map[string]<-chan struct{}
+	deleting                 map[string]bool
+	deleted                  map[string]bool
+	deleteHits               map[int]string
 }
 
 func newApp(client *apiClient, session sessionInfo, messages []apiMessage, permissions []permissionRequest, output io.Writer, fd int, rich *richPreview) *app {
@@ -114,6 +126,7 @@ func newApp(client *apiClient, session sessionInfo, messages []apiMessage, permi
 		messageIndex: make(map[string]int), followPreview: true,
 		promptLimit: 10, sessions: []sessionInfo{session}, sidebarFocus: session.ID,
 		rows: 24, cols: 80, running: true, dirty: true, status: "Ready",
+		sending: make(map[string]<-chan struct{}), deleting: make(map[string]bool), deleted: make(map[string]bool),
 	}
 	application.replaceMessages(messages)
 	application.permissions = append([]permissionRequest(nil), permissions...)
@@ -128,7 +141,7 @@ func convertMessages(messages []apiMessage) []chatMessage {
 		switch message.Type {
 		case "user":
 			promptID = message.ID
-			converted = append(converted, chatMessage{ID: message.ID, Role: "user", Text: message.Text, Rich: message.Text})
+			converted = append(converted, chatMessage{ID: message.ID, Role: "user", Text: message.Text, Rich: message.Text, Acknowledged: true})
 		case "assistant":
 			var rich []string
 			var auxiliary []string
@@ -171,6 +184,7 @@ func (application *app) rebuildIndex() {
 }
 
 func (application *app) replaceMessages(messages []apiMessage) {
+	application.updateUsage(messages)
 	previous := application.messages
 	application.messages = convertMessages(messages)
 	application.rebuildIndex()
@@ -196,6 +210,15 @@ func (application *app) replaceMessages(messages []apiMessage) {
 }
 
 func (application *app) ensureAssistant(messageID string) *chatMessage {
+	promptID := application.activePrompt
+	if index, ok := application.messageIndex[messageID]; ok {
+		promptID = application.messages[index].PromptID
+	}
+	if index, ok := application.messageIndex[promptID]; ok {
+		message := &application.messages[index]
+		message.Acknowledged = true
+		message.Pending, message.Failed, message.Uncertain = false, false, false
+	}
 	if index, ok := application.messageIndex[messageID]; ok {
 		return &application.messages[index]
 	}
@@ -318,16 +341,21 @@ func (application *app) startEventStream() {
 }
 
 func (application *app) requestSync() {
-	if application.syncing {
+	if application.syncing || application.api == nil || application.session.ID == "" {
 		return
 	}
 	application.syncing = true
+	application.nextSync = time.Now().Add(application.syncInterval())
 	id, epoch, revision := application.session.ID, application.sessionEpoch, application.revision
 	limit := application.promptLimit
+	pending := application.pendingPrompts()
 	go func() {
 		ctx, cancel := context.WithTimeout(application.ctx, 30*time.Second)
 		defer cancel()
 		snapshot, err := application.api.snapshot(ctx, id, limit)
+		if err == nil && pending {
+			snapshot.inbox, _ = application.api.inbox(ctx, id)
+		}
 		result := operationResult{sessionSnapshot: snapshot}
 		result.kind, result.sessionID, result.epoch, result.revision = "sync", id, epoch, revision
 		result.err = err
@@ -344,6 +372,7 @@ func (application *app) applyEvent(event apiEvent) {
 		application.status = "Connected"
 		application.requestSync()
 		application.requestCatalog()
+		application.detailsRefresh = time.Now()
 		application.dirty = true
 		return
 	}
@@ -353,11 +382,18 @@ func (application *app) applyEvent(event apiEvent) {
 		application.dirty = true
 		return
 	}
+	if event.Type == "session.deleted" && data.SessionID != "" {
+		application.removeSession(data.SessionID)
+		return
+	}
 	switch event.Type {
 	case "session.created", "session.deleted", "session.archived", "session.unarchived", "session.moved", "session.renamed":
 		application.catalogRefresh = time.Now().Add(300 * time.Millisecond)
 	}
 	if data.SessionID != "" && data.SessionID != application.session.ID {
+		return
+	}
+	if application.session.ID == "" || application.deleted[data.SessionID] {
 		return
 	}
 	application.revision++
@@ -373,8 +409,11 @@ func (application *app) applyEvent(event apiEvent) {
 			} `json:"item"`
 		}
 		if json.Unmarshal(event.Data, &queued) == nil && queued.Item.Type == "user" && queued.InboxID != "" {
-			if _, exists := application.messageIndex[queued.InboxID]; !exists {
-				application.messages = append(application.messages, chatMessage{ID: queued.InboxID, Role: "user", Text: queued.Item.Payload.Text, Pending: true})
+			if index, exists := application.messageIndex[queued.InboxID]; exists {
+				application.messages[index].Acknowledged = true
+				application.messages[index].Failed, application.messages[index].Uncertain = false, false
+			} else {
+				application.messages = append(application.messages, chatMessage{ID: queued.InboxID, Role: "user", Text: queued.Item.Payload.Text, Pending: true, Acknowledged: true})
 				application.rebuildIndex()
 				if application.followPreview {
 					application.selectLatestPreview()
@@ -389,6 +428,8 @@ func (application *app) applyEvent(event apiEvent) {
 		if json.Unmarshal(event.Data, &delivered) == nil {
 			if index, exists := application.messageIndex[delivered.InboxID]; exists && application.messages[index].Role == "user" {
 				application.messages[index].Pending = false
+				application.messages[index].Acknowledged = true
+				application.messages[index].Failed, application.messages[index].Uncertain = false, false
 				application.activePrompt = delivered.InboxID
 			}
 		}
@@ -400,6 +441,8 @@ func (application *app) applyEvent(event apiEvent) {
 			if index, exists := application.messageIndex[canceled.InboxID]; exists {
 				application.messages[index].Pending = false
 				application.messages[index].Failed = true
+				application.messages[index].Acknowledged = true
+				application.messages[index].Uncertain = false
 			}
 		}
 	case "session.model.selected":
@@ -408,6 +451,41 @@ func (application *app) applyEvent(event apiEvent) {
 		}
 		if json.Unmarshal(event.Data, &selected) == nil && selected.Model.ID != "" {
 			application.session.Model = &selected.Model
+			application.detailsRefresh = time.Now()
+		}
+	case "session.step.started":
+		var step struct {
+			Model *modelRef `json:"model"`
+		}
+		if json.Unmarshal(event.Data, &step) == nil && step.Model != nil {
+			application.details.lastModel = step.Model
+		}
+		application.busy = true
+	case "session.step.ended", "session.step.failed":
+		var step struct {
+			Tokens *tokenUsage `json:"tokens"`
+		}
+		if json.Unmarshal(event.Data, &step) == nil && step.Tokens != nil {
+			model := application.effectiveModel()
+			if application.details.lastModel != nil {
+				model = *application.details.lastModel
+			}
+			application.usage = &contextUsage{tokens: *step.Tokens, model: model}
+		}
+	case "session.compaction.ended", "session.revert.staged", "session.revert.cleared", "session.revert.committed":
+		application.requestSync()
+	case "session.status":
+		var state struct {
+			Status struct{ Type, Message string } `json:"status"`
+		}
+		if json.Unmarshal(event.Data, &state) == nil {
+			application.busy = state.Status.Type != "idle"
+			if state.Status.Type == "retry" {
+				application.status = "Server retrying: " + state.Status.Message
+			}
+			if !application.busy {
+				application.requestSync()
+			}
 		}
 	case "session.text.started":
 		message := application.ensureAssistant(data.AssistantMessageID)
@@ -489,6 +567,10 @@ func (application *app) removePermission(requestID string) {
 }
 
 func (application *app) applyOperation(result operationResult) {
+	if result.kind == "delete" {
+		application.applyDelete(result)
+		return
+	}
 	if result.catalog != nil {
 		application.applyCatalog(result)
 		return
@@ -500,6 +582,15 @@ func (application *app) applyOperation(result operationResult) {
 		application.applyPickerResult(result)
 		return
 	}
+	if result.details != nil {
+		application.detailsLoading = false
+		if result.err == nil {
+			result.details.lastModel = application.details.lastModel
+			application.details = *result.details
+		}
+		application.dirty = true
+		return
+	}
 	switch result.kind {
 	case "attach":
 		application.applyAttach(result)
@@ -508,14 +599,28 @@ func (application *app) applyOperation(result operationResult) {
 		application.syncing = false
 		if result.err == nil {
 			if result.revision != application.revision {
-				application.requestSync()
+				application.nextSync = time.Now().Add(time.Second)
 				return
 			}
 			if result.session != nil {
 				application.session = *result.session
 				application.busy = result.busy
 			}
+			uncertain := false
+			for _, message := range application.messages {
+				uncertain = uncertain || message.Uncertain
+			}
 			application.replaceMessages(result.messages)
+			application.mergeInbox(result.inbox)
+			if uncertain {
+				stillUncertain := false
+				for _, message := range application.messages {
+					stillUncertain = stillUncertain || message.Uncertain
+				}
+				if !stillUncertain {
+					application.status = "Prompt confirmed by server"
+				}
+			}
 			application.historyCursor = result.messageCursor
 			application.permissions = result.permissions
 			application.queuePreview()
@@ -523,16 +628,10 @@ func (application *app) applyOperation(result operationResult) {
 				application.requestSync()
 			}
 		}
+		application.nextSync = time.Now().Add(application.syncInterval())
 	case "prompt":
-		if result.err == nil {
-			application.status = "Prompt accepted"
-		} else {
-			application.busy = result.wasBusy
-			if index, ok := application.messageIndex[result.requestID]; ok {
-				application.messages[index].Pending = false
-				application.messages[index].Failed = true
-			}
-		}
+		application.applyPromptResult(result)
+		return
 	case "interrupt":
 		if result.err == nil {
 			application.status = "Interrupt requested"
@@ -571,6 +670,11 @@ func (application *app) submitPrompt() {
 	if text == "" {
 		return
 	}
+	if application.session.ID == "" && !strings.HasPrefix(text, "/") {
+		application.status = "Create or select a session first"
+		application.dirty = true
+		return
+	}
 	application.history = append(application.history, promptPrefix+text)
 	if len(application.history) > 100 {
 		application.history = application.history[len(application.history)-100:]
@@ -603,10 +707,20 @@ func (application *app) submitPrompt() {
 	application.queuePreview()
 	sessionID, epoch := application.session.ID, application.sessionEpoch
 	application.revision++
+	application.nextSync = time.Now().Add(5 * time.Second)
+	previous := application.sending[sessionID]
+	done := make(chan struct{})
+	application.sending[sessionID] = done
 	go func() {
-		ctx, cancel := context.WithTimeout(application.ctx, 30*time.Second)
-		defer cancel()
-		err := application.api.prompt(ctx, sessionID, text, id)
+		defer close(done)
+		if previous != nil {
+			select {
+			case <-previous:
+			case <-application.ctx.Done():
+				return
+			}
+		}
+		err := application.api.prompt(application.ctx, sessionID, text, id)
 		select {
 		case application.operations <- operationResult{kind: "prompt", sessionID: sessionID, epoch: epoch, requestID: id, wasBusy: wasBusy, err: err}:
 		case <-application.ctx.Done():
@@ -817,6 +931,8 @@ func (application *app) run() error {
 	application.queuePreview()
 	application.startEventStream()
 	application.requestCatalog()
+	application.detailsRefresh = time.Now()
+	application.nextSync = time.Now().Add(5 * time.Second)
 
 	var parser inputParser
 	var input [8192]byte
@@ -825,13 +941,7 @@ func (application *app) run() error {
 		for count := 0; count < 256; count++ {
 			select {
 			case item := <-application.stream:
-				if item.event != nil {
-					application.applyEvent(*item.event)
-				} else if item.err != nil {
-					application.streamConnected = false
-					application.status = "Event stream reconnecting: " + item.err.Error()
-					application.dirty = true
-				}
+				application.applyStream(item)
 			case result := <-application.operations:
 				application.applyOperation(result)
 			case received := <-application.signals:
@@ -849,6 +959,7 @@ func (application *app) run() error {
 		}
 		now := time.Now()
 		application.tickPicker(now)
+		application.tickConnection(now)
 		if !application.catalogRefresh.IsZero() && !now.Before(application.catalogRefresh) && !application.catalogLoading {
 			application.catalogRefresh = time.Time{}
 			application.requestCatalog()

@@ -73,6 +73,9 @@ func (application *app) applyCatalog(result operationResult) {
 			indexes[session.ID] = index
 		}
 		for _, session := range page.sessions {
+			if application.deleted[session.ID] {
+				continue
+			}
 			if index, exists := indexes[session.ID]; exists {
 				application.sessions[index] = session
 			} else {
@@ -95,6 +98,9 @@ func (application *app) cancelAttach() {
 }
 
 func (application *app) attachSession(id string) {
+	if application.deleted[id] {
+		return
+	}
 	application.cancelAttach()
 	if id == application.session.ID {
 		application.sidebarFocus = id
@@ -143,8 +149,12 @@ func (application *app) installSession(snapshot sessionSnapshot) {
 	application.followPreview, application.selectedPrompt, application.activePrompt = true, "", ""
 	application.messages = nil
 	application.sidebarHits = nil
+	application.deleteHits = nil
 	application.promptLimit = 10
 	application.historyCursor = snapshot.messageCursor
+	application.details, application.usage = sessionDetails{}, nil
+	application.detailsLoading = false
+	application.detailsRefresh = time.Now()
 	application.sidebarFocus = application.session.ID
 	application.responseScroll = 0
 	application.previewGeneration = ""
@@ -227,17 +237,25 @@ func (application *app) sidebarRows(width int) []displayRow {
 			found = true
 		}
 	}
-	if !found {
+	if !found && application.session.ID != "" {
 		sessions = append([]sessionInfo{application.session}, sessions...)
 	}
 	expanded := application.session.ID
 	if application.attachTarget != "" {
 		expanded = application.attachTarget
 	}
-	var rows []displayRow
+	rows := []displayRow{{text: "+ New session", style: sessionNameStyle, action: "new"}, {}}
 	for _, session := range sessions {
 		active := session.ID == expanded
-		rows = append(rows, sessionHeader(session, active, width)...)
+		headerWidth := width
+		if width >= 12 {
+			headerWidth -= 9
+		}
+		header := sessionHeader(session, active, max(1, headerWidth))
+		if width >= 12 {
+			header[0].deleteID = session.ID
+		}
+		rows = append(rows, header...)
 		if active {
 			if application.attachTarget != "" {
 				rows = append(rows, displayRow{text: "  Loading prompts…", style: dimStyle})
