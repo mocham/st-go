@@ -141,6 +141,11 @@
           });
           content.addEventListener("keydown", e => {
             if (e.key === "Escape") { e.preventDefault(); focus(); }
+            else if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key.toLowerCase() === "u" || e.key.toLowerCase() === "d")) {
+              e.preventDefault();
+              const scroll = content.scrollingElement;
+              scroll.scrollTop += (e.key.toLowerCase() === "u" ? -1 : 1) * scroll.clientHeight;
+            }
             else if (e.key === "Tab" && pane.data.view.captureTab) {
               e.preventDefault(); focus();
               send({ type: "key", key: "Tab", modifiers: modifiers(e) });

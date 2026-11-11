@@ -1089,6 +1089,8 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 			surface.html.Scroll = 0
 		case "scroll":
 			surface.html.Scroll += event.Value
+		case "view":
+			surface.html.Scroll += event.Value * t.displayRegions.viewport.Dy() / 1000000 / max(1, t.ch)
 		default:
 			return fmt.Errorf("unsupported HTML navigation")
 		}

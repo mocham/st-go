@@ -355,6 +355,18 @@ finally: termios.tcsetattr(0,termios.TCSANOW,saved)
   if (!await evaluate(`(() => { const f = ${preview}, r = f.getBoundingClientRect(), c = document.querySelector("canvas").getBoundingClientRect(); return r.left > c.left + c.width * 0.35 && r.right <= c.right && f.contentWindow.getComputedStyle(f.contentDocument.getElementById("web-probe")).color === "rgb(20, 80, 140)" && !window.previewScriptRan; })()`)) {
     throw new Error("HTML overlay geometry, CSS or document isolation is incorrect");
   }
+  if (!await evaluate(`(() => {
+    const f = ${preview}, doc = f.contentDocument, scroll = doc.scrollingElement;
+    const spacer = doc.createElement("div"); spacer.style.height = "4000px"; doc.body.appendChild(spacer);
+    scroll.scrollTop = 0;
+    const down = new f.contentWindow.KeyboardEvent("keydown", {key:"d",ctrlKey:true,bubbles:true,cancelable:true});
+    doc.dispatchEvent(down);
+    const paged = Math.abs(scroll.scrollTop-scroll.clientHeight) <= 1;
+    const up = new f.contentWindow.KeyboardEvent("keydown", {key:"u",ctrlKey:true,bubbles:true,cancelable:true});
+    doc.dispatchEvent(up);
+    const restored = scroll.scrollTop === 0;
+    spacer.remove(); return down.defaultPrevented && up.defaultPrevented && paged && restored;
+  })()`)) throw new Error("Ctrl-U/D did not page the focused HTML preview");
   await type(":%s/OLD/NEW/g");
   await type(":w");
   await wait(() => evaluate(`${preview}?.contentDocument?.getElementById("web-probe")?.textContent === "NEW web preview"`), "saved HTML preview refresh");

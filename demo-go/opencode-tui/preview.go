@@ -48,6 +48,7 @@ type richPreview struct {
 	targetID   string
 	nextRender time.Time
 	busy       bool
+	endPending bool
 	results    chan richRenderResult
 }
 
@@ -151,6 +152,7 @@ func (view *richPreview) clear() error {
 	view.html = nil
 	view.mediaPath = ""
 	view.nextRender = time.Time{}
+	view.endPending = false
 	if view.visible {
 		return view.command("region secondary clear")
 	}
@@ -282,6 +284,23 @@ func (view *richPreview) openPublished() error {
 		return err
 	}
 	view.displayed = view.published
+	if view.endPending {
+		return view.jumpToEnd()
+	}
+	return nil
+}
+
+func (view *richPreview) jumpToEnd() error {
+	// A second click can arrive while the first render or region handshake is
+	// still pending. Apply the jump after the document has actually been opened.
+	view.endPending = true
+	if !view.ready || view.displayed == 0 {
+		return nil
+	}
+	if err := view.command("region secondary position 1000000"); err != nil {
+		return err
+	}
+	view.endPending = false
 	return nil
 }
 

@@ -196,19 +196,19 @@ func (application *app) helpLine() string {
 		return "Enter confirms only DELETE · Esc/Ctrl-C cancel · Ctrl-Q quit"
 	}
 	if len(application.permissions) > 0 {
-		return "Permission input has focus · Ctrl-C interrupt · Ctrl-Q quit · PgUp/PgDn prompts"
+		return "Permission input has focus · Ctrl-U/D preview page · Ctrl-C interrupt · Ctrl-Q quit · PgUp/PgDn prompts"
 	}
 	if application.picker != nil {
 		return "↑/↓ select · Enter apply · Esc cancel · type to filter · PgUp/PgDn · Ctrl-R reload"
 	}
 	if application.filesMode {
-		return "Tab prompts · Click file to preview · Alt-↑/↓ file · F3 reload · PgUp/PgDn files · Alt-PgUp/PgDn preview · Ctrl-Q quit"
+		return "Tab prompts · Ctrl-U/D preview page · Click file to preview · Alt-↑/↓ file · F3 reload · PgUp/PgDn files · Ctrl-Q quit"
 	}
 	previewKey := "F2 rich pane"
 	if application.preview == nil || !application.preview.enabled {
 		previewKey = "text response"
 	}
-	return "Tab message files · Click session/prompt · More/F3 +10 · Alt-↑/↓ select · Alt-PgUp/PgDn response · /sessions /models /variants · Ctrl-Q quit · " + previewKey
+	return "Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /sessions /models /variants · Ctrl-Q quit · " + previewKey
 }
 
 func writeFull(writer io.Writer, data []byte) error {

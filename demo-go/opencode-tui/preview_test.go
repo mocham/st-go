@@ -108,6 +108,33 @@ func TestLargeWebResponseUsesChunkedDCS(t *testing.T) {
 	}
 }
 
+func TestEndJumpWaitsForPublicationAndDoesNotLeakToAnotherPrompt(t *testing.T) {
+	var output bytes.Buffer
+	view := &richPreview{out: &output, enabled: true, visible: true, pdfPath: "/preview.pdf"}
+	view.request("first", "Response")
+	if err := view.jumpToEnd(); err != nil || output.Len() != 0 {
+		t.Fatal("jump was sent before a document existed", err)
+	}
+	view.published = view.generation
+	if err := view.setReady(&regionLayout{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "region secondary open ") || !strings.HasSuffix(output.String(), "\x1bPregion secondary position 1000000\x1b\\") || view.endPending {
+		t.Fatal("publication lost deferred jump")
+	}
+	view.clear()
+	view.request("second", "Another response")
+	view.jumpToEnd()
+	view.clear()
+	output.Reset()
+	view.request("third", "Selected a different prompt")
+	view.published = view.generation
+	view.openPublished()
+	if strings.Contains(output.String(), "position 1000000") {
+		t.Fatal("old prompt's end jump affected a new selection")
+	}
+}
+
 func TestFileMediaPreviewAndResponseSwitchKeepIndependentResources(t *testing.T) {
 	for _, web := range []bool{false, true} {
 		name := "pdf"

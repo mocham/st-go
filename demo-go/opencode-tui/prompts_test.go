@@ -193,3 +193,77 @@ func TestRichSelectionInvalidatesOldRenderAndShowsPendingPlaceholder(t *testing.
 		t.Fatal("old response was published after selecting another prompt")
 	}
 }
+
+func TestRepeatedPromptClickJumpsToEndAndControlKeysPagePreview(t *testing.T) {
+	for _, mode := range []string{"text", "pdf", "web"} {
+		t.Run(mode, func(t *testing.T) {
+			application, output := promptTestApp(t, []apiMessage{
+				{ID: "msg_one", Type: "user", Text: "First question"}, answer("msg_a", strings.Repeat("Long answer\n", 100)),
+				{ID: "msg_two", Type: "user", Text: "Second question"}, answer("msg_b", "Another answer"),
+			}, mode != "text")
+			application.preview.web = mode == "web"
+			application.input.Insert("unfinished draft")
+			sidebarClick(t, application, "prompt", "msg_one")
+			if application.preview.endPending || application.responseScroll != 0 || strings.Contains(output.String(), "position 1000000") {
+				t.Fatal("first click jumped past the start")
+			}
+			if err := application.draw(); err != nil {
+				t.Fatal(err)
+			}
+			view := application.preview
+			view.displayed, view.published = view.generation, view.generation
+			generation, fileSequence, scroll := view.generation, application.fileSequence, application.scroll
+			output.Reset()
+			clicked := false
+			for y, hit := range application.sidebarHits {
+				if hit.kind == "prompt" && hit.id == "msg_one" {
+					application.handleInput(inputEvent{mouse: &mouseEvent{x: 2, y: y}})
+					clicked = true
+					break
+				}
+			}
+			if !clicked {
+				t.Fatal("selected prompt is not clickable")
+			}
+			if application.scroll != scroll || application.fileSequence != fileSequence || view.generation != generation || application.followPreview {
+				t.Fatal("repeat click reselected/reloaded the prompt or moved the sidebar")
+			}
+			if mode == "text" {
+				if application.responseScroll != application.responseEnd() || application.responseScroll == 0 {
+					t.Fatal("repeat click did not reach the end")
+				}
+			} else if output.String() != "\x1bPregion secondary position 1000000\x1b\\" {
+				t.Fatalf("repeat click navigation: %q", output.String())
+			}
+			output.Reset()
+			end := application.responseScroll
+			application.handleInput(inputEvent{key: "\x15"})
+			if mode == "text" && application.responseScroll != end-application.bodyLayout().response.height {
+				t.Fatal("Ctrl-U did not move a full screen")
+			}
+			application.handleInput(inputEvent{key: "\x04"})
+			if mode == "text" {
+				if application.responseScroll != end {
+					t.Fatal("Ctrl-D did not move a full screen")
+				}
+				application.handleInput(inputEvent{key: "\x04"})
+				if application.responseScroll != end {
+					t.Fatal("Ctrl-D overshot the end")
+				}
+			} else if output.String() != "\x1bPregion secondary view -1000000\x1b\\\x1bPregion secondary view 1000000\x1b\\" {
+				t.Fatalf("full-page commands: %q", output.String())
+			}
+			if application.input.Text() != promptPrefix+"unfinished draft" || !application.running || application.selectedPrompt != "msg_one" {
+				t.Fatal("paging edited the draft or changed selection")
+			}
+			application.filesMode = true
+			application.fileSelection = &fileSelection{text: strings.Repeat("File line\n", 100)}
+			application.responseScroll = 0
+			output.Reset()
+			application.handleInput(inputEvent{key: "\x04"})
+			if mode == "text" && application.responseScroll != application.bodyLayout().response.height || mode != "text" && !strings.Contains(output.String(), "view 1000000") {
+				t.Fatal("file preview paging failed")
+			}
+		})
+	}
+}

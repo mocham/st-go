@@ -827,6 +827,10 @@ func (application *app) handleInput(event inputEvent) {
 			application.scroll = max(0, application.scroll-max(1, application.rows/2))
 		case "<PageDown>":
 			application.scroll += max(1, application.rows/2)
+		case "\x15": // Ctrl-U
+			application.scrollResponseBy(-1, true)
+		case "\x04": // Ctrl-D
+			application.scrollResponseBy(1, true)
 		}
 		application.dirty = true
 		return
@@ -883,6 +887,12 @@ func (application *app) handleInput(event inputEvent) {
 		return
 	case "<A-PageDown>":
 		application.scrollResponse(1)
+		return
+	case "\x15": // Ctrl-U
+		application.scrollResponseBy(-1, true)
+		return
+	case "\x04": // Ctrl-D
+		application.scrollResponseBy(1, true)
 		return
 	case "<F3>":
 		if application.filesMode {

@@ -163,12 +163,43 @@ func (application *app) ensurePromptVisible() {
 }
 
 func (application *app) scrollResponse(direction int) {
+	application.scrollResponseBy(direction, false)
+}
+
+func (application *app) scrollResponseBy(direction int, fullPage bool) {
+	portion := 500000
+	if fullPage {
+		portion = 1000000
+	}
+	if application.preview != nil {
+		application.preview.endPending = false
+	}
 	if application.preview != nil && application.preview.visible {
-		if err := application.preview.command(fmt.Sprintf("region secondary view %d", direction*500000)); err != nil {
+		if err := application.preview.command(fmt.Sprintf("region secondary view %d", direction*portion)); err != nil {
 			application.status = err.Error()
 		}
 	} else {
-		application.responseScroll = max(0, application.responseScroll+direction*max(1, application.bodyLayout().response.height/2))
+		height := application.bodyLayout().response.height
+		step := max(1, height*portion/1000000)
+		application.responseScroll = max(0, min(application.responseEnd(), application.responseScroll+direction*step))
+	}
+	application.dirty = true
+}
+
+func (application *app) responseEnd() int {
+	rect := application.bodyLayout().response
+	return max(0, len(wrapText(application.selectedResponse(), rect.width))-rect.height)
+}
+
+func (application *app) jumpResponseEnd() {
+	application.followPreview = false
+	application.status = "End of response"
+	if application.preview != nil && application.preview.visible {
+		if err := application.preview.jumpToEnd(); err != nil {
+			application.status = err.Error()
+		}
+	} else {
+		application.responseScroll = application.responseEnd()
 	}
 	application.dirty = true
 }
@@ -223,7 +254,11 @@ func (application *app) handleMouse(mouse mouseEvent) {
 		case "session":
 			application.attachSession(hit.id)
 		case "prompt":
-			application.selectPrompt(hit.id)
+			if hit.id == application.selectedPrompt && !application.filesMode {
+				application.jumpResponseEnd()
+			} else {
+				application.selectPrompt(hit.id)
+			}
 		case "more":
 			application.morePrompts()
 		case "reload":

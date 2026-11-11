@@ -67,6 +67,7 @@ unavailable files show an error in the preview.
 
 The sidebar groups prompts by session, showing workdir and title. Click a session
 to expand it, a prompt to read its response, or **More** for older prompts.
+Click the already-selected prompt again to jump to the end of its response.
 Every session is boxed. The selected/connecting session is highlighted; sessions
 with work in progress show **Awaiting response**, including folded sessions.
 Inactive sessions use muted borders.
@@ -85,6 +86,7 @@ The header displays model, variant, and context usage.
 | PgUp/PgDn | Scroll session/prompt or file list |
 | Alt-Up/Down | Select newer/older prompt, or previous/next file |
 | Alt-PgUp/PgDn | Scroll response |
+| Ctrl-U / Ctrl-D | Move preview up / down one full screen (also in message-file previews) |
 | Mouse wheel | Scroll pane under pointer |
 | F2 | Toggle rich/text response |
 | Ctrl-C | Interrupt active work; quit while idle |

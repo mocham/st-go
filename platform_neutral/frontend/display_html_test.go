@@ -41,6 +41,16 @@ func TestHTMLPreviewIsRetainedOnlyByCapableBackends(t *testing.T) {
 	if surface.html.Scroll != 6 {
 		t.Fatal("coalescing lost relative HTML navigation")
 	}
+	before := surface.html.Scroll
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "view", Value: 1000000}); err != nil || surface.html.Scroll-before != trm.displayRegions.viewport.Dy()/trm.ch {
+		t.Fatal("HTML full-page forward navigation failed", err)
+	}
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "view", Value: -1000000}); err != nil || surface.html.Scroll != before {
+		t.Fatal("HTML full-page backward navigation failed", err)
+	}
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "position", Value: 1000000}); err != nil || surface.html.Position != 1000000 || surface.html.Scroll != 0 {
+		t.Fatal("HTML jump to end failed", err)
+	}
 	trm.ClearRegion(term.SecondaryRegion)
 	if surface.html.Document != nil {
 		t.Fatal("region clear retained HTML")
