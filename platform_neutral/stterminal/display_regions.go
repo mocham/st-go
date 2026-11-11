@@ -63,6 +63,12 @@ type RegionHooks interface {
 	ClearRegion(RegionID) error
 }
 
+// RegionOverlayHooks places the secondary preview over an application-owned
+// rectangle without resizing the main terminal grid. Reset removes the overlay.
+type RegionOverlayHooks interface {
+	SetRegionOverlay(CellRect) error
+}
+
 // RegionNavigation describes an application-owned preview position. scroll
 // values are signed wheel steps; seek values are one-based source lines.
 // position is a local continuous-view position in millionths (0..1,000,000).
@@ -111,6 +117,20 @@ func (t *Term) dslRegion(args []string) error {
 		return fmt.Errorf("region requires layout, split, reset, query, or a target")
 	}
 	switch args[0] {
+	case "overlay":
+		overlay, ok := t.hooks.(RegionOverlayHooks)
+		if !ok || len(args) != 5 {
+			return fmt.Errorf("region overlay requires supported X Y W H geometry")
+		}
+		var n [4]int
+		for i := range n {
+			v, err := strconv.Atoi(args[i+1])
+			if err != nil || v < 1 {
+				return fmt.Errorf("invalid overlay rectangle")
+			}
+			n[i] = v
+		}
+		return overlay.SetRegionOverlay(CellRect{n[0] - 1, n[1] - 1, n[2], n[3]})
 	case "stack":
 		if len(args) != 2 {
 			return fmt.Errorf("region stack requires the main height in rows")

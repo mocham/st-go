@@ -12,6 +12,7 @@ import (
 
 // modalPrompt is the shared modal input loop for the '/' and ':' prompts.
 func (b *Browser) modalPrompt(mode string, init []byte) {
+	b.clearWebPreview()
 	b.promptMode = mode
 	b.promptActive = true
 	b.promptAbort = false

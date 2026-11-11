@@ -239,6 +239,8 @@ func (t *Terminal) regionFrame() (regionFrame, bool) {
 	if surface.viewerPrevious != nil {
 		surface = *surface.viewerPrevious
 	}
+	surface.html.CaptureTab = s.overlay.Width > 0
+	surface.media.CaptureTab = s.overlay.Width > 0
 	return regionFrame{surface: surface, pane: s.pane, viewport: s.viewport, background: s.background, epoch: s.layoutEpoch, presentation: generation}, true
 }
 

@@ -113,6 +113,7 @@ type MediaView struct {
 	PositionID uint64 `json:"positionID"`
 	Scroll     int    `json:"scroll"`
 	Zoom       int    `json:"zoom,omitempty"`
+	CaptureTab bool   `json:"captureTab,omitempty"` // application-owned overlay navigation
 }
 type MediaSurface interface{ PresentMedia(uint64, MediaView) bool }
 

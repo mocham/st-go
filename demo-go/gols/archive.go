@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/mocham/GoLS/latexpdf"
+	_ "modernc.org/sqlite"
 )
 
 type documentMeta struct {
@@ -68,10 +68,10 @@ func openCorpus(file string) (*corpus, error) {
 	query := dsn.Query()
 	query.Set("mode", "ro")
 	query.Set("immutable", "1")
-	query.Set("_query_only", "1")
-	query.Set("_busy_timeout", "5000")
+	query.Add("_pragma", "query_only(ON)")
+	query.Add("_pragma", "busy_timeout(5000)")
 	dsn.RawQuery = query.Encode()
-	db, err := sql.Open("sqlite3", dsn.String())
+	db, err := sql.Open("sqlite", dsn.String())
 	if err != nil {
 		return nil, err
 	}

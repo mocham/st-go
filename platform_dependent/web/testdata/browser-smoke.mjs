@@ -351,8 +351,66 @@ finally: termios.tcsetattr(0,termios.TCSANOW,saved)
   await wait(() => evaluate(`${preview}?.contentDocument?.body?.textContent.includes("Markdown web preview") && !!${preview}?.contentDocument?.querySelector("svg")`), "Markdown and SVG math rendered as HTML");
   await type(":q!");
   await wait(() => evaluate(`!${preview}`), "HTML preview removed on editor exit");
+
+  // The file browser keeps the full PTY grid and pins navigation to the right
+  // of an application-owned HTML/media rectangle. Tab expands/restores it.
+  const files = path.join(dir, "files");
+  await fs.mkdir(files);
+  await fs.writeFile(path.join(files, "a.html"), '<h1 id="file-probe">File browser HTML</h1>');
+  await fs.writeFile(path.join(files, "b.md"), '# File browser Markdown\n\n$x^2$\n');
+  await fs.writeFile(path.join(files, "c.tex"), '\\documentclass{article}\n\\begin{document}File browser LaTeX $x^2$\\end{document}');
+  await fs.writeFile(path.join(files, "d.png"), fixture());
+  await fs.writeFile(path.join(files, "e.pdf"), pdf);
+  await fs.writeFile(path.join(files, "f.txt"), 'Ordinary text preview');
+  const key = async (key, code, windowsVirtualKeyCode, modifiers = 0) => {
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key, code, windowsVirtualKeyCode, modifiers });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode, modifiers });
+  };
+  const down = () => key("ArrowDown", "ArrowDown", 40);
+  const htmlText = text => evaluate(`${preview}?.contentDocument?.body?.textContent.includes(${JSON.stringify(text)})`);
+  const paneWidth = () => evaluate(`${preview}?.getBoundingClientRect().width || 0`);
+  await type(path.join(root, "BINARIES/file-browser") + " --web files");
+  await delay(300);
+  await down();
+  await wait(() => htmlText("File browser HTML"), "file-browser HTML preview");
+  const pinnedWidth = await paneWidth();
+  if (!await evaluate(`(() => { const r=${preview}.getBoundingClientRect(), c=document.querySelector("canvas").getBoundingClientRect(); return r.left < c.left+20 && r.right < c.right-300 && r.top > c.top+28; })()`)) throw new Error("File-browser preview overlaps pinned navigation or header");
+  await key("Tab", "Tab", 9, 8); // Shift+Tab cannot unpin in web mode.
+  await evaluate(`${preview}.contentWindow.focus();true`);
+  await key("Tab", "Tab", 9);
+  await wait(async () => await htmlText("File browser HTML") && await paneWidth() > pinnedWidth+300, "Tab hides pinned navigation");
+  await key("Tab", "Tab", 9);
+  await wait(async () => await htmlText("File browser HTML") && await paneWidth() === pinnedWidth, "Tab restores pinned navigation");
+  await command("Page.reload");
+  await wait(() => htmlText("File browser HTML"), "file-browser preview reconnect");
+  await down();
+  await wait(() => htmlText("File browser Markdown"), "file-browser Markdown preview");
+  await down();
+  await wait(() => htmlText("File browser LaTeX"), "file-browser LaTeX preview");
+  if (!await evaluate(`!!${preview}.contentDocument.querySelector("svg")`)) throw new Error("File-browser math lost its SVG rendering");
+  await down();
+  await wait(() => evaluate(`!${preview} && ${imagePreview}?.naturalWidth === 2`), "file-browser image media preview replaces HTML");
+  const imageWidth = await evaluate('document.querySelector(".media-preview").getBoundingClientRect().width');
+  await evaluate('document.querySelector(".media-preview").focus();true');
+  await key("Tab", "Tab", 9);
+  await wait(() => evaluate(`document.querySelector(".media-preview")?.getBoundingClientRect().width > ${imageWidth+300}`), "Tab hides navigation from focused media");
+  await key("Tab", "Tab", 9);
+  await wait(() => evaluate(`document.querySelector(".media-preview")?.getBoundingClientRect().width === ${imageWidth}`), "Tab restores navigation beside media");
+  await down();
+  await wait(() => evaluate('document.querySelector(".textLayer")?.textContent.includes("Browser PDF page 1")'), "file-browser PDF.js preview");
+  await command("Input.insertText", { text: "]" });
+  await wait(() => evaluate('document.querySelector(".textLayer")?.textContent.includes("Browser PDF page 2")'), "file-browser PDF next page");
+  await down();
+  await wait(() => evaluate(`!${preview} && !document.querySelector(".media-preview")`), "file-browser text selection releases media");
+  await key("Home", "Home", 36);
+  await down();
+  await wait(() => htmlText("File browser HTML"), "file-browser HTML restored");
+  await command("Emulation.setDeviceMetricsOverride", { width: 1000, height: 700, deviceScaleFactor: 1, mobile: false });
+  await wait(async () => await htmlText("File browser HTML") && await paneWidth() < pinnedWidth, "file-browser preview resize");
+  await command("Input.insertText", { text: "q" });
+  await wait(() => evaluate(`!${preview} && !document.querySelector(".media-preview")`), "file-browser exit releases preview");
   if (pageErrors.length) throw new Error("JavaScript errors: " + pageErrors.join("\n"));
-  console.log("PASS: Chromium semantic text, paint backpressure/input, browser media, govim HTML/CSS/Markdown, keyboard/IME, clipboard, mouse, resize and reconnect.");
+  console.log("PASS: Chromium semantic text, paint backpressure/input, browser media, govim and file-browser HTML/media, pinned navigation, keyboard/IME, clipboard, mouse, resize and reconnect.");
   console.log("Test artifacts: " + dir);
 } catch (error) {
   console.error(serverLog, browserLog);

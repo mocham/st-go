@@ -20,7 +20,7 @@ func WebSupported(path string) bool {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".html", ".htm", ".css", ".json":
+	case ".html", ".htm", ".xhtml", ".css", ".json":
 		return true
 	}
 	return false
@@ -45,7 +45,7 @@ func LoadWeb(path string, read Reader) (*Snapshot, error) {
 // The existing renderer already produces semantic HTML with inline SVG math.
 func RenderHTML(source *Snapshot) (body string, mathErrors int, err error) {
 	switch strings.ToLower(filepath.Ext(source.Root)) {
-	case ".html", ".htm":
+	case ".html", ".htm", ".xhtml":
 		return source.Source, 0, nil
 	case ".css", ".json":
 		text := source.Source

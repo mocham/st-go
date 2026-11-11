@@ -11,7 +11,7 @@ import (
 
 func makeSQLitePreviewTestDB(t *testing.T, path string, rows int) {
 	t.Helper()
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}

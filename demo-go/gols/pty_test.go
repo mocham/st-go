@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 
 func TestGoLSPTYSelectionPreviewAndVisibleContents(t *testing.T) {
 	file := writeTestCorpus(t)
-	db, err := sql.Open("sqlite3", file)
+	db, err := sql.Open("sqlite", file)
 	if err != nil {
 		t.Fatal(err)
 	}

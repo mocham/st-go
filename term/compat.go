@@ -28,6 +28,7 @@ type (
 	DisplayRegion         = stterminal.DisplayRegion
 	RegionImage           = stterminal.RegionImage
 	RegionHooks           = stterminal.RegionHooks
+	RegionOverlayHooks    = stterminal.RegionOverlayHooks
 	RegionNavigation      = stterminal.RegionNavigation
 	RegionNavigationHooks = stterminal.RegionNavigationHooks
 	RegionSearchHooks     = stterminal.RegionSearchHooks

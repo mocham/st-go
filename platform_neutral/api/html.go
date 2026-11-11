@@ -12,8 +12,9 @@ type HTMLDocument struct {
 type HTMLView struct {
 	Document   *HTMLDocument `json:"document,omitempty"`
 	PositionID uint64        `json:"positionID"`
-	Position   int           `json:"position"` // millionths of the scroll range
-	Scroll     int           `json:"scroll"`   // wheel steps since PositionID
+	Position   int           `json:"position"`             // millionths of the scroll range
+	Scroll     int           `json:"scroll"`               // wheel steps since PositionID
+	CaptureTab bool          `json:"captureTab,omitempty"` // application owns Tab/Shift+Tab even while preview is focused
 }
 
 type HTMLSupport interface{ SupportsHTML() bool }

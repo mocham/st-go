@@ -396,6 +396,10 @@ window.SceneClient = class {
           if (e.key === "Escape") {
             e.preventDefault();
             this.focus();
+          } else if (e.key === "Tab" && p.data.view.captureTab) {
+            e.preventDefault();
+            this.focus();
+            this.send({ type: "key", key: "Tab", modifiers: (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 4 : 0) | (e.altKey ? 8 : 0) | (e.metaKey ? 64 : 0) });
           }
         });
         element.addEventListener("scroll", () => {

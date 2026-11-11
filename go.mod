@@ -8,8 +8,6 @@ require (
 	golang.org/x/sys v0.49.0
 )
 
-require github.com/mattn/go-sqlite3 v1.14.32
-
 require (
 	codeberg.org/go-fonts/liberation v0.6.0
 	golang.org/x/text v0.42.0

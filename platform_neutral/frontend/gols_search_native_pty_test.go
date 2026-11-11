@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 	"st-go/ptyutil"
 	"st-go/term"
 )
@@ -24,7 +24,7 @@ import (
 func TestGoLSNativeDocumentSearchPTY(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "corpus.sqlite3")
-	db, err := sql.Open("sqlite3", file)
+	db, err := sql.Open("sqlite", file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ INSERT INTO documents VALUES(1,'AA/document.tex','AA','document.tex','.tex','Syn
 		t.Fatal(err)
 	}
 	binaryPath := filepath.Join(dir, "gols")
-	build := exec.Command("go", "-C", "demo-go/gols", "build", "-tags", "sqlite_omit_load_extension", "-o", binaryPath, "-ldflags", `-linkmode external -extldflags "-static"`, ".")
+	build := exec.Command("go", "-C", "demo-go/gols", "build", "-o", binaryPath, ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build gols:%v\n%s", err, output)
 	}

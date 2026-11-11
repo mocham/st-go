@@ -18,7 +18,7 @@ func (*testOutput) Flush() error { return nil }
 func writeTestCorpus(t *testing.T) string {
 	t.Helper()
 	file := filepath.Join(t.TempDir(), "corpus.sqlite3")
-	db, err := sql.Open("sqlite3", file)
+	db, err := sql.Open("sqlite", file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestCorpusHierarchySearchAndInputExpansion(t *testing.T) {
 
 func TestCorpusAddsUsedTableCompanionToStandaloneFragment(t *testing.T) {
 	file := writeTestCorpus(t)
-	db, err := sql.Open("sqlite3", file)
+	db, err := sql.Open("sqlite", file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestCorpusRefreshRemovesStalePreviewRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := sql.Open("sqlite3", file)
+	db, err := sql.Open("sqlite", file)
 	if err != nil {
 		t.Fatal(err)
 	}

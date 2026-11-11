@@ -131,7 +131,13 @@
             const link = e.target.closest?.("a");
             if (link && !link.getAttribute("href")?.startsWith("#")) e.preventDefault();
           });
-          content.addEventListener("keydown", e => { if (e.key === "Escape") { e.preventDefault(); focus(); } });
+          content.addEventListener("keydown", e => {
+            if (e.key === "Escape") { e.preventDefault(); focus(); }
+            else if (e.key === "Tab" && pane.data.view.captureTab) {
+              e.preventDefault(); focus();
+              send({ type: "key", key: "Tab", modifiers: modifiers(e) });
+            }
+          });
           scrollHTML(pane);
         };
         const css = (doc.css || "").replace(/<\/style/gi, "<\\/style");

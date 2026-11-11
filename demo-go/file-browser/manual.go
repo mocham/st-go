@@ -25,6 +25,10 @@ PREVIEW
   modes for newly painted previews. TeX and Markdown are rendered locally to
   paginated vector PDFs by latexpdf; Markdown supports inline and display
   LaTeX math through the same pipeline.
+  With --web, LaTeX/Markdown/HTML use asynchronous browser HTML previews;
+  images and PDFs use browser media rendering. Navigation is always pinned
+  while visible: Tab still hides/shows it; Shift+Tab is disabled. Scroll HTML
+  with the mouse or [ and ]; these keys change PDF pages.
   DOCX and XLSX have preliminary text-only previews extracted from their
   ZIP bundles. DOCX shows paragraphs and table text; XLSX shows sheet names,
   cell references and values (saved formula results, without recalculation).

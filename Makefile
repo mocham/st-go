@@ -9,7 +9,7 @@
 #   - libpng      : poppler's embedded-image support
 #   - libjpeg-turbo: poppler's JPEG/DCT image decoder
 #   - DjVuLibre  : static DjVu decoding for zat-djvu
-# SQLite comes from go-sqlite3's bundled amalgamation rather than third_party/.
+# SQLite uses the pure-Go modernc.org/sqlite driver on every backend.
 #
 # Full terminal profiles also use libpng and libjpeg-turbo for accelerated PNG
 # and JPEG decoding. Reduced profiles use native Go image codecs. Poppler uses
@@ -47,12 +47,10 @@ PREFIX     ?= /usr/local
 BINDIR     ?= $(PREFIX)/bin
 TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 
-# SQLite is only used by the full terminal. Omit it from reduced builds and
-# disable runtime extension loading so the static binary has no dlopen
-# dependency from SQLite.
+# The decoded-WebP SQLite cache is only used by the full native terminal.
 TABS ?= 1
 TAB_GO_TAGS = $(if $(filter 1,$(TABS)),terminal_tabs,)
-FULL_GO_TAGS = fastimage libwebp webpcache sqlite_omit_load_extension $(TAB_GO_TAGS)
+FULL_GO_TAGS = fastimage libwebp webpcache $(TAB_GO_TAGS)
 TERMINAL_NAMES = st st-web st-fb st-pdf st-min
 TERMINAL_PROFILE = $(OUTPUT_DIR)/.terminal-profile
 
@@ -407,15 +405,14 @@ $(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_PDF) $(GO_SRC)
 # Run it inside the terminal:
 #   ./BINARIES/st -e ./BINARIES/file-browser /path/to/files
 $(FILE_BROWSER): $(FB_GO_SRC)
-	go -C demo-go/file-browser build -trimpath -tags 'sqlite_omit_load_extension' -o $(abspath $@) -ldflags '-linkmode external -extldflags "-static"' .
+	CGO_ENABLED=0 go -C demo-go/file-browser build -trimpath -o $(abspath $@) .
 
 # --- GoLS static-corpus browser -------------------------------------------
 # Read-only terminal UI over one or more lecture-server corpus databases.
 # It shares latexpdf with lecture-server and asks st-go to display generated
 # vector PDFs through the existing DCS open protocol; no HTTP server is used.
 $(OUTPUT_DIR)/gols: $(GOLS_GO_SRC)
-	go -C demo-go/gols build -trimpath -tags 'sqlite_omit_load_extension' -o $(abspath $@) \
-		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' .
+	CGO_ENABLED=0 go -C demo-go/gols build -trimpath -o $(abspath $@) .
 
 # Real Vim on a pane-sized PTY, with save-triggered LaTeX PDF previews.
 $(OUTPUT_DIR)/vimtex: $(VIMTEX_GO_SRC)
@@ -474,11 +471,11 @@ test: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(IMAGE_D
 # Integrated profile, including the in-process pure-Go Pinyin tests.
 test-modules:
 	@set -e; for module in $(GO_MODULES); do \
-		GOWORK=off go -C "$$module" test -tags 'sqlite_omit_load_extension' ./... -count=1; \
+		GOWORK=off go -C "$$module" test ./... -count=1; \
 	done
 
 # Standard Go workflow: no graphical libraries or Make-built assets needed.
-# File-browser/GoLS use bundled SQLite and need a C compiler, not ALSA.
+# File-browser/GoLS use pure-Go SQLite and need no C compiler or ALSA.
 test-tui:
 	@set -e; for module in $(filter-out functionalities/audio,$(GO_MODULES)); do \
 		GOWORK=off go -C "$$module" test ./... -count=1; \
@@ -488,7 +485,7 @@ test-tui:
 test-web: st-web
 	CGO_ENABLED=0 go test -tags 'backend_web' ./platform_dependent/web ./platform_neutral/sharedclipboard
 
-test-web-browser: st-web govim
+test-web-browser: st-web govim file-browser
 	node platform_dependent/web/testdata/browser-smoke.mjs
 
 # End-to-end animated-WebP playback through the built browser, PTY, terminal

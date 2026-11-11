@@ -57,8 +57,8 @@ documents the shared host interface.
 * External openers are explicitly configured child commands, not a built-in
   dependency on a particular desktop. Vimtex/TeX tools are external programs.
 
-Other portability boundaries remain: entry points use Unix TTY/PTY/signal APIs;
-file-browser and GoLS use bundled SQLite/cgo. File-browser has **no ALSA/native
+Entry points use Unix TTY/PTY/signal APIs; file-browser and GoLS use pure-Go
+`modernc.org/sqlite`. File-browser has **no ALSA/native
 audio linkage**: MP3 playback is an authenticated terminal request, handled by
 st-go's `functionalities/audio` service. Metadata remains available on hosts
 without audio support. Universal readline Pinyin and its dictionary frontend

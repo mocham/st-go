@@ -106,9 +106,9 @@ clipboard used by other enabled st-go fb/web/X11 windows. It starts off on every
 launch and is not persisted. Disabled sessions perform no shared-clipboard SQL
 or polling. While enabled, the server polls revisions only while a browser is
 attached; browser security still requires the user to press **Copy** before the
-shared text can replace the browser/OS clipboard. The web build uses a pure-Go
-SQLite driver for this shared clipboard database; native builds retain their
-existing driver. No separate service exists.
+shared text can replace the browser/OS clipboard. Every backend uses the same
+pure-Go `modernc.org/sqlite` driver and shared clipboard database format.
+No separate service exists.
 
 Select with the mouse (Shift overrides application mouse reporting), then use
 **Copy** or Ctrl-Shift-C. Use native Ctrl-Shift-V or the **Paste** button to paste.

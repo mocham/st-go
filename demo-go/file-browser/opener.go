@@ -125,6 +125,7 @@ func (b *Browser) runTerminalToolIn(directory, tool, path string, options ...str
 		selected = b.files[b.idx]
 	}
 	raw, _ := unix.IoctlGetTermios(b.fd, unix.TCGETS)
+	b.clearWebPreview()
 	fmt.Fprint(b.out, "\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[0m\x1b[?1049l")
 	b.flush()
 	if savedTermios != nil {

@@ -164,6 +164,9 @@ func (b *Browser) drawDivider() {
 
 func (b *Browser) drawStatus() {
 	help := "  arrows  Enter  Tab nav  S-Tab pin  / path  : cmd  q quit"
+	if b.web {
+		help = "  arrows  Enter  Tab nav  / path  : cmd  q quit"
+	}
 	fmt.Fprintf(b.out, "\x1b[%d;1H%s%*s\x1b[%d;2H", b.rows, statusStyle, b.cols, "", b.rows)
 	fmt.Fprint(b.out, shorten(b.status, b.cols-len(help)-3))
 	if b.cols >= len(help)+2 {
@@ -212,6 +215,7 @@ func (b *Browser) clearPathPopup() {
 }
 
 func (b *Browser) clearPreview() {
+	b.clearWebPreview()
 	for row := 2; row < b.rows; row++ {
 		b.cup(row, 1)
 		fmt.Fprintf(b.out, "\x1b[%dX", b.previewW)

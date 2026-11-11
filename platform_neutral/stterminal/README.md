@@ -181,6 +181,7 @@ apply, and failures use the bounded diagnostic log.
 | --- | --- |
 | `region split 45%` | Reserve 45% of columns for the right preview |
 | `region split 40` | Reserve 40 columns initially |
+| `region overlay X Y W H` | Place the secondary preview in a fixed one-based cell rectangle, preserving the full main grid and PTY size |
 | `region stack 1` | Reserve one terminal row at the top, with a full-width preview below |
 | `region layout main X Y W H secondary X Y W H` | Atomically set explicit cell rectangles |
 | `region secondary open '<path>' [page N\|current] [fit-contain\|fit-width\|fit-height\|native]` | Replace the preview with a static image or PDF page |
@@ -220,6 +221,15 @@ For a 120×40 window:
 ```sh
 printf '\033P%s\033\\' 'region layout main 1 1 70 40 secondary 71 1 50 40'
 ```
+
+`region overlay X Y W H` instead retains the full main grid and places the
+secondary preview over the specified in-bounds rectangle. Applications reserve
+those cells themselves (for example, file-browser's pinned sidebar layout).
+The rectangle stays fixed in cells and clips on physical shrink; issue another
+overlay command to reposition it. `region reset` removes it, and ordinary
+split/stack/layout commands replace it. HTML, media, and navigation use the same
+`region secondary` commands in either mode. Browser overlays route Tab/Shift+Tab
+to the application even when their document has keyboard focus.
 
 Resizing preserves the requested side-by-side width ratio or stacked main-row
 count, updates the PTY, and re-renders the preview. At one column/row respectively,

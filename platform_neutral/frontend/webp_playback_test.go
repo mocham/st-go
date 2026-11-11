@@ -35,7 +35,7 @@ func TestWebPAnimationPlaybackAcrossCacheStates(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cachePath := filepath.Join(t.TempDir(), "frames.sqlite3")
 			if test.migrated {
-				db, err := sql.Open("sqlite3", cachePath)
+				db, err := sql.Open("sqlite", cachePath)
 				if err != nil {
 					t.Fatal(err)
 				}

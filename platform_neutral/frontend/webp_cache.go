@@ -17,8 +17,8 @@ import (
 
 	"st-go/limits"
 
-	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/sys/unix"
+	_ "modernc.org/sqlite"
 )
 
 const staticWebPFrame = -1
@@ -61,12 +61,11 @@ func openWebPCache(path string) (*webPCache, error) {
 		return nil, err
 	}
 	params := url.Values{
-		"_busy_timeout": []string{"100"},
-		"_journal_mode": []string{"WAL"},
-		"_synchronous":  []string{"NORMAL"},
+		"_pragma":      []string{"busy_timeout(100)", "journal_mode(WAL)"},
+		"_synchronous": []string{"NORMAL"},
 	}
 	dsn := (&url.URL{Scheme: "file", Path: path, RawQuery: params.Encode()}).String()
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}

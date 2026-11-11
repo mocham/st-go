@@ -15,7 +15,8 @@ import (
 )
 
 // The public interface is rectangle-based; this backend currently supports
-// adjoining main-left/secondary-right or main-top/secondary-bottom regions.
+// adjoining main-left/secondary-right or main-top/secondary-bottom regions,
+// plus an application-reserved overlay on the full-size main grid.
 // Layout belongs to Terminal.mu. Preview content, navigation and jobs belong
 // to mu. Lock order is Terminal.mu -> mu; preview workers never take Terminal.mu.
 // Geometry is copied at layout changes so workers never read the terminal grid.
@@ -23,8 +24,9 @@ type displayRegionState struct {
 	documentCancel        func()
 	documentQuery         uint64
 	mu                    sync.Mutex
-	mainWidth, totalWidth int // requested ratio, preserved across WM resizes
-	mainRows, windowRows  int // nonzero mainRows selects a stacked layout
+	mainWidth, totalWidth int           // requested ratio, preserved across WM resizes
+	mainRows, windowRows  int           // nonzero mainRows selects a stacked layout
+	overlay               term.CellRect // positive width keeps the main grid full-sized
 	secondary             *regionSurface
 	listPreview           *regionSurface // suspended image/PDF while a list is shown
 	listVisible           *regionListSurface
@@ -140,6 +142,11 @@ func (t *Terminal) Regions() []term.DisplayRegion {
 		if t.displayRegions.mainRows > 0 {
 			bounds = term.CellRect{Y: t.rows, Width: t.cols, Height: t.physicalRows() - t.rows}
 		}
+		if t.displayRegions.overlay.Width > 0 {
+			bounds = t.displayRegions.overlay
+			bounds.X, bounds.Y = min(bounds.X, t.cols), min(bounds.Y, t.rows)
+			bounds.Width, bounds.Height = min(bounds.Width, t.cols-bounds.X), min(bounds.Height, t.rows-bounds.Y)
+		}
 		regions = append(regions, term.DisplayRegion{ID: term.SecondaryRegion, Bounds: bounds})
 	}
 	return regions
@@ -201,6 +208,7 @@ func (t *Terminal) SetRegions(regions []term.DisplayRegion) error {
 	}
 	s := &t.displayRegions
 	s.mu.Lock()
+	s.overlay = term.CellRect{}
 	if mainWidth == cols {
 		if registry, ok := t.host.(api.MediaRegistry); ok {
 			for _, surface := range []*regionSurface{s.secondary, s.listPreview} {
@@ -229,13 +237,33 @@ func (t *Terminal) SetRegions(regions []term.DisplayRegion) error {
 	return nil
 }
 
+// SetRegionOverlay reuses the retained preview's resource/presentation lifecycle
+// while leaving cursor coordinates, the terminal grid and PTY dimensions alone.
+func (t *Terminal) SetRegionOverlay(bounds term.CellRect) error {
+	cols, rows := t.physicalCols(), t.physicalRows()
+	if t.termCore == nil || t.cw < 1 || t.ch < 1 || bounds.X < 0 || bounds.X >= cols || bounds.Y < 0 || bounds.Y >= rows || bounds.Width < 1 || bounds.Width > cols-bounds.X || bounds.Height < 1 || bounds.Height > rows-bounds.Y {
+		return fmt.Errorf("overlay must be a positive in-bounds cell rectangle")
+	}
+	t.pauseRegionPaint(t.termCore.IsPaintPaused())
+	s := &t.displayRegions
+	s.mu.Lock()
+	s.overlay = bounds
+	s.mainWidth, s.totalWidth, s.mainRows = 0, 0, 0
+	if s.secondary == nil {
+		s.secondary = &regionSurface{dirty: true}
+	}
+	s.mu.Unlock()
+	t.applyDisplayLayout(cols, rows)
+	return nil
+}
+
 // applyDisplayLayout also runs after a physical resize. At a one-column window
 // the preview is temporarily hidden; the requested ratio and content survive.
 func (t *Terminal) applyDisplayLayout(cols, rows int) {
 	s := &t.displayRegions
 	s.mu.Lock()
 	mainCols, mainRows := cols, rows
-	if s.secondary != nil {
+	if s.secondary != nil && s.overlay.Width == 0 {
 		if s.mainRows > 0 {
 			mainRows = min(s.mainRows, max(1, rows-1))
 		} else if cols > 1 {
@@ -803,7 +831,7 @@ func (t *Terminal) requestRegionPaint() {
 
 func (t *Terminal) terminalClip() image.Rectangle {
 	r := image.Rect(0, 0, t.fbW, t.fbH)
-	if t.displayRegions.secondary != nil {
+	if t.displayRegions.secondary != nil && t.displayRegions.overlay.Width == 0 {
 		r = r.Intersect(image.Rect(t.borderpx, t.borderpx, t.borderpx+t.cols*t.cw, t.borderpx+t.rows*t.ch))
 	}
 	return r
@@ -811,13 +839,19 @@ func (t *Terminal) terminalClip() image.Rectangle {
 
 func (t *Terminal) secondaryPixels() image.Rectangle {
 	r := t.secondaryPanePixels()
-	if t.displayRegions.mainRows == 0 {
+	if t.displayRegions.mainRows == 0 && t.displayRegions.overlay.Width == 0 {
 		r.Min.X += min(3, max(0, r.Dx()-1))
 	}
 	return r
 }
 
 func (t *Terminal) secondaryPanePixels() image.Rectangle {
+	if b := t.displayRegions.overlay; b.Width > 0 {
+		// Clip in cells before multiplying, including after a physical shrink.
+		x, y := min(b.X, t.cols), min(b.Y, t.rows)
+		w, h := min(b.Width, t.cols-x), min(b.Height, t.rows-y)
+		return image.Rect(t.borderpx+x*t.cw, t.borderpx+y*t.ch, t.borderpx+(x+w)*t.cw, t.borderpx+(y+h)*t.ch).Intersect(image.Rect(0, 0, t.fbW, t.fbH))
+	}
 	if t.displayRegions.mainRows > 0 {
 		return image.Rect(t.borderpx, t.borderpx+t.rows*t.ch, t.borderpx+t.cols*t.cw, t.borderpx+t.physicalRows()*t.ch).Intersect(image.Rect(0, 0, t.fbW, t.fbH))
 	}

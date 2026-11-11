@@ -110,6 +110,8 @@ type Browser struct {
 	atlasClean        bool
 	previewPageTotal  int
 	documentPreviewer *previewDocumentRenderer
+	web               bool
+	webPreview        webPreviewState
 
 	// info pane
 	infoName, infoKind, infoSize, infoMode, infoTime string
@@ -268,6 +270,7 @@ func (b *Browser) setup() {
 	b.previewPageTotal = 0
 	b.status = "Ready"
 	b.navigation = navigation.DefaultPanel()
+	b.navigation.Pinned = b.web
 	b.atlasClean = true
 	b.lastClickIdx = -1
 	b.doubleClickMS = parseDoubleClickMS()
@@ -298,6 +301,7 @@ func (b *Browser) cleanup() {
 		return
 	}
 	b.cleaned = true
+	b.closeWebPreview()
 	b.stopPlayback()
 	for _, ctx := range b.archiveStack {
 		if ctx.zip != nil {
@@ -390,6 +394,9 @@ func (b *Browser) updatePreviewWidth() {
 // preview and sidebar are intentionally left untouched until another file or
 // page is painted.
 func (b *Browser) toggleNavigationPin() {
+	if b.web {
+		return
+	}
 	b.navigation.TogglePin()
 	b.updatePreviewWidth()
 }
@@ -1151,6 +1158,15 @@ func previewPageAfter(page, delta, total int) int {
 }
 
 func (b *Browser) changePreviewPage(delta int) {
+	if b.webPreview.active {
+		if b.webPreview.html {
+			b.dcs(fmt.Sprintf("region secondary scroll %d", delta*max(1, b.rows-5)))
+		} else if b.idx >= 0 && b.idx < len(b.files) && b.isPDF(b.files[b.idx]) {
+			b.dcs(fmt.Sprintf("region secondary page %d", delta))
+		}
+		b.flush()
+		return
+	}
 	if b.idx < 0 {
 		return
 	}
@@ -1207,6 +1223,7 @@ func (b *Browser) runShellCommand(code string) {
 			}
 		}
 	}
+	b.clearWebPreview()
 	fmt.Fprint(b.out, "\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[0m\x1b[?1049l")
 	b.flush()
 	cmd := exec.Command("bash", "-c", code)
@@ -1226,6 +1243,7 @@ func (b *Browser) renderAll() {
 	b.paintStop()
 	b.terminalSize()
 	if b.compact {
+		b.clearWebPreview()
 		fmt.Fprintf(b.out, "\x1b[2J\x1b[H%s click to restore %s", headerStyle, resetStyle)
 		b.paintResume()
 		b.flush()
@@ -1243,6 +1261,7 @@ func (b *Browser) renderAll() {
 }
 
 func (b *Browser) renderPreview() {
+	b.clearWebPreview()
 	// A full-width floating preview overwrites the sidebar's cells. Redraw the
 	// complete sidebar after the preview so it remains visually on top.
 	b.previewFullRedraw = b.navigation.Floating()
@@ -1275,6 +1294,15 @@ func (b *Browser) renderPreview() {
 			return
 		}
 		path = real
+	}
+	if b.web {
+		if b.promptActive || b.manualActive {
+			b.clearPreview()
+			return
+		}
+		if b.renderWebPreview(path) {
+			return
+		}
 	}
 	if isRenderedDocument(path) && isRegularFile(path) {
 		b.clearPreview()
@@ -1597,6 +1625,7 @@ func (b *Browser) loop() {
 // state is never accessed from the signal handler.
 func (b *Browser) processPendingSignals() {
 	b.pollTabRequests()
+	b.pollWebPreview()
 	for {
 		select {
 		case sig := <-b.sigCh:

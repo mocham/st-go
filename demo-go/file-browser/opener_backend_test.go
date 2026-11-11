@@ -75,7 +75,7 @@ func TestPlatformOpenerSelection(t *testing.T) {
 						want = "legacy"
 					}
 				}
-				_, command, gotCustom, _, done, code := parseArgs(args)
+				_, command, gotCustom, _, _, done, code := parseArgs(args)
 				if done || code != 0 || command != want || gotCustom != custom {
 					t.Fatalf("selection=(%q,%t,%t,%d), want (%q,%t,false,0)", command, gotCustom, done, code, want, custom)
 				}
@@ -83,7 +83,7 @@ func TestPlatformOpenerSelection(t *testing.T) {
 		}
 	}
 	for _, args := range [][]string{{"--open-for"}, {"--open-for", "fb"}, {"--open-for=fb"}, {"--open-for", "typo", "code"}, {"--open-for=", "code"}} {
-		_, _, _, _, done, code := parseArgs(args)
+		_, _, _, _, _, done, code := parseArgs(args)
 		if !done || code != 2 {
 			t.Fatal("invalid registration accepted", args)
 		}

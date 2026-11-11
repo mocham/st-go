@@ -1,14 +1,12 @@
-//go:build !cgo || backend_web
-
 package sharedclipboard
 
 import (
-	_ "modernc.org/sqlite"
 	"net/url"
+
+	_ "modernc.org/sqlite"
 )
 
-// Clipboard synchronization remains compatible with native terminals' cache.
-// This driver is unrelated to the native-only decoded-WebP pixel cache.
+// All backends share the same SQLite driver and on-disk clipboard format.
 const sqliteDriver = "sqlite"
 
 func driverParams() url.Values {

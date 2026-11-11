@@ -14,7 +14,16 @@ Run these commands from the repository root:
 
 make file-browser
 ./BINARIES/st -e ./BINARIES/file-browser /some/path
+./BINARIES/st-web -e ./BINARIES/file-browser --web /some/path
 ```
+
+`--web` enables browser-native HTML previews for LaTeX, Markdown, and HTML
+(including XHTML), plus browser-decoded images and PDF.js previews for PDFs.
+HTML conversion runs asynchronously; changing the selection discards stale
+results. The right-hand navigation panel is always pinned while visible:
+**Tab** hides/shows it and expands/restores the preview, and **Shift+Tab** is
+disabled. Scroll HTML with the mouse or `[`/`]`; these keys change PDF pages.
+Prompts and the manual remain available, and previews follow resize/reconnect.
 
 ## Navigation and prompts
 
@@ -243,8 +252,8 @@ and Vimtex (**0.8×**) are unchanged.
 ## Module and audio ownership
 
 This directory is an independent Go module. `go build` and `go test ./...`
-need a C compiler for bundled SQLite, but **no graphical libraries or ALSA
-linker flags**. From the repository root:
+use pure-Go `modernc.org/sqlite` and require **no C compiler, graphical libraries,
+or ALSA linker flags**. From the repository root:
 
 ```sh
 GOWORK=off go -C demo-go/file-browser build -o ../../BINARIES/file-browser .

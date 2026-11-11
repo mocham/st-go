@@ -26,7 +26,7 @@ func TestFileBrowserNativeDocumentToolsPTY(t *testing.T) {
 		}
 	}
 	browser := filepath.Join(tools, "file-browser")
-	build := exec.Command("go", "-C", "demo-go/file-browser", "build", "-o", browser, "-tags", "sqlite_omit_load_extension", ".")
+	build := exec.Command("go", "-C", "demo-go/file-browser", "build", "-o", browser, ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build browser: %v\n%s", err, output)
 	}

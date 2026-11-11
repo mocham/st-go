@@ -14,6 +14,7 @@ func usage() {
 
 Options:
   -a, --hidden       include hidden entries
+  --web             browser HTML/media previews with a pinned navigation sidebar
   -o, --open CODE    legacy custom opener (X11 only)
   --open-for PLATFORM CODE
                     register an opener for x11, fb, web, or all (repeatable)
@@ -39,7 +40,7 @@ scroll, Ctrl+D/Ctrl+U page with one overlapping row, [ and ] change PDF or
 rendered document pages, / enters a path, : runs a shell command
 (with $F = selected file and $D = current directory), :s/old/new/[g] renames
 matching entries, :help shows this manual, Tab shows/hides the navigation
-sidebar, Shift+Tab toggles floating/pinned navigation, . toggles hidden files,
+sidebar, Shift+Tab toggles floating/pinned navigation (disabled by --web), . toggles hidden files,
 r refreshes, q quits.
 Mouse: click selects, double-click opens/enters, wheel scrolls the list; over a
 PDF or rendered document preview the wheel changes pages.
@@ -52,7 +53,7 @@ directories: tables contain paginated record entries.
 
 // parseArgs mirrors the shell argument loop. It returns the settings, whether
 // parsing is finished (help/--), and the exit code when finished.
-func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool, startDir string, done bool, code int) {
+func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool, startDir string, web bool, done bool, code int) {
 	showHidden = parseShowHidden()
 	openCmd, customOpen = defaultOpenCommand()
 	for i := 0; i < len(args); i++ {
@@ -60,10 +61,12 @@ func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool,
 		switch {
 		case a == "-a" || a == "--hidden":
 			showHidden = true
+		case a == "--web":
+			web = true
 		case a == "-o" || a == "--open":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "file-browser: --open requires shell code")
-				return showHidden, openCmd, customOpen, startDir, true, 2
+				return showHidden, openCmd, customOpen, startDir, web, true, 2
 			}
 			i++
 			if openPlatformMatches("x11") {
@@ -80,7 +83,7 @@ func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool,
 			if a == "--open-for" {
 				if i+2 >= len(args) {
 					fmt.Fprintln(os.Stderr, "file-browser: --open-for requires PLATFORM and shell code")
-					return showHidden, openCmd, customOpen, startDir, true, 2
+					return showHidden, openCmd, customOpen, startDir, web, true, 2
 				}
 				i++
 				platform = args[i]
@@ -88,7 +91,7 @@ func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool,
 			platform = strings.ToLower(platform)
 			if !validOpenPlatform(platform) || i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "file-browser: --open-for requires x11, fb, web, or all and shell code")
-				return showHidden, openCmd, customOpen, startDir, true, 2
+				return showHidden, openCmd, customOpen, startDir, web, true, 2
 			}
 			i++
 			if openPlatformMatches(platform) {
@@ -96,36 +99,36 @@ func parseArgs(args []string) (showHidden bool, openCmd string, customOpen bool,
 			}
 		case a == "-h" || a == "--help":
 			usage()
-			return showHidden, openCmd, customOpen, startDir, true, 0
+			return showHidden, openCmd, customOpen, startDir, web, true, 0
 		case a == "--":
 			rest := args[i+1:]
 			if len(rest) > 1 {
 				fmt.Fprintln(os.Stderr, "file-browser: only one directory may be specified")
-				return showHidden, openCmd, customOpen, startDir, true, 2
+				return showHidden, openCmd, customOpen, startDir, web, true, 2
 			}
 			if len(rest) == 1 {
 				startDir = rest[0]
 			}
-			return showHidden, openCmd, customOpen, startDir, false, 0
+			return showHidden, openCmd, customOpen, startDir, web, false, 0
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(os.Stderr, "file-browser: unknown option: %s\n", a)
-			return showHidden, openCmd, customOpen, startDir, true, 2
+			return showHidden, openCmd, customOpen, startDir, web, true, 2
 		default:
 			if startDir != "" {
 				fmt.Fprintln(os.Stderr, "file-browser: only one directory may be specified")
-				return showHidden, openCmd, customOpen, startDir, true, 2
+				return showHidden, openCmd, customOpen, startDir, web, true, 2
 			}
 			startDir = a
 		}
 	}
-	return showHidden, openCmd, customOpen, startDir, false, 0
+	return showHidden, openCmd, customOpen, startDir, web, false, 0
 }
 
 func run() int {
 	if len(os.Args) == 3 && os.Args[1] == "--native-video" {
 		return runNativeVideoHelper(os.Args[2])
 	}
-	showHidden, openCmd, customOpen, startDir, done, code := parseArgs(os.Args[1:])
+	showHidden, openCmd, customOpen, startDir, web, done, code := parseArgs(os.Args[1:])
 	if done {
 		return code
 	}
@@ -146,6 +149,7 @@ func run() int {
 	b.showHidden = showHidden
 	b.openCmd = openCmd
 	b.customOpen = customOpen
+	b.web = web
 	b.sigCh = make(chan os.Signal, 8)
 	signal.Notify(b.sigCh, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	b.setup()
