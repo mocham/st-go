@@ -57,8 +57,14 @@ try {
     await command("Runtime.enable"); await command("Page.enable"); await command("Network.enable");
     await command("Emulation.setDeviceMetricsOverride", {width:1000, height:720, deviceScaleFactor:1, mobile:false});
     await command("Page.addScriptToEvaluateOnNewDocument", {source:`
+      window.resizeLog = [];
       const Native = WebSocket; window.WebSocket = class extends Native {
         constructor(...args) { super(...args); window.terminalSocket = this; }
+        send(data) {
+          const message = JSON.parse(data);
+          if (message.type === "resize") window.resizeLog.push([message.width, message.height]);
+          super.send(data);
+        }
       };
     `});
     const evaluate = async expression => {
@@ -79,6 +85,28 @@ try {
   const select = id => row(id) + '.querySelector(".select")';
   const action = (id, name) => `[...${row(id)}.querySelectorAll("button")].find(b=>b.textContent===${JSON.stringify(name)})`;
   await a.click(select(first.id)); await a.connected();
+  const viewportState = `(() => {
+    const viewport = document.getElementById("viewport"), screen = document.getElementById("screen");
+    const bounds = viewport.getBoundingClientRect(), canvas = screen.getBoundingClientRect();
+    return {resizes:window.resizeLog, viewport:[bounds.width,bounds.height,viewport.clientWidth,viewport.clientHeight], screen:[screen.width,screen.height], canvas:[canvas.width,canvas.height]};
+  })()`;
+  async function stableViewport(page, width, height, deviceScaleFactor) {
+    await page.command("Emulation.setDeviceMetricsOverride", {width,height,deviceScaleFactor,mobile:false});
+    await delay(1000);
+    const before = await page.evaluate(viewportState);
+    await delay(1000);
+    const after = await page.evaluate(viewportState);
+    if (after.resizes.length !== before.resizes.length) throw new Error("Terminal resize did not settle: " + JSON.stringify(after));
+    if (after.canvas.some((size, i) => size > after.viewport[i] + .05)) throw new Error("Canvas exceeds its viewport: " + JSON.stringify(after));
+  }
+  // Scaling creates fractional toolbar/viewport dimensions; a narrow window
+  // wraps both bars. Old Canvas sizes must not cause scrollbar/resize feedback.
+  for (const zoom of ["1", "1.1"]) {
+    await a.evaluate(`document.body.style.zoom = ${JSON.stringify(zoom)}`);
+    for (const size of [[1000,720,1],[375,667,1],[800,601,1.25]]) await stableViewport(a,...size);
+  }
+  await a.evaluate('document.body.style.zoom = "1"');
+  await stableViewport(a,1000,720,1);
   if (!await a.evaluate('window.top === window && !document.querySelector("iframe")')) throw new Error("Terminal is not a top-level page");
   // B's initial snapshot is deliberately stale until the user refreshes it.
   if (await b.evaluate(select(first.id)+".disabled")) throw new Error("Occupancy was pushed to another browser");
@@ -91,6 +119,10 @@ try {
   await b.click('document.getElementById("new")'); await b.connected();
   const secondID = await b.evaluate("document.body.dataset.pty");
   if (secondID === first.id) throw new Error("New terminal reused occupied PTY");
+  await b.evaluate('document.body.style.zoom = "1.1"');
+  await stableViewport(b,375,667,1.25); // overflowing terminal-list bar
+  await b.evaluate('document.body.style.zoom = "1"');
+  await stableViewport(b,1000,720,1);
   await b.text("printf second > b.input\n");
   await wait(async () => (await fs.readFile(path.join(dir,"b.input"),"utf8").catch(()=>"")) === "second", "independent PTY input");
   if (await a.evaluate(`!!${row(secondID)}`)) throw new Error("New PTY list update was pushed");
@@ -108,6 +140,7 @@ try {
   if (await fs.access(pdf).then(()=>true,()=>false)) {
     await a.text(`printf '\\033Pregion split 50%%; region secondary open "${pdf}"\\033\\\\'\n`);
     await wait(() => a.evaluate('!!document.querySelector(".media-preview .pdf-page canvas")'), "prefixed PDF canvas");
+    await stableViewport(a,1000,720,1);
   }
   await a.evaluate("window.beforeReload = true");
   await a.command("Page.reload");
@@ -131,7 +164,7 @@ try {
   const invalid = requests.filter(raw => { const u = new URL(raw); return ["http:","ws:"].includes(u.protocol) && u.host === new URL(address).host && !u.pathname.startsWith("/tools/terminal/"); });
   if (invalid.length) throw new Error("Unprefixed requests: " + invalid.join(", "));
   if (errors.length) throw new Error(JSON.stringify(errors));
-  console.log("Service browser smoke passed: exclusive control, independent PTYs, manual refresh, hide/show, prefixed rendering, reload, zero-PTY recovery, application tabs");
+  console.log("Service browser smoke passed: stable scaled/wrapped toolbars, exclusive control, independent PTYs, manual refresh, hide/show, prefixed rendering, reload, zero-PTY recovery, application tabs");
 } finally {
   socket?.close(); browser?.kill("SIGTERM"); server?.kill("SIGTERM");
   await fs.writeFile(path.join(dir,"server.log"),serverLog);

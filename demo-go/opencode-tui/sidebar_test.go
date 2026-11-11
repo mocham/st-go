@@ -243,3 +243,115 @@ func TestRapidSessionClicksUseLastSelectionAndFailuresRestoreCurrent(t *testing.
 		t.Fatal("failed attachment corrupted active session")
 	}
 }
+
+func TestSessionBoxesHighlightActivityAndRetainBoundedHitRows(t *testing.T) {
+	application, output := promptTestApp(t, []apiMessage{{ID: "msg_prompt", Type: "user", Text: "Question with 世界 and long wrapping text"}}, true)
+	application.session.Title = "Current 世界"
+	application.session.Location.Directory = "/work/current"
+	application.sessions = []sessionInfo{application.session, {ID: "ses_other", Title: "Other", Location: locationRef{Directory: "/work/other"}}}
+	application.streamConnected = true
+	findTop := func(id string, width int) displayRow {
+		t.Helper()
+		for _, row := range application.sidebarRows(width) {
+			if row.sessionID == id {
+				return row
+			}
+		}
+		t.Fatalf("missing session %s", id)
+		return displayRow{}
+	}
+	if row := findTop("ses_test", 60); !strings.Contains(row.text, "Active · Ready") || !strings.HasPrefix(row.text, "┏") || row.style != activeSessionStyle {
+		t.Fatalf("active session not boxed/highlighted: %+v", row)
+	}
+	if row := findTop("ses_other", 60); !strings.Contains(row.text, "Inactive") || !strings.HasPrefix(row.text, "┌") || row.style != dimStyle {
+		t.Fatalf("inactive session not boxed: %+v", row)
+	}
+	application.applyEvent(apiEvent{Type: "session.execution.started", Data: json.RawMessage(`{"sessionID":"ses_other"}`)})
+	if row := findTop("ses_other", 60); !strings.Contains(row.text, "Awaiting response") || row.style != waitingSessionStyle {
+		t.Fatalf("folded running session lost activity: %+v", row)
+	}
+	if application.busy || application.selectedPrompt != "msg_prompt" || len(application.messages) != 1 {
+		t.Fatal("background activity changed current conversation")
+	}
+	application.applyEvent(apiEvent{Type: "session.status", Data: json.RawMessage(`{"sessionID":"ses_other","status":{"type":"idle"}}`)})
+	if row := findTop("ses_other", 60); !strings.Contains(row.text, "Inactive") {
+		t.Fatal("idle event left stale waiting title")
+	}
+	application.busy = true
+	if row := findTop("ses_test", 60); !strings.Contains(row.text, "Awaiting response") {
+		t.Fatal("current busy title missing")
+	}
+	application.busy = false
+	application.messages[0].Pending = true
+	if row := findTop("ses_test", 60); !strings.Contains(row.text, "Awaiting response") {
+		t.Fatal("queued prompt not shown as waiting")
+	}
+	application.messages[0].Pending = false
+	application.attachTarget = "ses_other"
+	if row := findTop("ses_other", 60); !strings.Contains(row.text, "Connecting") || row.style != activeSessionStyle {
+		t.Fatal("connecting session not highlighted")
+	}
+	application.attachTarget = ""
+	for _, width := range []int{3, 8, 14, 28, 60, 80} {
+		for _, row := range application.sidebarRows(width) {
+			if row.sessionID == "" && row.promptID == "" && len(row.spans) == 0 {
+				continue
+			}
+			if textWidth(row.text) != width {
+				t.Fatalf("box row width %d != %d: %q", textWidth(row.text), width, row.text)
+			}
+			if len(row.spans) > 0 {
+				var text strings.Builder
+				for _, span := range row.spans {
+					text.WriteString(span.text)
+				}
+				if text.String() != row.text {
+					t.Fatalf("styled box differs from hit row: %q vs %q", text.String(), row.text)
+				}
+			}
+		}
+	}
+	application.rows, application.cols = 40, 60
+	if err := application.draw(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), activeSessionBackground) {
+		t.Fatal("active box background missing")
+	}
+	for y, id := range application.deleteHits {
+		if id != "ses_test" {
+			continue
+		}
+		// The border is outside the delete button; its leftmost cell is inside.
+		application.handleInput(inputEvent{mouse: &mouseEvent{x: 60, y: y}})
+		if application.deleteConfirmation != nil {
+			t.Fatal("right border triggered deletion")
+		}
+		application.handleInput(inputEvent{mouse: &mouseEvent{x: 52, y: y}})
+		if application.deleteConfirmation == nil || application.deleteConfirmation.session.ID != id {
+			t.Fatal("delete button hit bounds do not match drawing")
+		}
+		application.closeDeleteConfirmation()
+		return
+	}
+	t.Fatal("no visible delete target")
+}
+
+func TestSessionActivitySnapshotsDoNotOverwriteNewerEvents(t *testing.T) {
+	application, _ := promptTestApp(t, nil, false)
+	application.applyOperation(operationResult{sessionSnapshot: sessionSnapshot{active: map[string]bool{"ses_other": true}}, activityRevision: application.activityRevision})
+	if !application.sessionActivity["ses_other"] {
+		t.Fatal("snapshot did not restore background activity")
+	}
+	stale := operationResult{sessionSnapshot: sessionSnapshot{active: map[string]bool{"ses_other": true}}, activityRevision: application.activityRevision}
+	application.applyEvent(apiEvent{Type: "session.execution.succeeded", Data: json.RawMessage(`{"sessionID":"ses_other"}`)})
+	application.applyOperation(stale)
+	if application.sessionActivity["ses_other"] {
+		t.Fatal("stale snapshot resurrected completed activity")
+	}
+	application.applyOperation(operationResult{sessionSnapshot: sessionSnapshot{active: map[string]bool{"ses_other": true}}, activityRevision: application.activityRevision})
+	application.applyOperation(operationResult{sessionSnapshot: sessionSnapshot{active: map[string]bool{}}, activityRevision: application.activityRevision})
+	if application.sessionActivity["ses_other"] {
+		t.Fatal("refresh did not repair missed idle event")
+	}
+}

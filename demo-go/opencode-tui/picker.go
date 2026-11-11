@@ -105,6 +105,7 @@ func (application *app) pickerRequest(kind string, call func(context.Context) (o
 	picker.request = application.pickerSequence
 	request := picker.request
 	id, epoch := application.session.ID, application.sessionEpoch
+	activityRevision := application.activityRevision
 	ctx, cancel := context.WithTimeout(application.ctx, 30*time.Second)
 	picker.cancel = cancel
 	picker.loading, picker.err = true, ""
@@ -116,6 +117,7 @@ func (application *app) pickerRequest(kind string, call func(context.Context) (o
 			result.picker = &pickerResult{}
 		}
 		result.kind, result.sessionID, result.epoch, result.err = kind, id, epoch, err
+		result.activityRevision = activityRevision
 		result.picker.request = request
 		select {
 		case application.operations <- result:
@@ -368,6 +370,9 @@ func (application *app) tickPicker(now time.Time) {
 }
 
 func (application *app) activeInput() *readline.Line {
+	if application.deleteConfirmation != nil {
+		return application.deleteConfirmation.input
+	}
 	if application.picker != nil {
 		return application.picker.input
 	}

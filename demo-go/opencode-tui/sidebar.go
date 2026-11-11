@@ -10,8 +10,11 @@ import (
 )
 
 const (
-	workdirStyle     = "\x1b[0;38;2;239;182;204m"
-	sessionNameStyle = "\x1b[0;38;2;169;204;238m"
+	workdirStyle            = "\x1b[0;38;2;239;182;204m"
+	sessionNameStyle        = "\x1b[0;38;2;169;204;238m"
+	activeSessionStyle      = "\x1b[1;38;5;81m"
+	waitingSessionStyle     = "\x1b[1;38;5;220m"
+	activeSessionBackground = "\x1b[48;5;236m"
 )
 
 type sidebarHit struct{ kind, id string }
@@ -112,12 +115,13 @@ func (application *app) attachSession(id string) {
 	application.status = "Opening session…"
 	application.queuePreview()
 	sequence, currentID, epoch := application.attachSequence, application.session.ID, application.sessionEpoch
+	activityRevision := application.activityRevision
 	ctx, cancel := context.WithTimeout(application.ctx, 30*time.Second)
 	application.attachCancel = cancel
 	go func() {
 		defer cancel()
 		snapshot, err := application.api.snapshot(ctx, id, 10)
-		result := operationResult{kind: "attach", attachToken: sequence, sessionID: currentID, epoch: epoch, sessionSnapshot: snapshot, err: err}
+		result := operationResult{kind: "attach", attachToken: sequence, sessionID: currentID, epoch: epoch, sessionSnapshot: snapshot, activityRevision: activityRevision, err: err}
 		select {
 		case application.operations <- result:
 		case <-application.ctx.Done():
@@ -145,6 +149,7 @@ func (application *app) installSession(snapshot sessionSnapshot) {
 	application.revision++
 	application.session = *snapshot.session
 	application.busy = snapshot.busy
+	application.sessionActivity[application.session.ID] = snapshot.busy
 	application.syncing, application.permissionBusy = false, false
 	application.permissions = snapshot.permissions
 	application.followPreview, application.selectedPrompt, application.activePrompt = true, "", ""
@@ -201,7 +206,7 @@ func sessionHeader(session sessionInfo, active bool, width int) []displayRow {
 	if directory == "" {
 		directory = "(workdir unavailable)"
 	}
-	parts := []textSpan{{marker, dimStyle}, {directory, workdirStyle + emphasis}, {" ", resetStyle}, {title, sessionNameStyle + emphasis}}
+	parts := []textSpan{{marker, dimStyle}, {title, sessionNameStyle + emphasis}, {" · ", dimStyle}, {directory, workdirStyle + emphasis}}
 	rows := []displayRow{{sessionID: session.ID}}
 	used := 0
 	for _, part := range parts {
@@ -229,6 +234,68 @@ func sessionHeader(session sessionInfo, active bool, width int) []displayRow {
 	return rows
 }
 
+// Keep borders separate from the styled content and from row hit targets.
+// Prompts and actions inside a box retain their original click behavior.
+func sessionBoxRow(row displayRow, width int, border, background string, heavy bool) displayRow {
+	edge := "│"
+	if heavy {
+		edge = "┃"
+	}
+	inner := max(1, width-2)
+	if row.style == selectedPromptStyle {
+		background = "" // Keep the selected prompt's own contrasting background.
+	}
+	spans := []textSpan{{edge, border}}
+	if len(row.spans) == 0 {
+		spans = append(spans, textSpan{padCells(row.text, inner), row.style + background})
+	} else {
+		for _, span := range row.spans {
+			spans = append(spans, textSpan{span.text, span.style + background})
+		}
+		spans = append(spans, textSpan{strings.Repeat(" ", max(0, inner-textWidth(row.text))), resetStyle + background})
+	}
+	row.text = edge + padCells(row.text, inner) + edge
+	row.spans = append(spans, textSpan{edge, border})
+	row.style = border
+	return row
+}
+
+func sessionBoxBorder(width int, label, style string, heavy, bottom bool) displayRow {
+	left, line, right := "┌", "─", "┐"
+	if bottom {
+		left, right = "└", "┘"
+	}
+	if heavy {
+		left, line, right = "┏", "━", "┓"
+		if bottom {
+			left, right = "┗", "┛"
+		}
+	}
+	inside := ""
+	if label != "" {
+		inside = truncateCells(" "+label+" ", max(0, width-2))
+	}
+	return displayRow{text: left + inside + strings.Repeat(line, max(0, width-2-textWidth(inside))) + right, style: style}
+}
+
+func (application *app) sessionBoxState(id string, active bool) (label, style string, highlighted bool) {
+	switch {
+	case application.deleting[id]:
+		return "Deleting…", waitingSessionStyle, true
+	case id == application.attachTarget:
+		return "Connecting…", activeSessionStyle, true
+	case id == application.session.ID && (application.busy || application.pendingPrompts()), id != application.session.ID && application.sessionActivity[id]:
+		return "Awaiting response", waitingSessionStyle, true
+	case active:
+		if !application.streamConnected {
+			return "Active · Reconnecting…", activeSessionStyle, true
+		}
+		return "Active · Ready", activeSessionStyle, true
+	default:
+		return "Inactive", dimStyle, false
+	}
+}
+
 func (application *app) sidebarRows(width int) []displayRow {
 	sessions := append([]sessionInfo(nil), application.sessions...)
 	found := false
@@ -248,30 +315,49 @@ func (application *app) sidebarRows(width int) []displayRow {
 	rows := []displayRow{{text: "+ New session", style: sessionNameStyle, action: "new"}, {}}
 	for _, session := range sessions {
 		active := session.ID == expanded
-		headerWidth := width
-		if width >= 12 {
+		label, border, highlighted := application.sessionBoxState(session.ID, active)
+		background := ""
+		if highlighted {
+			background = activeSessionBackground
+		}
+		top := sessionBoxBorder(width, label, border, highlighted, false)
+		top.sessionID = session.ID
+		rows = append(rows, top)
+		inner := max(1, width-2)
+		headerWidth := inner
+		if inner >= 12 {
 			headerWidth -= 9
 		}
 		header := sessionHeader(session, active, max(1, headerWidth))
-		if width >= 12 {
+		if inner >= 12 {
 			header[0].deleteID = session.ID
 		}
-		rows = append(rows, header...)
+		content := header
 		if active {
 			if application.attachTarget != "" {
-				rows = append(rows, displayRow{text: "  Loading prompts…", style: dimStyle})
+				for _, line := range wrapText("  Loading prompts…", inner) {
+					content = append(content, displayRow{text: line, style: dimStyle})
+				}
 			} else {
-				rows = append(rows, application.promptRows(width)...)
+				content = append(content, application.promptRows(inner)...)
 				count := len(application.promptIndexes())
 				if count > application.promptLimit || application.historyCursor != "" {
 					label := "  More (+10 older prompts)"
 					if application.syncing && count < application.promptLimit {
 						label = "  Loading older prompts…"
 					}
-					rows = append(rows, displayRow{text: label, style: sessionNameStyle, action: "more"})
+					for _, line := range wrapText(label, inner) {
+						content = append(content, displayRow{text: line, style: sessionNameStyle, action: "more"})
+					}
 				}
 			}
 		}
+		for _, row := range content {
+			rows = append(rows, sessionBoxRow(row, width, border, background, highlighted))
+		}
+		bottom := sessionBoxBorder(width, "", border, highlighted, true)
+		bottom.sessionID = session.ID
+		rows = append(rows, bottom)
 		rows = append(rows, displayRow{})
 	}
 	if application.catalogError != "" {

@@ -174,6 +174,9 @@ func (application *app) scrollResponse(direction int) {
 }
 
 func (application *app) handleMouse(mouse mouseEvent) {
+	if application.deleteConfirmation != nil {
+		return
+	}
 	if mouse.release || mouse.button&32 != 0 || mouse.button&128 != 0 {
 		return
 	}
@@ -211,7 +214,7 @@ func (application *app) handleMouse(mouse mouseEvent) {
 		return
 	}
 	if mouse.button&3 == 0 && application.paintedLayout.prompts.contains(mouse.x, mouse.y) {
-		if id := application.deleteHits[mouse.y]; id != "" && mouse.x >= application.paintedLayout.prompts.width-7 {
+		if id := application.deleteHits[mouse.y]; id != "" && mouse.x >= application.paintedLayout.prompts.width-8 && mouse.x < application.paintedLayout.prompts.width {
 			application.deleteSession(id)
 			return
 		}

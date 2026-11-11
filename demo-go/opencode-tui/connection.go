@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
@@ -84,6 +85,45 @@ func (application *app) pendingPrompts() bool {
 	return false
 }
 
+func (application *app) replaceSessionActivity(active map[string]bool) {
+	application.sessionActivity = make(map[string]bool, len(active))
+	for id, busy := range active {
+		if busy && !application.deleted[id] {
+			application.sessionActivity[id] = true
+		}
+	}
+	application.activityRevision++
+	application.dirty = true
+}
+
+// Track activity before filtering messages to the selected session, so a folded
+// session remains highlighted while the server works on it. Snapshot refreshes
+// repair missed events, but must not overwrite newer activity from any session.
+func (application *app) recordSessionActivity(event apiEvent, id string) {
+	if id == "" || application.deleted[id] {
+		return
+	}
+	busy := false
+	switch event.Type {
+	case "session.execution.started", "session.step.started", "session.text.started":
+		busy = true
+	case "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted":
+	case "session.status":
+		var data struct {
+			Status struct{ Type string } `json:"status"`
+		}
+		if json.Unmarshal(event.Data, &data) != nil || data.Status.Type == "" {
+			return
+		}
+		busy = data.Status.Type != "idle"
+	default:
+		return
+	}
+	application.sessionActivity[id] = busy
+	application.activityRevision++
+	application.dirty = true
+}
+
 func (application *app) tickConnection(now time.Time) {
 	if application.api == nil {
 		return
@@ -143,6 +183,8 @@ func (application *app) applyPromptResult(result operationResult) {
 		application.status = "Send status unknown; checking server: " + result.err.Error()
 	}
 	application.nextSync = time.Now()
+	application.sessionActivity[application.session.ID] = application.busy || application.pendingPrompts()
+	application.activityRevision++
 	application.queuePreview()
 	application.dirty = true
 }

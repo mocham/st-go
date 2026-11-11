@@ -144,6 +144,12 @@ func (application *app) header() string {
 }
 
 func (application *app) statusLine() (string, string) {
+	if confirmation := application.deleteConfirmation; confirmation != nil {
+		if confirmation.err != "" {
+			return " " + confirmation.err, warningStyle
+		}
+		return " Type DELETE to confirm session deletion · Esc cancels ", warningStyle
+	}
 	if application.attachTarget != "" {
 		return " Opening session… · Esc cancels ", statusStyle
 	}
@@ -186,6 +192,9 @@ func (application *app) statusLine() (string, string) {
 }
 
 func (application *app) helpLine() string {
+	if application.deleteConfirmation != nil {
+		return "Enter confirms only DELETE · Esc/Ctrl-C cancel · Ctrl-Q quit"
+	}
 	if len(application.permissions) > 0 {
 		return "Permission input has focus · Ctrl-C interrupt · Ctrl-Q quit · PgUp/PgDn prompts"
 	}
@@ -283,7 +292,7 @@ func (application *app) drawPanes(output *strings.Builder) {
 			if application.deleting[row.deleteID] {
 				label = "[Wait…]"
 			}
-			drawCells(output, layout.prompts.width-7, y, 8, warningStyle, label)
+			drawCells(output, layout.prompts.width-8, y, 8, warningStyle, label)
 			application.deleteHits[y] = row.deleteID
 		}
 		switch {
@@ -314,7 +323,9 @@ func (application *app) draw() error {
 	bodyHeight := max(1, application.rows-headers-3)
 	var visible []displayRow
 	header := application.header()
-	if application.picker != nil {
+	if application.deleteConfirmation != nil {
+		visible = application.deleteConfirmation.rows(application.cols)
+	} else if application.picker != nil {
 		visible = append([]displayRow{{text: " /" + application.picker.kind + " · " + application.session.Title, style: headerStyle}}, application.picker.rows(max(0, bodyHeight-1))...)
 	}
 
@@ -333,7 +344,7 @@ func (application *app) draw() error {
 			drawAt(&output, row, resetStyle, "", application.cols)
 		}
 	}
-	if application.picker == nil {
+	if application.picker == nil && application.deleteConfirmation == nil {
 		application.drawPanes(&output)
 	} else {
 		application.sidebarHits = nil

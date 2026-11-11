@@ -385,18 +385,11 @@ func TestBrowserAssetsUseDevicePixelViewportWithoutRasterScaling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	style, err := assets.ReadFile("assets/style.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(client, []byte("ResizeObserver")) || !bytes.Contains(client, []byte(`type: "resize"`)) || !bytes.Contains(client, []byte("viewport.clientWidth * ratio")) || !bytes.Contains(client, []byte("viewport.clientHeight * ratio")) {
+	if !bytes.Contains(client, []byte("ResizeObserver")) || !bytes.Contains(client, []byte(`type: "resize"`)) || !bytes.Contains(client, []byte("viewportSize.width * ratio")) || !bytes.Contains(client, []byte("viewportSize.height * ratio")) {
 		t.Fatal("browser client does not size its backing buffer to viewport device pixels")
 	}
 	if !bytes.Contains(client, []byte(`screen.style.width = width / ratio + "px"`)) || !bytes.Contains(client, []byte(`screen.style.height = height / ratio + "px"`)) || !bytes.Contains(client, []byte("window.devicePixelRatio")) {
 		t.Fatal("canvas does not map source pixels to browser device pixels")
-	}
-	if !bytes.Contains(style, []byte("overflow: auto")) {
-		t.Fatal("fixed-size canvas is not scrollable")
 	}
 }
 

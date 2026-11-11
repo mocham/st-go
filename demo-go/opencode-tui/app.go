@@ -43,18 +43,19 @@ type streamItem struct {
 
 type operationResult struct {
 	sessionSnapshot
-	kind        string
-	err         error
-	requestID   string
-	wasBusy     bool
-	sessionID   string
-	epoch       uint64
-	revision    uint64
-	picker      *pickerResult
-	catalog     *catalogResult
-	attachToken uint64
-	details     *sessionDetails
-	file        *fileResult
+	kind             string
+	err              error
+	requestID        string
+	wasBusy          bool
+	sessionID        string
+	epoch            uint64
+	revision         uint64
+	picker           *pickerResult
+	catalog          *catalogResult
+	attachToken      uint64
+	details          *sessionDetails
+	file             *fileResult
+	activityRevision uint64
 }
 
 type app struct {
@@ -119,6 +120,9 @@ type app struct {
 	deleting                 map[string]bool
 	deleted                  map[string]bool
 	deleteHits               map[int]string
+	deleteConfirmation       *deleteConfirmation
+	sessionActivity          map[string]bool
+	activityRevision         uint64
 
 	filesMode                 bool
 	promptScroll, filesScroll int
@@ -137,6 +141,7 @@ func newApp(client *apiClient, session sessionInfo, messages []apiMessage, permi
 		promptLimit: 10, sessions: []sessionInfo{session}, sidebarFocus: session.ID,
 		rows: 24, cols: 80, running: true, dirty: true, status: "Ready",
 		sending: make(map[string]<-chan struct{}), deleting: make(map[string]bool), deleted: make(map[string]bool),
+		sessionActivity: make(map[string]bool),
 	}
 	application.replaceMessages(messages)
 	application.permissions = append([]permissionRequest(nil), permissions...)
@@ -342,6 +347,7 @@ func (application *app) requestSync() {
 	application.syncing = true
 	application.nextSync = time.Now().Add(application.syncInterval())
 	id, epoch, revision := application.session.ID, application.sessionEpoch, application.revision
+	activityRevision := application.activityRevision
 	limit := application.promptLimit
 	pending := application.pendingPrompts()
 	go func() {
@@ -353,6 +359,7 @@ func (application *app) requestSync() {
 		}
 		result := operationResult{sessionSnapshot: snapshot}
 		result.kind, result.sessionID, result.epoch, result.revision = "sync", id, epoch, revision
+		result.activityRevision = activityRevision
 		result.err = err
 		select {
 		case application.operations <- result:
@@ -385,6 +392,7 @@ func (application *app) applyEvent(event apiEvent) {
 	case "session.created", "session.deleted", "session.archived", "session.unarchived", "session.moved", "session.renamed":
 		application.catalogRefresh = time.Now().Add(300 * time.Millisecond)
 	}
+	application.recordSessionActivity(event, data.SessionID)
 	if data.SessionID != "" && data.SessionID != application.session.ID {
 		return
 	}
@@ -573,6 +581,9 @@ func (application *app) removePermission(requestID string) {
 }
 
 func (application *app) applyOperation(result operationResult) {
+	if result.err == nil && result.active != nil && result.activityRevision == application.activityRevision {
+		application.replaceSessionActivity(result.active)
+	}
 	if result.kind == "delete" {
 		application.applyDelete(result)
 		return
@@ -713,6 +724,8 @@ func (application *app) submitPrompt() {
 	application.selectedPrompt, application.followPreview = id, true
 	application.resetFiles()
 	application.busy = true
+	application.sessionActivity[application.session.ID] = true
+	application.activityRevision++
 	application.sidebarFocus = application.session.ID
 	application.status = "Sending…"
 	application.queuePreview()
@@ -776,6 +789,10 @@ func (application *app) handleInput(event inputEvent) {
 			application.status = err.Error()
 		}
 		application.dirty = true
+		return
+	}
+	if application.deleteConfirmation != nil {
+		application.handleDeleteInput(event)
 		return
 	}
 	if event.mouse != nil {
@@ -940,6 +957,7 @@ func (application *app) run() error {
 	defer application.cancel()
 	defer application.input.Close()
 	defer application.closePicker()
+	defer application.closeDeleteConfirmation()
 	defer application.cancelAttach()
 	defer application.cancelFile()
 	application.terminalSize()

@@ -127,6 +127,7 @@ func run(args []string) int {
 	defer rich.close()
 	application := newApp(client, *snapshot.session, snapshot.messages, snapshot.permissions, os.Stdout, int(os.Stdin.Fd()), rich)
 	application.historyCursor, application.busy = snapshot.messageCursor, snapshot.busy
+	application.replaceSessionActivity(snapshot.active)
 	if err := application.run(); err != nil {
 		fmt.Fprintln(os.Stderr, "opencode-tui:", err)
 		return 1

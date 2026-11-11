@@ -13,7 +13,7 @@
   const notifyService = detail => { if (managed) window.dispatchEvent(new CustomEvent("st-terminal", { detail })); };
   let htmlState;
   let socket, metrics, composing = false, clipboard = "", reconnect, screenRatio = 0, syncEnabled = false;
-  let resizeTimer, heartbeat, requestedWidth = 0, requestedHeight = 0, wheel = 0;
+  let resizeTimer, heartbeat, viewportSize, requestedWidth = 0, requestedHeight = 0, wheel = 0;
   const utf8 = new TextEncoder();
   const message = text => { status.textContent = text; };
   const syncState = data => {
@@ -69,17 +69,22 @@
     placeHTML();
   };
   const resize = () => {
-    if (!metrics) return;
+    if (!metrics || !viewportSize) return;
     const ratio = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
-    const width = Math.max(2 * metrics.border + metrics.cellWidth, Math.floor(viewport.clientWidth * ratio));
-    const height = Math.max(2 * metrics.border + metrics.cellHeight, Math.floor(viewport.clientHeight * ratio));
+    const width = Math.max(2 * metrics.border + metrics.cellWidth, Math.floor(viewportSize.width * ratio));
+    const height = Math.max(2 * metrics.border + metrics.cellHeight, Math.floor(viewportSize.height * ratio));
     if (width === requestedWidth && height === requestedHeight) return;
     if (width * height * 4 > 64 * 1024 * 1024) { message("Viewport exceeds pixel budget"); return; }
     requestedWidth = width; requestedHeight = height;
     placeHTML();
     send({ type: "resize", width, height });
   };
-  new ResizeObserver(() => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 60); }).observe(viewport);
+  new ResizeObserver(([entry]) => {
+    // clientWidth/Height round fractional CSS pixels before device scaling.
+    // Use the content box so wrapping toolbars and zoom cannot oversize Canvas.
+    viewportSize = entry.contentRect;
+    clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 60);
+  }).observe(viewport);
   window.addEventListener("resize", resize, { passive: true });
   setInterval(() => {
     const ratio = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;

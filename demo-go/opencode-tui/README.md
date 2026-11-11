@@ -67,7 +67,12 @@ unavailable files show an error in the preview.
 
 The sidebar groups prompts by session, showing workdir and title. Click a session
 to expand it, a prompt to read its response, or **More** for older prompts.
-**+ New session** creates one; **Delete** removes a session and its children.
+Every session is boxed. The selected/connecting session is highlighted; sessions
+with work in progress show **Awaiting response**, including folded sessions.
+Inactive sessions use muted borders.
+**+ New session** creates one; **Delete** opens a confirmation for the named
+session and its children. Type exactly **DELETE** and press Enter to delete,
+or press Esc/Ctrl-C to cancel. Your unfinished prompt is preserved.
 The header displays model, variant, and context usage.
 
 | Key | Action |

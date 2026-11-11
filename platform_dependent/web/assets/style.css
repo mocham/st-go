@@ -6,7 +6,10 @@ header { flex: 0 0 36px; display: flex; gap: 10px; align-items: center; padding:
 #status { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #ccc; }
 button { border: 1px solid #666; border-radius: 3px; background: #333; color: #eee; padding: 2px 9px; cursor: pointer; }
 button:disabled { opacity: .45; cursor: default; }
-#viewport { position: relative; flex: 1; min-height: 0; overflow: auto; }
+/* The layout owns the terminal size. Old or fractionally rounded Canvas frames
+   must not add scrollbars that change the next PTY resize measurement. Preview
+   panes provide their own scrolling inside this fixed viewport. */
+#viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 #screen { display: block; max-width: none; max-height: none; }
 .html-preview { position: absolute; border: 0; background: #fff; z-index: 1; }
 .media-preview { position:absolute; overflow:auto; z-index:1; outline:none; color:#222; }

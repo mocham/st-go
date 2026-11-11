@@ -3,10 +3,106 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
+
+	"st-go/tui/readline"
 )
 
+type deleteConfirmation struct {
+	session sessionInfo
+	input   *readline.Line
+	err     string
+}
+
 func (application *app) deleteSession(id string) {
+	if id == "" || application.deleting[id] || application.deleted[id] || application.deleteConfirmation != nil {
+		return
+	}
+	var target sessionInfo
+	if id == application.session.ID {
+		target = application.session
+	} else {
+		for _, session := range application.sessions {
+			if session.ID == id {
+				target = session
+				break
+			}
+		}
+	}
+	if target.ID == "" {
+		return // Ignore a click on a session removed since the last frame.
+	}
+	line := readline.New("Confirm: ", len("Confirm: "), 128)
+	line.DisableIME = true
+	application.deleteConfirmation = &deleteConfirmation{session: target, input: line}
+	application.sidebarHits, application.deleteHits = nil, nil
+	application.dirty = true
+}
+
+func (application *app) closeDeleteConfirmation() {
+	if application.deleteConfirmation != nil {
+		application.deleteConfirmation.input.Close()
+		application.deleteConfirmation = nil
+		application.dirty = true
+	}
+}
+
+func (application *app) handleDeleteInput(event inputEvent) {
+	confirmation := application.deleteConfirmation
+	if event.mouse != nil {
+		return
+	}
+	application.dirty = true
+	switch event.key {
+	case "\x11":
+		application.running = false
+		application.closeDeleteConfirmation()
+	case "<Esc>", "\x03":
+		application.closeDeleteConfirmation()
+	case "<Enter>":
+		text := string([]rune(confirmation.input.Text())[confirmation.input.Min:])
+		if text != "DELETE" {
+			confirmation.err = "Type DELETE exactly (uppercase), then press Enter."
+			return
+		}
+		id := confirmation.session.ID
+		application.closeDeleteConfirmation()
+		application.performDeleteSession(id)
+	default:
+		confirmation.err = ""
+		if event.paste != "" {
+			if err := confirmation.input.Insert(event.paste); err != nil {
+				confirmation.err = err.Error()
+			}
+		} else if result := confirmation.input.Handle(event.key); result.Err != nil {
+			confirmation.err = result.Err.Error()
+		}
+	}
+}
+
+func (confirmation *deleteConfirmation) rows(width int) []displayRow {
+	title := confirmation.session.Title
+	if strings.TrimSpace(title) == "" {
+		title = confirmation.session.ID
+	}
+	var rows []displayRow
+	for _, part := range []textSpan{
+		{"Delete session?", warningStyle},
+		{title, sessionNameStyle},
+		{confirmation.session.ID, dimStyle},
+		{confirmation.session.Location.Directory, workdirStyle},
+		{"This also deletes its child sessions.", bodyStyle},
+		{"Type DELETE below and press Enter to confirm. Esc cancels.", bodyStyle},
+	} {
+		for _, line := range wrapText(part.text, width) {
+			rows = append(rows, displayRow{text: line, style: part.style})
+		}
+	}
+	return rows
+}
+
+func (application *app) performDeleteSession(id string) {
 	if id == "" || application.deleting[id] || application.deleted[id] {
 		return
 	}
@@ -39,6 +135,7 @@ func (application *app) applyDelete(result operationResult) {
 
 func (application *app) removeSession(id string) {
 	application.deleted[id] = true
+	application.activityRevision++
 	// The server removes descendants too; remove known children immediately.
 	for changed := true; changed; {
 		changed = false
@@ -55,6 +152,14 @@ func (application *app) removeSession(id string) {
 		}
 	}
 	application.sessions = remaining
+	for id := range application.sessionActivity {
+		if application.deleted[id] {
+			delete(application.sessionActivity, id)
+		}
+	}
+	if confirmation := application.deleteConfirmation; confirmation != nil && application.deleted[confirmation.session.ID] {
+		application.closeDeleteConfirmation()
+	}
 	application.sidebarHits, application.deleteHits = nil, nil
 	application.catalogSequence++ // An in-flight page must not resurrect a deletion.
 	application.catalogLoading = false
@@ -89,6 +194,7 @@ func (application *app) newSession() {
 		return
 	}
 	directory, id, epoch := application.session.Location.Directory, application.session.ID, application.sessionEpoch
+	activityRevision := application.activityRevision
 	application.status = "Creating session…"
 	application.dirty = true
 	// Reuse attachment cancellation/last-selection protection.
@@ -104,7 +210,7 @@ func (application *app) newSession() {
 		if err == nil {
 			snapshot, err = application.api.snapshot(ctx, created.ID, 10)
 		}
-		result := operationResult{kind: "attach", sessionID: id, epoch: epoch, attachToken: sequence, sessionSnapshot: snapshot, err: err}
+		result := operationResult{kind: "attach", sessionID: id, epoch: epoch, attachToken: sequence, sessionSnapshot: snapshot, activityRevision: activityRevision, err: err}
 		select {
 		case application.operations <- result:
 		case <-application.ctx.Done():

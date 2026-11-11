@@ -51,6 +51,7 @@ type sessionSnapshot struct {
 	busy          bool
 	messageCursor string
 	inbox         []inboxItem
+	active        map[string]bool
 }
 
 type inboxItem struct {
@@ -415,6 +416,12 @@ func (client *apiClient) snapshot(ctx context.Context, id string, promptCount in
 	}
 	err = client.request(ctx, http.MethodGet, "/api/session/active", nil, &active)
 	_, result.busy = active.Data[id]
+	if err == nil {
+		result.active = make(map[string]bool, len(active.Data))
+		for id := range active.Data {
+			result.active[id] = true
+		}
+	}
 	return result, err
 }
 
