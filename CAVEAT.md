@@ -226,25 +226,23 @@ Fully static build: `go build -trimpath -ldflags '-linkmode external -extldflags
 "-static -lstdc++"'` (needs `-lstdc++` for the C++ poppler bridge). glibc emits
 harmless NSS warnings (`getaddrinfo`, `getpwnam_r`) under `-static` — cosmetic.
 
-### 3.2 Tiered builds: st-min / st-stb / st-pdf / st
+### 3.2 Tiered builds: st-min / st-pdf / st
 
-Four Makefile targets link an increasing set of third-party libraries, all with
-the SAME `.go` sources — the third-party libs are **not** in the cgo files'
-`#cgo LDFLAGS`; they are passed via `-extldflags`:
+Three Makefile targets link an increasing set of native libraries. Raster
+formats always have Go decoders; the full build prefers native acceleration.
+Third-party libs are **not** in cgo `#cgo LDFLAGS`; they are passed through
+`-extldflags`:
 
 | target | libs                      | extra objects/libs                        |
 |--------|---------------------------|-------------------------------------------|
-| `st-min`| freetype only            | dummy-stb.o dummy-webp.o dummy-pdf.o      |
-| `st-stb`| + stb_image              | stb_image.o dummy-webp.o dummy-pdf.o      |
-| `st-pdf`| + poppler                | stb_image.o pdf_bridge.o poppler.. dummy-webp.o |
-| `st`   | all (+ libwebp)          | stb_image.o pdf_bridge.o poppler.. libwebp.a |
+| `st-min`| freetype only            | Go raster codecs, dummy-pdf.o |
+| `st-pdf`| + poppler                | Go raster codecs, pdf_bridge.o |
+| `st`   | + libpng/jpeg/webp/poppler | image_decode.o, pdf_bridge.o, native archives |
 
-**Dummy objects.** When a library is dropped, its C symbols are provided by a
-no-op `dummy-*.o` (from `third_party_wrapper/dummy-{stb,webp,pdf}.c`) that
-returns failure. Because every cgo path already checks for NULL/0 and degrades
-to "show nothing", the reduced binaries never crash — they just don't render
-that format. Verified: `st-min`'s `decodeImage`/`decodeWebP`/`pdfPageCount`
-return error/false/0 gracefully.
+**Go and native paths.** Reduced profiles decode PNG/JPEG/GIF/BMP/TIFF/static
+WebP in Go. Full PNG/JPEG fast paths fall back to the same Go decoders. Reduced
+profiles compile animation stubs instead of any WebP C bridge; `st-min` uses
+`dummy-pdf.o`. Callers check failure and degrade without crashing.
 
 **pdf_bridge.cpp is NOT in the package dir** (it is in `third_party_wrapper/`)
 so cgo does not auto-compile it; the Makefile compiles it to `pdf_bridge.o`
@@ -254,8 +252,8 @@ so cgo does not auto-compile it; the Makefile compiles it to `pdf_bridge.o`
 - cgo rejects `-Wl,...` in `#cgo LDFLAGS` (security); link flags belong in the
   Makefile's `-extldflags`.
 - Order matters for static archives: put the object that *uses* a symbol before
-  the `-l...` that provides it, and repeat `-lm` where `pow`/`floor` are needed
-  (stb_image uses `pow`, libpng uses `floor`). poppler needs freetype again.
+  the `-l...` that provides it, and repeat `-lm` where `floor` is needed.
+  Poppler needs freetype again.
 - `go test ./...` also needs the libs linked: use `make test` (which passes the
   full EXTRA flags) instead of a bare `go test`.
 
@@ -263,14 +261,9 @@ so cgo does not auto-compile it; the Makefile compiles it to `pdf_bridge.o`
 
 Every third-party lib is built with `-ffunction-sections -fdata-sections`, and
 all binaries are linked with `-Wl,--gc-sections`, which drops unreferenced
-functions. This shrinks the binaries substantially:
-
-| target | without gc-sections | with gc-sections |
-|--------|---------------------|------------------|
-| st-min | 8.5 MB              | 7.3 MB           |
-| st-stb | 8.6 MB              | 7.4 MB           |
-| st-pdf | 14.6 MB             | 11.2 MB          |
-| st     | 14.9 MB             | 11.5 MB          |
+functions. This keeps the native fast paths from retaining unrelated archive
+members; measure current binaries rather than preserving version-sensitive size
+figures here.
 
 **poppler does not use dlopen/dlsym** at runtime — the `dlopen`/`dlsym`
 symbols in a static binary are glibc's own internals (pulled in by Go's net
@@ -307,7 +300,7 @@ silently stop working. Keep the embedded config complete.
 
 ### 3.4 Makefile third-party rebuilds
 
-`third_party/` is gitignored and rebuilt on demand (freetype, stb, zlib, libpng,
+`third_party/` is gitignored and rebuilt on demand (freetype, zlib, libpng,
 libjpeg-turbo, poppler). Poppler and libjpeg-turbo depend on `Makefile` so codec
 configuration changes rebuild existing archives. Pitfalls seen:
 - Use `tar --strip-components=1` (GNU) — `--transform` is not portable.

@@ -50,7 +50,7 @@ clears and clips only its one-based cell rectangle, leaving the cursor unchanged
 | `pdfsearch clear` | Cancel fixed-page search and discard retained matches |
 
 Text/image/PDF detection uses file content. Image support includes PNG, JPEG,
-GIF, BMP, TGA, and WebP, depending on the [build profile](../BUILDING.md#build-targets).
+GIF, BMP, TIFF, and WebP, depending on the [build profile](../BUILDING.md#build-targets).
 PDFs use the shared native Poppler renderer.
 
 ### Window geometry

@@ -1,9 +1,7 @@
-// webp_cgo.go bridges st-go to libwebp for WebP decoding.
-// stb_image does not support WebP, so we use libwebp's WebPDecodeRGBA.
-//
-// The WebP symbols are resolved at link time from either the real libwebp.a
-// or the no-op dummy-webp.o (see Makefile targets); a dummy makes decodeWebP
-// return false so the caller just shows nothing.
+//go:build libwebp
+
+// webp_cgo.go bridges full st-go profiles to libwebp's WebPDecodeRGBA.
+// The WebP symbols are supplied by the full profile's static libwebp archive.
 package frontend
 
 /*

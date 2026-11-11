@@ -20,5 +20,5 @@ Bindings:
 - arrows/Page Up/Page Down: keyboard panning
 - `r`: reload; `q` or Escape: quit
 
-The supported sibling set is PNG, JPEG, GIF, BMP, TGA, WebP, and ICO. A static
+The supported sibling set is PNG, JPEG, GIF, BMP, TIFF, and WebP. A static
 frame is shown for animated formats.

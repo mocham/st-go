@@ -877,7 +877,7 @@ func (t *Term) looksLikeText(data []byte) bool {
 	if len(data) == 0 {
 		return true
 	}
-	// image/PDF magic bytes (stb_image/webp/poppler would handle them)
+	// image/PDF magic bytes (Go image codecs/libwebp/poppler handle them)
 	if data[0] == 0x89 && len(data) > 3 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' {
 		return false
 	}

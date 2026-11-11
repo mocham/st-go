@@ -3,8 +3,7 @@
 # Third-party static libraries (all downloaded & built into third_party/ on
 # demand; the whole folder is gitignored and reproduced on demand):
 #   - FreeType2   : glyph rasterization
-#   - stb_image   : PNG/JPEG/GIF/BMP image decode
-#   - libwebp     : WebP decode (stb_image has no WebP support)
+#   - libwebp     : accelerated static/animated WebP decode
 #   - poppler     : PDF rendering (first page / page N via "open")
 #   - zlib        : poppler's stream decompression
 #   - libpng      : poppler's embedded-image support
@@ -12,8 +11,10 @@
 #   - DjVuLibre  : static DjVu decoding for zat-djvu
 # SQLite comes from go-sqlite3's bundled amalgamation rather than third_party/.
 #
-# poppler uses the C++/Splash renderer with static freetype, zlib, libpng and
-# libjpeg-turbo. The JPEG decoder uses libjpeg.a, not the TurboJPEG API.
+# Full terminal profiles also use libpng and libjpeg-turbo for accelerated PNG
+# and JPEG decoding. Reduced profiles use native Go image codecs. Poppler uses
+# the C++/Splash renderer with the same static freetype, zlib, libpng and JPEG
+# archives. The JPEG decoder uses libjpeg.a, not the TurboJPEG API.
 # GUI bindings, Cairo, color management and JPEG 2000 are disabled.
 #
 # X is driven by the pure-Go xgb library over sockets, so no X11 C library
@@ -29,20 +30,10 @@ FT_SRC      = third_party/freetype-$(FT_VERSION)
 FT_TARBALL  = third_party/freetype-$(FT_VERSION).tar.xz
 FT_A        = $(FT_DIR)/libfreetype.a
 
-# stb_image: single-header, downloaded into third_party/ (pure third-party
-# code). The wrapper .c in third_party_wrapper/ (our glue) defines the
-# implementation and is precompiled into a .o so the ~280 KB single-header is
-# not recompiled on every build.
-STB_DIR     = third_party/stb
-STB_H       = $(STB_DIR)/stb_image.h
-STB_O       = $(STB_DIR)/stb_image.o
-STB_C       = third_party_wrapper/stb_image.c
-STB_URL     = https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
-
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
-BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat zat-djvu goiv govim
+BINARY_NAMES = st st-min st-pdf st-web st-fb file-browser gols vimtex zat zat-djvu goiv govim
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
@@ -61,8 +52,8 @@ TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 # dependency from SQLite.
 TABS ?= 1
 TAB_GO_TAGS = $(if $(filter 1,$(TABS)),terminal_tabs,)
-FULL_GO_TAGS = webpcache sqlite_omit_load_extension $(TAB_GO_TAGS)
-TERMINAL_NAMES = st st-web st-fb st-pdf st-stb st-min
+FULL_GO_TAGS = fastimage libwebp webpcache sqlite_omit_load_extension $(TAB_GO_TAGS)
+TERMINAL_NAMES = st st-web st-fb st-pdf st-min
 TERMINAL_PROFILE = $(OUTPUT_DIR)/.terminal-profile
 
 # Sources that affect the Go file-browser demo, including the sibling
@@ -126,7 +117,7 @@ DJVU_DIR     = third_party/djvu
 DJVU_LIB     = $(DJVU_DIR)/lib/libdjvulibre.a
 DJVU_STAMP   = $(DJVU_DIR)/include/st_go_djvu_static.h
 
-# libwebp: WebP decode (stb_image has no WebP support).
+# libwebp: accelerated static and animated WebP decode for full profiles.
 WEBP_VERSION = 1.6.0
 WEBP_URL     = https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-$(WEBP_VERSION).tar.gz
 WEBP_TAR     = third_party/libwebp-$(WEBP_VERSION).tar.gz
@@ -160,20 +151,6 @@ $(FT_A):
 	cp "$(FT_SRC)/objs/.libs/libfreetype.a" "$(FT_A)"
 	cp -r "$(FT_SRC)/include" "$(FT_DIR)/include"
 
-# --- stb_image ----------------------------------------------------------
-# stb_image.h is header-only third-party code; fetch it into third_party/
-# if missing, then compile our wrapper (which defines STB_IMAGE_IMPLEMENTATION)
-# into a .o so the ~280 KB single-header is not recompiled on every build.
-$(STB_O): $(STB_C) $(STB_H)
-	$(CC) -O2 -ffunction-sections -fdata-sections -I$(STB_DIR) -c "$(STB_C)" -o "$@"
-
-$(STB_H):
-	@mkdir -p "$(STB_DIR)"
-	@if [ ! -f "$(STB_H)" ]; then \
-		echo "downloading stb_image.h..."; \
-		curl -fL -o "$(STB_H)" "$(STB_URL)"; \
-	fi
-
 # --- zlib static (poppler dep) ------------------------------------------
 $(ZLIB_LIB):
 	@mkdir -p third_party
@@ -190,7 +167,7 @@ $(ZLIB_LIB):
 	cp "$(ZLIB_SRC)/libz.a" "$(ZLIB_LIB)"
 	cp "$(ZLIB_SRC)/zlib.h" "$(ZLIB_SRC)/zconf.h" third_party/poppler/include/
 
-# --- libpng static (poppler dep for embedded images) ---------------------
+# --- libpng static (full raster fast path and poppler dependency) ---------
 $(PNG_LIB): $(ZLIB_LIB)
 	@mkdir -p third_party
 	@if [ ! -f "$(PNG_TAR)" ]; then \
@@ -206,7 +183,7 @@ $(PNG_LIB): $(ZLIB_LIB)
 	cp "$(PNG_SRC)/.libs/libpng16.a" "$(PNG_LIB)"
 	cp "$(PNG_SRC)/png.h" "$(PNG_SRC)/pngconf.h" "$(PNG_SRC)/pnglibconf.h" third_party/poppler/include/
 
-# --- libjpeg-turbo static (poppler DCTDecode/JPEG support) ----------------
+# --- libjpeg-turbo static (full raster fast path and poppler DCTDecode) ----
 # Build only the libjpeg API. SIMD is auto-detected; NASM enables it on x86.
 # Archive targets deliberately do not depend on the whole Makefile: changing
 # app targets or test commands must not rebuild native dependencies. Explicitly
@@ -276,7 +253,7 @@ $(DJVU_STAMP): $(DJVU_LIB)
 		printf '#define ST_GO_DJVU_STATIC_SHA256 "%s"\n' "$$hash" > "$@.tmp"; \
 		mv "$@.tmp" "$@"
 
-# --- libwebp static (WebP decode; stb_image has no WebP support) ----------
+# --- libwebp static (accelerated static/animated WebP decode) --------------
 $(WEBP_LIB):
 	@mkdir -p third_party
 	@if [ ! -f "$(WEBP_TAR)" ]; then \
@@ -342,32 +319,30 @@ $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB) $(JPEG_LIB)
 	cp "$(POPPLER_BUILD)/cpp/poppler_cpp_export.h" third_party/poppler/include/
 
 # --- st targets ------------------------------------------------------------
-# Four build levels with an increasing set of third-party libraries:
-#   st      (full) : freetype + stb_image + libwebp + poppler
-#   st-pdf         : freetype + stb_image + poppler          (no webp)
-#   st-stb         : freetype + stb_image                    (no pdf/webp)
-#   st-min         : freetype only                           (no image/pdf)
+# Three build levels with an increasing set of native libraries. Every level
+# decodes ordinary raster images with Go; full profiles prefer libpng,
+# libjpeg-turbo and libwebp where available:
+#   st      (full) : freetype + libpng/jpeg + libwebp + poppler
+#   st-pdf         : freetype + poppler                      (Go raster codecs)
+#   st-min         : freetype only                           (Go raster codecs)
 #
-# When a library is dropped, the cgo files still reference its C symbols; the
-# corresponding dummy-*.o (a no-op that returns failure) satisfies the link, so
-# the code degrades gracefully (shows nothing) instead of crashing. All extra
-# objects/libs are passed via -extldflags so a single set of .go files works
-# for every level.
+# Reduced profiles compile a Go static-WebP decoder and animation stubs; st-min
+# also links a no-op PDF bridge. Unsupported animation and PDF requests degrade
+# gracefully. All extra objects/libs are passed via -extldflags so one source
+# tree works for every level.
 
 DUMMY_DIR    = third_party/dummy
-DUMMY_STB    = $(DUMMY_DIR)/dummy-stb.o
-DUMMY_WEBP   = $(DUMMY_DIR)/dummy-webp.o
 DUMMY_PDF    = $(DUMMY_DIR)/dummy-pdf.o
 PDF_BRIDGE_O = third_party/pdf_bridge.o
+IMAGE_DECODE_O = third_party/image_decode.o
 
 # extra link items appended to -extldflags (order matters for static libs;
 # pdf_bridge.o must precede -lpoppler-cpp so --gc-sections keeps the needed
 # poppler objects; --gc-sections relies on the libs being built with
 # -ffunction-sections -fdata-sections).
-MIN_EXTRA  = $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF)
-STB_EXTRA  = $(STB_O) -lm $(DUMMY_WEBP) $(DUMMY_PDF)
-PDF_EXTRA  = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(DUMMY_WEBP)
-FULL_EXTRA = $(STB_O) -lm $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
+MIN_EXTRA  = $(DUMMY_PDF)
+PDF_EXTRA  = $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm
+FULL_EXTRA = $(IMAGE_DECODE_O) $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
 
 # Animated-WebP items for the Go file-browser (WebPAnimDecoder playback).
 # webp_anim.o must precede -l:libwebpdemux.a; libwebp.a comes via WEBP_LIB.
@@ -403,11 +378,11 @@ $(OUTPUT_DIR):
 # Keep familiar make target names, but never create executables in the root.
 $(BINARY_NAMES): %: $(OUTPUT_DIR)/%
 
-$(OUTPUT_DIR)/st: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
+$(OUTPUT_DIR)/st: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(GO_SRC)
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 # Embedded HTTP/canvas client; terminal, fonts and media decoders stay native.
-$(OUTPUT_DIR)/st-web: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(GO_SRC)
+$(OUTPUT_DIR)/st-web: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(GO_SRC)
 	go build -trimpath -tags 'backend_web netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 # Linux console fbdev/evdev host, with the existing full software media renderer.
@@ -415,16 +390,13 @@ FB_STATUS_FONT = platform_dependent/fb/system_bar_font_generated.go
 $(FB_STATUS_FONT): Monaco_Linux.ttf platform_dependent/fb/generate_system_bar_font.go third_party_wrapper/ff2.h third_party_wrapper/plugin-ff2.c $(FT_A)
 	CGO_ENABLED=1 go run platform_dependent/fb/generate_system_bar_font.go -font Monaco_Linux.ttf -output $@
 
-$(OUTPUT_DIR)/st-fb: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(FB_STATUS_FONT) $(GO_SRC)
+$(OUTPUT_DIR)/st-fb: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(FB_STATUS_FONT) $(GO_SRC)
 	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
-$(OUTPUT_DIR)/st-pdf: $(FT_A) $(STB_O) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(DUMMY_WEBP) $(GO_SRC)
+$(OUTPUT_DIR)/st-pdf: $(FT_A) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(GO_SRC)
 	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
 
-$(OUTPUT_DIR)/st-stb: $(FT_A) $(STB_O) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
-	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(STB_EXTRA)"' .
-
-$(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_STB) $(DUMMY_WEBP) $(DUMMY_PDF) $(GO_SRC)
+$(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_PDF) $(GO_SRC)
 	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
 
 # --- Go file-browser demo --------------------------------------------------
@@ -465,14 +437,6 @@ $(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/govim build -trimpath -o $(abspath $@) .
 
 # --- dummy objects (no-op stubs for dropped libraries) --------------------
-$(DUMMY_DIR)/dummy-stb.o: third_party_wrapper/dummy-stb.c
-	@mkdir -p $(DUMMY_DIR)
-	$(CC) -O2 -ffunction-sections -fdata-sections -c $< -o $@
-
-$(DUMMY_DIR)/dummy-webp.o: third_party_wrapper/dummy-webp.c
-	@mkdir -p $(DUMMY_DIR)
-	$(CC) -O2 -ffunction-sections -fdata-sections -c $< -o $@
-
 $(DUMMY_DIR)/dummy-pdf.o: third_party_wrapper/dummy-pdf.c
 	@mkdir -p $(DUMMY_DIR)
 	$(CC) -O2 -ffunction-sections -fdata-sections -c $< -o $@
@@ -481,6 +445,12 @@ $(DUMMY_DIR)/dummy-pdf.o: third_party_wrapper/dummy-pdf.c
 $(PDF_BRIDGE_O): third_party_wrapper/pdf_bridge.cpp pdf_bridge.h $(POPPLER_LIB)
 	$(CXX) -std=c++20 -O2 -fPIC -Ithird_party/poppler/include \
 	       -I$(POPPLER_SRC) -I$(POPPLER_SRC)/poppler -I$(POPPLER_BUILD) -I$(POPPLER_BUILD)/poppler -I. -c $< -o $@
+
+# Full profiles prefer these bounded libpng/libjpeg-turbo decoders. The Go
+# decoder remains available as a fallback for malformed and other formats.
+$(IMAGE_DECODE_O): third_party_wrapper/image_decode.c $(PNG_LIB) $(JPEG_LIB)
+	$(CC) -O2 -fPIC -ffunction-sections -fdata-sections \
+	       -Ithird_party/poppler/include -I$(JPEG_DIR)/include -c $< -o $@
 
 install: st
 	install -d "$(DESTDIR)$(BINDIR)"
@@ -492,7 +462,7 @@ install: st
 # are tested explicitly: Go's ./... pattern never crosses module boundaries.
 TEST_EXTRA = $(FULL_EXTRA)
 
-test: $(FT_A) $(STB_O) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules
+test: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 # Integrated profile, including the in-process pure-Go Pinyin tests.

@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	golang.org/x/image v0.40.0
 	golang.org/x/net v0.60.0
 	st-go/audio v0.0.0
 	st-go/config v0.0.0

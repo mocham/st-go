@@ -612,7 +612,7 @@ func (b *Browser) fileType(path string) string {
 	switch {
 	case hasSuffixAny(ext, ".pdf", ".djvu"):
 		return "pdf"
-	case hasSuffixAny(ext, ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".svg"):
+	case hasSuffixAny(ext, ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".svg"):
 		return "image"
 	case hasSuffixAny(ext, ".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar", ".cbz", ".cbr"):
 		return "archive"
@@ -637,7 +637,7 @@ func (b *Browser) fileType(path string) string {
 }
 
 func (b *Browser) isGraphic(path string) bool {
-	return hasSuffixAny(strings.ToLower(path), ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".pdf")
+	return hasSuffixAny(strings.ToLower(path), ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".pdf")
 }
 
 func (b *Browser) isPDF(path string) bool {

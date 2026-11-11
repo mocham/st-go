@@ -1,7 +1,7 @@
-// webp_anim_cgo.go bridges st-go to libwebp's WebPAnimDecoder (from
-// libwebpdemux) for animated WebP playback. The C symbols are resolved at
-// link time from the real libwebp.a + libwebpdemux.a (or the no-op dummy in
-// reduced builds, which makes decodeWebPAnim return false).
+//go:build libwebp
+
+// webp_anim_cgo.go bridges full profiles to libwebp's WebPAnimDecoder (from
+// libwebpdemux) for animated WebP playback.
 package frontend
 
 /*

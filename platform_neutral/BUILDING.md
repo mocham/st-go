@@ -75,17 +75,15 @@ not a dynamic executable
 
 ## Build targets
 
-The X11 targets use the same Go sources and differ in their linked native
-libraries. A dropped decoder is replaced by a no-op dummy object, so unsupported
-formats do nothing instead of crashing. The full build enables the SQLite WebP
-cache with a build tag; reduced builds omit SQLite entirely.
+The X11 targets use the same Go raster decoders and differ in their linked
+native acceleration and document libraries. The full build enables optimized
+PNG/JPEG/WebP decoding and the SQLite WebP cache; reduced builds omit SQLite.
 
-| Target | Extra libraries | Image/PDF support | Approximate size |
-| --- | --- | --- | --- |
-| `st-min` | FreeType only | None | 8 MB |
-| `st-stb` | + stb_image | PNG/JPEG/GIF/BMP/TGA | 8.6 MB |
-| `st-pdf` | + stb_image + Poppler | Raster images + PDF | 14.6 MB |
-| `st` | + stb_image + WebP + Poppler + SQLite | All of the above + WebP | 16.5 MB |
+| Target | Extra libraries | Image/PDF support |
+| --- | --- | --- |
+| `st-min` | FreeType only | Go PNG/JPEG/GIF/BMP/TIFF/static WebP |
+| `st-pdf` | + Poppler | Go raster images + PDF |
+| `st` | + libpng + libjpeg-turbo + libwebp + Poppler + SQLite | Accelerated PNG/JPEG/WebP, animated WebP, other Go raster codecs, PDF |
 
 `st-web` embeds its HTML, JavaScript, CSS, and fonts; no npm build, CDN, or
 separate asset directory is required. `st-fb` uses a pure-Go Linux fbdev/evdev
@@ -100,23 +98,22 @@ make st-min
 ```
 
 VT100/ANSI handling, colors, mouse reporting, selection, clipboard, bracketed
-paste, the embedded font, and JSON configuration remain available. There is no
-inline image or PDF decoding; display requests for these formats are no-ops.
+paste, the embedded font, JSON configuration, and native-Go raster image
+decoding remain available. PDF and animated WebP requests are no-ops.
 
 ### Other media profiles
 
-- **`st-stb`** adds [stb_image](https://github.com/nothings/stb) for raster images;
-  WebP and PDF remain stubbed.
 - **`st-pdf`** adds a minimal static Poppler with the C++ API and Splash renderer,
   plus FreeType, zlib, libpng, and libjpeg-turbo. The libjpeg API decodes embedded
   JPEG (`DCTDecode`) images, including scanned covers/pages. NASM optionally
   enables x86 SIMD when building libjpeg-turbo. PDF page selection is supported;
-  WebP remains stubbed.
-- **`st`** is the full default build, including libwebp and the SQLite WebP cache.
+  animated WebP remains stubbed while static WebP uses Go.
+- **`st`** is the full default build. It prefers libpng and libjpeg-turbo over
+  the Go PNG/JPEG decoders and includes libwebp plus the SQLite WebP cache.
 
 Per-target libraries are passed through `-extldflags`, deliberately not through
-the cgo files' `#cgo LDFLAGS`. Stub objects come from
-`third_party_wrapper/dummy-{stb,webp,pdf}.c`. See
+the cgo files' `#cgo LDFLAGS`. Native PNG/JPEG decoding falls back to Go; the
+remaining PDF stub comes from `third_party_wrapper/dummy-pdf.c`. See
 [build and linking caveats](../CAVEAT.md#3-build--packaging-caveats).
 
 ## Verification

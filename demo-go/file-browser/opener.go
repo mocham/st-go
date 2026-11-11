@@ -19,7 +19,7 @@ func terminalDocumentTool(path string) string {
 		name = "zat"
 	case ".djvu":
 		name = "zat-djvu"
-	case ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".ico":
+	case ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp":
 		name = "goiv"
 	default:
 		if !editorTextFile(path) {

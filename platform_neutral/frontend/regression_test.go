@@ -1097,9 +1097,8 @@ func TestPDFModuloWrap(t *testing.T) {
 	}
 }
 
-// TestWebPDecode verifies WebP images decode via libwebp (stb_image does not
-// support WebP). A minimal valid WebP is built in-memory from a known-good
-// 2x2 lossless WebP and must decode to the expected RGBA.
+// TestWebPDecode verifies the shared static-WebP contract: full profiles use
+// libwebp and reduced profiles use x/image/webp.
 func TestWebPDecode(t *testing.T) {
 	// 2x2 solid-red lossless WebP (VP8L), bytes verified against libwebp.
 	webp := []byte{
@@ -1124,7 +1123,7 @@ func TestWebPDecode(t *testing.T) {
 }
 
 // TestDummyGracefulDegrades verifies that when a library is replaced by a
-// dummy object (st-min/st-stb/st-pdf builds), the decode paths fail gracefully
+// dummy object (st-min/st-pdf builds), the decode paths fail gracefully
 // (no panic, no image) instead of crashing. It passes with both real libs and
 // dummies since the failure-handling is the same.
 func TestDummyGracefulDegrades(t *testing.T) {
@@ -1138,7 +1137,7 @@ func TestDummyGracefulDegrades(t *testing.T) {
 	}
 	defer trm.Close()
 
-	// malformed PNG magic: real stb returns NULL, dummy-stb returns NULL too
+	// malformed PNG magic must be rejected by both native and Go decoders.
 	_, _, _, errOK := decodeImage([]byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xff})
 	if !errOK {
 		t.Fatalf("decodeImage of bad png should fail gracefully (err=true)")

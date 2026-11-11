@@ -56,7 +56,7 @@ func protocolPath(path string) bool {
 
 func isImageName(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".ico":
+	case ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp":
 		return true
 	}
 	return false

@@ -3,7 +3,7 @@
  * Provides the same C symbols as pdf_bridge.cpp (pdf_render_page,
  * pdf_page_count) but returns failure so the Go PDF path degrades gracefully
  * (no image) instead of crashing. Compiled to dummy-pdf.o and linked in place
- * of the poppler-based bridge for the st-min/st-stb targets.
+ * of the poppler-based bridge for the st-min target.
  */
 #include <stddef.h>
 

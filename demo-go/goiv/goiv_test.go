@@ -13,7 +13,7 @@ import (
 
 func TestOptionsAndSiblingImages(t *testing.T) {
 	dir := t.TempDir()
-	for _, name := range []string{"b.JPG", "a.png", "notes.txt", "c.webp"} {
+	for _, name := range []string{"b.JPG", "a.png", "notes.txt", "c.webp", "d.tiff", "old.tga"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("fixture"), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -26,11 +26,11 @@ func TestOptionsAndSiblingImages(t *testing.T) {
 	if err != nil || index != 1 {
 		t.Fatalf("images=%v index=%d err=%v", images, index, err)
 	}
-	want := []string{filepath.Join(dir, "a.png"), filepath.Join(dir, "b.JPG"), filepath.Join(dir, "c.webp")}
+	want := []string{filepath.Join(dir, "a.png"), filepath.Join(dir, "b.JPG"), filepath.Join(dir, "c.webp"), filepath.Join(dir, "d.tiff")}
 	if !reflect.DeepEqual(images, want) {
 		t.Fatalf("images=%v want=%v", images, want)
 	}
-	for _, args := range [][]string{{}, {dir}, {filepath.Join(dir, "notes.txt")}} {
+	for _, args := range [][]string{{}, {dir}, {filepath.Join(dir, "notes.txt")}, {filepath.Join(dir, "old.tga")}} {
 		if _, err := parseOptions(args, io.Discard); err == nil {
 			t.Errorf("accepted %v", args)
 		}

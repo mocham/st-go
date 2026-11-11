@@ -9,7 +9,7 @@ make st
 ```
 
 Run commands from the repository root. [Reduced media builds](../../platform_neutral/BUILDING.md#build-targets)
-are available as `st-min`, `st-stb`, and `st-pdf`.
+are available as `st-min` and `st-pdf`.
 
 The driver uses pure-Go [`xgb`](https://github.com/BurntSushi/xgb), without a
 runtime libX11 dependency. It owns X resources and native event decoding,

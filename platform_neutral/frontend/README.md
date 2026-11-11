@@ -111,9 +111,10 @@ coalesces damage and composes a finished back buffer before paced scanout copies
 Optional `api.PaintBatcher` groups a terminal paint's uploads and caret into one
 commit, so the presenter cannot sample a half-updated terminal frame.
 
-The frontend decodes PNG, JPEG, GIF, BMP, and TGA through stb_image, WebP through
-libwebp, and PDF through static Poppler/Splash, including embedded JPEG images.
-Availability depends on the [build profile](../BUILDING.md#build-targets).
+The frontend has native-Go PNG, JPEG, GIF, BMP, TIFF, and static WebP decoders.
+Full profiles prefer libpng, libjpeg-turbo, and libwebp for those formats and
+add animated WebP; PDF uses static Poppler/Splash, including embedded JPEG
+images. Availability depends on the [build profile](../BUILDING.md#build-targets).
 Media is placed through the terminal's DCS display and region protocols.
 
 Retained region decoding runs on one background worker with one replaceable
@@ -149,7 +150,7 @@ separate **256 MiB** budget before preview scaling.
 | Resource | Limit |
 | --- | --- |
 | Preview file / encoded image or PDF | 64 MiB |
-| Decoded still image (JPEG/PNG/GIF/BMP/TGA/WebP) | 256 MiB |
+| Decoded still image (JPEG/PNG/GIF/BMP/TIFF/WebP) | 256 MiB |
 | Framebuffer, PDF page bitmap, WebP animation canvas, image atlas, pending WebP cache pixels | 64 MiB each |
 | Terminal screen grids (both buffers plus bookkeeping) | 64 MiB |
 | Glyph cache | 32 MiB / 16,384 entries |
