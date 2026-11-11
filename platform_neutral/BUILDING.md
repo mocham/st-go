@@ -132,11 +132,14 @@ go -C functionalities/tui test ./...
 make test-tui
 ```
 
-Govim, zat, and vimtex build without cgo. File-browser and GoLS need a C compiler
+Govim, zat, and vimtex build without cgo. `zat-djvu` deliberately uses cgo; its
+pinned DjVuLibre source is downloaded, checksum-verified, and statically built
+against the bundled static libjpeg. The decoder remains in that client rather
+than the terminal. File-browser and GoLS need a C compiler
 for bundled SQLite, **not** graphical codecs or ALSA. File-browser sends audio
 requests to st-go, whose audio module owns libasound and MP3 playback. The optional
-Pinyin helper keeps its native decoder isolated. `make` still builds static
-distribution binaries, including terminal-owned audio with `alsa_static`.
+Pinyin helper keeps its native decoder isolated. Distribution binaries remain
+static, including terminal-owned audio with `alsa_static` and `zat-djvu`.
 
 Go's `./...` does not cross module boundaries. The root pattern tests only the
 host; `make test` additionally tests every shared/demo module, including the

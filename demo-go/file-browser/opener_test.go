@@ -67,6 +67,7 @@ func TestDocumentToolsUseSameTerminalAndReturn(t *testing.T) {
 		t.Run(implementation, func(t *testing.T) {
 			tests := []struct{ name, tool, activate, result string }{
 				{"a ';$literal.pdf", "zat", "\r", "zat finished"},
+				{"a ';$literal.DJVU", "zat-djvu", "\r", "zat-djvu finished"},
 				{"a document.tex", "govim", "o", "govim finished"},
 				{"a document.md", "govim", "double", "govim finished"},
 				{"a document.PDF", "zat", "\r", "zat finished"},
@@ -156,12 +157,15 @@ func TestDocumentToolsUseSameTerminalAndReturn(t *testing.T) {
 func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 	for implementation, program := range documentBrowserCommands(t) {
 		t.Run(implementation, func(t *testing.T) {
-			for _, mode := range []string{"missing-pdf", "missing-image", "missing-tex", "missing-md", "missing-txt", "missing-sh", "custom-flag", "custom-env", "disabled"} {
+			for _, mode := range []string{"missing-pdf", "missing-djvu", "missing-image", "missing-tex", "missing-md", "missing-txt", "missing-sh", "custom-flag", "custom-env", "disabled"} {
 				t.Run(mode, func(t *testing.T) {
 					dir, tools := t.TempDir(), documentToolTestPath(t)
 					name := "document.pdf"
 					if mode == "missing-tex" {
 						name = "document.tex"
+					}
+					if mode == "missing-djvu" {
+						name = "document.djvu"
 					}
 					if mode == "missing-md" {
 						name = "document.md"
@@ -184,12 +188,14 @@ func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 					// govim is missing. Keep the established external fallback instead.
 					writeDocumentTool(t, tools, "vimtex", `printf 'wrong legacy tool' > "$MARKER"`)
 					if !strings.HasPrefix(mode, "missing-") {
-						for _, tool := range []string{"zat", "goiv", "govim"} {
+						for _, tool := range []string{"zat", "zat-djvu", "goiv", "govim"} {
 							writeDocumentTool(t, tools, tool, `printf 'wrong tool' > "$MARKER"`)
 						}
 					} else {
 						tool, other := "zat", "govim"
 						switch mode {
+						case "missing-djvu":
+							tool, other = "zat-djvu", "zat"
 						case "missing-image":
 							tool, other = "goiv", "zat"
 						case "missing-tex", "missing-md", "missing-txt", "missing-sh":
@@ -223,7 +229,7 @@ func TestDocumentToolDispatchAndFallbacks(t *testing.T) {
 					}
 					file := filepath.Join(dir, name)
 					want := file
-					if implementation == "go" && (mode == "missing-pdf" || mode == "missing-image") {
+					if implementation == "go" && (mode == "missing-pdf" || mode == "missing-djvu" || mode == "missing-image") {
 						want = "external|" + file
 					}
 					if mode == "missing-tex" || mode == "missing-md" || mode == "missing-txt" || mode == "missing-sh" {
@@ -250,7 +256,7 @@ func TestEditorTextClassification(t *testing.T) {
 		{"Dockerfile", "FROM scratch\n", true}, {".bash_profile", "export SYNTHETIC=1\n", true},
 		{"unknown-format", "ordinary synthetic text\n", true}, {"empty.yaml", "", true}, {"empty.unknown", "", true},
 		{"textual.pem", "-----BEGIN CERTIFICATE-----\nU3ludGhldGljIHRlc3Qgb25seQ==\n-----END CERTIFICATE-----\n", true},
-		{"image.png", "", false}, {"video.mp4", "", false}, {"archive.zip", "", false}, {"database.sqlite3", "", false},
+		{"image.png", "", false}, {"scan.djvu", "", false}, {"video.mp4", "", false}, {"archive.zip", "", false}, {"database.sqlite3", "", false},
 		{"office.docx", "", false}, {"program.wasm", "", false}, {"binary.unknown", "\x00\x01\x02\x03", false},
 	} {
 		path := filepath.Join(dir, test.name)

@@ -59,7 +59,7 @@ Options:
 
 CODE is evaluated by `bash -c` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
-By default, .pdf opens in zat and text/source/config files in govim when available in PATH.
+By default, .pdf opens in zat, .djvu opens in zat-djvu, and text/source/config files open in govim when available in PATH.
 These tools use this terminal; exiting returns to the browser. Otherwise the
 external fallbacks are used on X11 only. Matching explicit openers take precedence.
 ST_FILE_BROWSER_OPEN_X11, _FB, _WEB, or _ALL register environment openers.
@@ -327,18 +327,29 @@ is_pdf() {
 	[[ ${1,,} == *.pdf ]]
 }
 
+has_video_extension() {
+	case ${1,,} in
+		*.mp4|*.mkv|*.webm|*.avi|*.mov|*.mpeg|*.mpg|*.m4v|*.ogv|*.3gp|*.3g2|*.mts|*.m2ts|*.vob|\
+		*.asf|*.divx|*.dv|*.f4v|*.flv|*.m2v|*.mpe|*.mpv|*.mxf|*.ogm|*.rm|*.rmvb|*.wmv|*.y4m) return 0 ;;
+	esac
+	return 1
+}
+
 file_type() {
 	local path=$1 ext=${1,,}
 	if [[ $path == "$DIR/.." ]]; then REPLY=parent
 	elif [[ -L $path ]]; then REPLY=symlink
 	elif [[ -d $path ]]; then REPLY=directory
 	else
+		if has_video_extension "$path"; then
+			REPLY=video
+			return
+		fi
 		case $ext in
-			*.pdf) REPLY=pdf ;;
+			*.pdf|*.djvu) REPLY=pdf ;;
 			*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tga|*.webp|*.svg) REPLY=image ;;
 			*.zip|*.tar|*.tgz|*.gz|*.bz2|*.xz|*.7z|*.rar) REPLY=archive ;;
 			*.mp3|*.wav|*.flac|*.ogg|*.m4a|*.aac) REPLY=audio ;;
-			*.mp4|*.mkv|*.webm|*.avi|*.mov|*.mpeg|*.mpg) REPLY=video ;;
 			*.go|*.c|*.h|*.cc|*.cpp|*.cxx|*.rs|*.py|*.js|*.ts|*.tsx|*.jsx|*.java|*.sh|*.bash|*.zsh) REPLY=code ;;
 			*.json|*.yaml|*.yml|*.toml|*.ini|*.conf|*.xml) REPLY=config ;;
 			*.txt|*.md|*.markdown|*.html|*.htm|*.css|*.tex|*.bib|*.bbl|*.rst|*.log|*.csv) REPLY=text ;;
@@ -364,10 +375,11 @@ is_text_file() {
 # existing routes even when empty. Refuse FIFOs/devices before invoking readers.
 is_editor_text_file() {
 	[[ -f $1 ]] || return 1
+	has_video_extension "$1" && return 1
 	case ${1,,} in
-		*.pdf|*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tga|*.webp|*.ico|\
+		*.pdf|*.djvu|*.png|*.jpg|*.jpeg|*.gif|*.bmp|*.tga|*.webp|*.ico|\
 		*.zip|*.tar|*.tgz|*.gz|*.bz2|*.xz|*.7z|*.rar|*.zst|*.jar|*.war|*.deb|*.rpm|\
-		*.mp3|*.wav|*.flac|*.ogg|*.m4a|*.aac|*.mp4|*.mkv|*.webm|*.avi|*.mov|*.mpeg|*.mpg|\
+		*.mp3|*.wav|*.flac|*.ogg|*.m4a|*.aac|\
 		*.sqlite3|*.sqlite|*.db|*.db3|*.s3db|*.epub|*.doc|*.docx|*.xls|*.xlsx|*.ppt|*.pptx|*.odt|*.ods|\
 		*.exe|*.dll|*.so|*.o|*.a|*.bin|*.wasm|*.pyc|*.class|*.mo|*.ttf|*.otf|*.woff|*.woff2) return 1 ;;
 	esac
@@ -888,6 +900,7 @@ open_path() {
 			fi
 			case ${path,,} in
 				*.pdf) tool=zat ;;
+				*.djvu) tool=zat-djvu ;;
 				*) if is_editor_text_file "$path"; then tool=govim; fi ;;
 			esac
 			if [[ -n $tool ]] && executable=$(type -P -- "$tool") && [[ -x $executable && ! -d $executable ]]; then
@@ -912,9 +925,7 @@ open_path() {
 }
 
 is_video_file() {
-	case ${1,,} in
-		*.mp4|*.mkv|*.webm|*.avi|*.mov|*.mpeg|*.mpg|*.m4v|*.ogv|*.3gp|*.mts|*.m2ts|*.vob) return 0 ;;
-	esac
+	has_video_extension "$1" && return 0
 	local mime
 	mime=$(file --mime-type -b -- "$1" 2>/dev/null) || return 1
 	[[ $mime == video/* ]]
@@ -1465,7 +1476,7 @@ MOUSE
   Middle click   go to parent
 
 HINTS
-  With the default opener, .pdf uses zat and text/source/config files use govim
+  With the default opener, .pdf uses zat, .djvu uses zat-djvu, and text/source/config files use govim
   when available in PATH. They run in this terminal; exit the tool
   to return to the same browser location on every backend. Desktop
   fallbacks are X11-only. Register custom code with --open-for PLATFORM CODE

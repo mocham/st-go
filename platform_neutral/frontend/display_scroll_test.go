@@ -310,6 +310,40 @@ func TestRasterViewerInitialChoiceRendersOnce(t *testing.T) {
 	}
 }
 
+func TestRasterViewerReportsOnlyScrollEdges(t *testing.T) {
+	trm := regionTestTerminal(t)
+	trm.writeTerminalOutput(trm.termCore, []byte("\x1bPregion stack 1\x1b\\"))
+	s := trm.displayRegions.secondary
+	s.request = &term.RegionImage{Path: "page.png", Viewer: true, Options: term.ImageDecodeOptions{FitWidth: true}}
+	r := trm.secondaryPixels()
+	s.bitmap = regionBitmap{pixels: make([]uint32, r.Dx()*3*r.Dy()), width: r.Dx(), height: 3 * r.Dy(), contentHeight: 3 * r.Dy(), sourceWidth: r.Dx(), sourceHeight: 3 * r.Dy()}
+	s.viewWidth = r.Dx()
+	if err := trm.SetRegionScrollEdgeReporting(term.SecondaryRegion, true); err != nil {
+		t.Fatal(err)
+	}
+	var reply bytes.Buffer
+	trm.termCore.SetWriter(func(data []byte) { reply.Write(data) })
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "scroll", Value: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Len() != 0 || s.targetY <= 0 {
+		t.Fatalf("ordinary scroll was not local: target=%g reply=%q", s.targetY, reply.String())
+	}
+	s.targetY = trm.regionScrollMaximum()
+	if err := trm.NavigateRegion(term.SecondaryRegion, term.RegionNavigation{Kind: "view", Value: 1000000}); err != nil {
+		t.Fatal(err)
+	}
+	if got := reply.String(); got != "\x1bPregion secondary event scroll 1\x1b\\" {
+		t.Fatalf("bottom edge reply = %q", got)
+	}
+	reply.Reset()
+	s.scrollY, s.targetY = 0, 0
+	trm.regionMousePress(4, 0, r.Min.X+1, r.Min.Y+1)
+	if got := reply.String(); got != "\x1bPregion secondary event scroll -1\x1b\\" {
+		t.Fatalf("top wheel edge reply = %q", got)
+	}
+}
+
 func TestRasterViewerBoundedStripAndAlpha(t *testing.T) {
 	image := &scrollImage{width: 2, height: 4, rgba: []byte{
 		0xff, 0x00, 0x00, 0xff, 0x00, 0xff, 0x00, 0x80,

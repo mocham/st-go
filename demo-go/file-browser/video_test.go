@@ -17,7 +17,7 @@ func TestVideoClassification(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		want bool
-	}{{"movie.MP4", true}, {"movie.mkv", true}, {"movie.m4v", true}, {"movie.m2ts", true}, {"source.ts", false}, {"notes.txt", false}, {"picture.png", false}} {
+	}{{"movie.MP4", true}, {"movie.mkv", true}, {"movie.m4v", true}, {"movie.m2ts", true}, {"movie.rmvb", true}, {"movie.MXF", true}, {"movie.wmv", true}, {"source.ts", false}, {"notes.txt", false}, {"picture.png", false}} {
 		path := filepath.Join(dir, test.name)
 		if err := os.WriteFile(path, []byte("ordinary text\n"), 0600); err != nil {
 			t.Fatal(err)
@@ -37,7 +37,7 @@ func TestFramebufferVideoPlayerPTY(t *testing.T) {
 				}
 				t.Run(implementation+"/"+backend+"/"+mode, func(t *testing.T) {
 					dir, tools := t.TempDir(), documentToolTestPath(t)
-					name := "movie ';--.MP4"
+					name := "movie ';--.MKV"
 					writeFiles(t, dir, name)
 					marker := filepath.Join(tools, "args")
 					providedConfig := filepath.Join(tools, "provided-alsa.conf")

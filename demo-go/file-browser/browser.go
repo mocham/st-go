@@ -609,7 +609,7 @@ func (b *Browser) fileType(path string) string {
 	}
 	ext := strings.ToLower(path)
 	switch {
-	case strings.HasSuffix(ext, ".pdf"):
+	case hasSuffixAny(ext, ".pdf", ".djvu"):
 		return "pdf"
 	case hasSuffixAny(ext, ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".svg"):
 		return "image"
@@ -619,7 +619,7 @@ func (b *Browser) fileType(path string) string {
 		return "database"
 	case hasSuffixAny(ext, ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac"):
 		return "audio"
-	case hasSuffixAny(ext, ".mp4", ".mkv", ".webm", ".avi", ".mov", ".mpeg", ".mpg"):
+	case videoExtension(path):
 		return "video"
 	case hasSuffixAny(ext, ".go", ".c", ".h", ".cc", ".cpp", ".cxx", ".rs", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".sh", ".bash", ".zsh"):
 		return "code"

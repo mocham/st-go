@@ -90,10 +90,11 @@ to `bash -c`, supporting functions and command sequences without interpolating
 filenames into shell code.
 
 By default, the Go browser opens images with [goiv](../goiv/README.md). Both
-browsers open `.pdf` with [zat](../zat/README.md), and text, source, and
-configuration files with [govim](../govim/README.md), when the tool is in
-`PATH`. This includes `.sh`, `.txt`, syntax-highlighted formats, dotfiles, and
-extensionless scripts; extensions are case-insensitive. With supported, enabled
+browsers open `.pdf` with [zat](../zat/README.md), `.djvu` with
+[zat-djvu](../zat-djvu/README.md), and text, source, and configuration files
+with [govim](../govim/README.md), when the tool is in `PATH`. This includes
+`.sh`, `.txt`, syntax-highlighted formats, dotfiles, and extensionless scripts;
+extensions are case-insensitive. With supported, enabled
 st-go tabs, the **Go browser** requests a new focused tab:
 the first successful open lazily initializes tabs, retains the browser in tab 1,
 and appends the new PTY last, selecting it only after a successful launch. The
@@ -152,8 +153,9 @@ ST_FILE_BROWSER_OPEN_FB='my-fb-handler "$FILE"' ./BINARIES/st-fb -e ./BINARIES/f
 
 ## Framebuffer video
 
-Framebuffer sessions default to foreground playback of MP4, MKV, WebM, and
-other video formats using:
+Framebuffer sessions default to foreground playback of MP4, MKV, WebM, AVI,
+MPEG, MOV, M4V, Ogg Video, 3GP/3G2, MTS/M2TS, VOB, ASF, DivX, DV, F4V/FLV,
+M2V, MXF, OGM, RealMedia, WMV, Y4M, and other MIME-detected video formats using:
 
 ```sh
 mpv --vo=drm --hwdec=auto-copy --ao=alsa --audio-device=alsa/plughw:1,0 --volume=33 -- "$FILE"

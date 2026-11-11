@@ -189,7 +189,7 @@ apply, and failures use the bounded diagnostic log.
 | `region secondary clear` | Clear the preview, retaining the split |
 | `region secondary list BASE64` | Overlay a retained, smoothly scrollable text list encoded as base64 JSON |
 | `region secondary list restore` | Restore the previous image/PDF and navigation without changing layout |
-| `region secondary scroll report\|pages` | Report navigation to the application or use default PDF-page scrolling |
+| `region secondary scroll report\|edges\|pages` | Report all navigation, report only raster-viewer edge crossings, or use default scrolling |
 | `region secondary scroll N` / `region secondary seek N` | Scroll locally in continuous mode or emit an application navigation event |
 | `region secondary position N` | Set continuous scroll position in millionths of its range (0–1000000) |
 | `region secondary page N` / `pages N` | Jump to a page / move by signed pages using actual page dimensions |
@@ -227,7 +227,11 @@ edge of a side-by-side pane. Continuous PDFs retain their native document across
 zoom/resize; a new `open` reloads it. Failed reloads retain previous pixels.
 `viewer` retains a decoded raster source and publishes bounded scaled strips;
 normal wheel input scrolls, Ctrl+wheel zooms, and left-button dragging pans the
-image without sending pointer traffic through the application's PTY.
+image without sending pointer traffic through the application's PTY. In
+`scroll edges` mode, ordinary motion remains local, while an outward movement
+at the top or bottom replies with `DCS region secondary event scroll -1|1 ST`;
+clients that render one page per raster can then replace it with the adjacent
+page.
 
 Search replies with `DCS region secondary found PAGE ST` (0 means no match), then
 `DCS region secondary matches PAGE INDEX TOTAL LOCAL_INDEX TRUNCATED ST`.

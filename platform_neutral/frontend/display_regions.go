@@ -55,6 +55,7 @@ type regionSurface struct {
 	bitmap                regionBitmap
 	dirty                 bool
 	reportScroll          bool
+	reportScrollEdges     bool
 	loading, scrollFailed bool
 	scrollY, targetY      float64
 	lastScroll            time.Time
@@ -110,6 +111,7 @@ type regionSearch struct {
 }
 
 var _ term.RegionHooks = (*Terminal)(nil)
+var _ term.RegionScrollEdgeHooks = (*Terminal)(nil)
 
 func (t *Terminal) physicalCols() int {
 	if t.windowCols > 0 {
@@ -756,6 +758,9 @@ func (t *Terminal) regionMousePress(button byte, state uint16, px, py int) bool 
 			return true
 		}
 		if surface.scrollable() {
+			if t.reportRegionScrollEdge(term.SecondaryRegion, surface, delta) {
+				return true
+			}
 			t.scrollRegionBy(delta)
 			return true
 		}
@@ -811,6 +816,22 @@ func (t *Terminal) SetRegionScrollReporting(id term.RegionID, enabled bool) erro
 	surface, err := t.secondaryRegion(id)
 	if err == nil {
 		surface.reportScroll = enabled
+		if enabled {
+			surface.reportScrollEdges = false
+		}
+	}
+	return err
+}
+
+func (t *Terminal) SetRegionScrollEdgeReporting(id term.RegionID, enabled bool) error {
+	t.displayRegions.mu.Lock()
+	defer t.displayRegions.mu.Unlock()
+	surface, err := t.secondaryRegion(id)
+	if err == nil {
+		surface.reportScrollEdges = enabled
+		if enabled {
+			surface.reportScroll = false
+		}
 	}
 	return err
 }
@@ -974,7 +995,9 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 			surface.dirty = true
 			t.requestRegionPaint()
 		case "view":
-			t.scrollRegionPixels(float64(event.Value) * float64(t.secondaryPixels().Dy()) / 1e6)
+			if !t.reportRegionScrollEdge(id, surface, event.Value) {
+				t.scrollRegionPixels(float64(event.Value) * float64(t.secondaryPixels().Dy()) / 1e6)
+			}
 		case "page", "pages":
 			if !surface.request.Continuous {
 				return fmt.Errorf("page navigation requires a continuous PDF")
@@ -1020,7 +1043,9 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 		return nil
 	}
 	if event.Kind == "scroll" && surface.scrollable() {
-		t.scrollRegionBy(event.Value)
+		if !t.reportRegionScrollEdge(id, surface, event.Value) {
+			t.scrollRegionBy(event.Value)
+		}
 		return nil
 	}
 	if (event.Kind != "seek" && event.Kind != "scroll") || !surface.reportScroll {
@@ -1028,6 +1053,28 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 	}
 	t.termCore.WriteToTTY([]byte(fmt.Sprintf("\x1bPregion %s event %s %d\x1b\\", id, event.Kind, event.Value)), false)
 	return nil
+}
+
+// reportRegionScrollEdge hands only an outward movement at a committed/target
+// edge back to applications that render one page per raster. Ordinary motion
+// stays local and smooth. targetY is used so a quick wheel burst need not wait
+// for easing to finish before it can cross the page boundary.
+// The display-region mutex is held by every caller.
+func (t *Terminal) reportRegionScrollEdge(id term.RegionID, surface *regionSurface, direction int) bool {
+	if !surface.reportScrollEdges || direction == 0 || surface.loading || surface.request == nil || !surface.request.Viewer {
+		return false
+	}
+	maximum := t.regionScrollMaximum()
+	atEdge := maximum <= 0 || direction < 0 && surface.targetY <= 0 || direction > 0 && surface.targetY >= maximum
+	if !atEdge {
+		return false
+	}
+	if t.termCore == nil {
+		return false
+	}
+	direction = min(1, max(-1, direction))
+	t.termCore.WriteToTTY([]byte(fmt.Sprintf("\x1bPregion %s event scroll %d\x1b\\", id, direction)), false)
+	return true
 }
 
 // regionStatusReply is also emitted immediately for host-owned Ctrl+wheel

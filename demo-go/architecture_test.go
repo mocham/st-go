@@ -66,8 +66,13 @@ func TestNoDisplayBackendDependencies(t *testing.T) {
 }
 
 func TestApplicationModulesDoNotDependOnGraphicalHost(t *testing.T) {
-	for _, name := range []string{"file-browser", "goiv", "gols", "govim", "pinyind", "vimtex", "zat"} {
+	for _, name := range []string{"file-browser", "goiv", "gols", "govim", "pinyind", "vimtex", "zat", "zat-djvu"} {
 		t.Run(name, func(t *testing.T) {
+			if name == "zat-djvu" {
+				if err := exec.Command("pkg-config", "--exists", "ddjvuapi").Run(); err != nil {
+					t.Skip("DjVuLibre development package is not installed")
+				}
+			}
 			data, err := os.ReadFile(filepath.Join(name, "go.mod"))
 			if err != nil || !strings.HasPrefix(string(data), "module st-go/demo-go/"+name+"\n") {
 				t.Fatalf("missing independent module: %v", err)

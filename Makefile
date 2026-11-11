@@ -9,6 +9,7 @@
 #   - zlib        : poppler's stream decompression
 #   - libpng      : poppler's embedded-image support
 #   - libjpeg-turbo: poppler's JPEG/DCT image decoder
+#   - DjVuLibre  : static DjVu decoding for zat-djvu
 # SQLite comes from go-sqlite3's bundled amalgamation rather than third_party/.
 #
 # poppler uses the C++/Splash renderer with static freetype, zlib, libpng and
@@ -40,11 +41,14 @@ STB_URL     = https://raw.githubusercontent.com/nothings/stb/master/stb_image.h
 
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
-BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat goiv govim govim-pinyind
+DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
+BINARY_NAMES = st st-min st-stb st-pdf st-web st-fb file-browser gols vimtex zat zat-djvu goiv govim govim-pinyind
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
-DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gols demo-go/govim demo-go/pinyind demo-go/vimtex demo-go/zat
+# Standalone, asset-free module tests use the system API when available. The
+# distribution target below never does: it always uses the pinned static build.
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gols demo-go/govim demo-go/pinyind demo-go/vimtex demo-go/zat $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
 MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
 CFG         = functionalities/config/config.json
@@ -77,6 +81,8 @@ FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go)
 VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go demo-go/vimtex/*.vim functionalities/ptyutil/*.go functionalities/limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go functionalities/limits/*.go functionalities/pdfmeta/*.go) \
+	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
+ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat-djvu/*.h demo-go/zat-djvu/go.mod demo-go/zat-djvu/go.sum functionalities/limits/*.go functionalities/pdfmeta/*.go) \
 	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
 GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
 GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
@@ -159,6 +165,15 @@ JPEG_SRC     = third_party/libjpeg-turbo-src
 JPEG_BUILD   = $(JPEG_SRC)/build
 JPEG_DIR     = third_party/jpeg
 JPEG_LIB     = $(JPEG_DIR)/lib/libjpeg.a
+
+DJVU_VERSION = 3.5.29
+DJVU_URL     = https://downloads.sourceforge.net/project/djvu/DjVuLibre/$(DJVU_VERSION)/djvulibre-$(DJVU_VERSION).tar.gz
+DJVU_SHA256  = d3b4b03ae2bdca8516a36ef6eb27b777f0528c9eda26745d9962824a3fdfeccf
+DJVU_TAR     = third_party/djvulibre-$(DJVU_VERSION).tar.gz
+DJVU_SRC     = third_party/djvulibre-src
+DJVU_DIR     = third_party/djvu
+DJVU_LIB     = $(DJVU_DIR)/lib/libdjvulibre.a
+DJVU_STAMP   = $(DJVU_DIR)/include/st_go_djvu_static.h
 
 # libwebp: WebP decode (stb_image has no WebP support).
 WEBP_VERSION = 1.6.0
@@ -278,6 +293,50 @@ $(JPEG_LIB):
 	cp "$(JPEG_BUILD)/libjpeg.a" "$(JPEG_LIB)"
 	cp "$(JPEG_BUILD)/jconfig.h" "$(JPEG_SRC)/src/jpeglib.h" \
 		"$(JPEG_SRC)/src/jmorecfg.h" "$(JPEG_SRC)/src/jerror.h" "$(JPEG_DIR)/include/"
+
+# --- DjVuLibre static (zat-djvu page/text/outline decoder) ----------------
+$(DJVU_TAR):
+	@mkdir -p third_party
+	curl --fail --location --retry 3 --output "$@.tmp" "$(DJVU_URL)"
+	printf '%s  %s\n' '$(DJVU_SHA256)' '$@.tmp' | sha256sum -c -
+	mv "$@.tmp" "$@"
+
+$(DJVU_LIB): $(JPEG_LIB)
+	@mkdir -p third_party
+	@if [ ! -f "$(DJVU_TAR)" ]; then \
+		$(MAKE) --no-print-directory "$(DJVU_TAR)"; \
+	fi
+	printf '%s  %s\n' '$(DJVU_SHA256)' '$(DJVU_TAR)' | sha256sum -c -
+	rm -rf "$(DJVU_SRC)" "$(DJVU_DIR)"
+	mkdir -p "$(DJVU_SRC)" "$(DJVU_DIR)/lib" "$(DJVU_DIR)/include/libdjvu"
+	tar -xzf "$(DJVU_TAR)" -C "$(DJVU_SRC)" --strip-components=1
+	# Static glibc cannot service NSS-backed passwd lookups without matching
+	# shared objects. zat-djvu supplies absolute paths and HOME, so disable only
+	# DjVuLibre's unused ~user/passwd fallbacks, like the static ALSA profile.
+	sed -i 's/pw=getpwnam(user);/pw=0;/' "$(DJVU_SRC)/libdjvu/GURL.cpp"
+	sed -i 's/pw = getpwnam((const char \*)senv.getUTF82Native());/pw = 0;/' "$(DJVU_SRC)/libdjvu/GURL.cpp"
+	sed -i 's/pw=getpwuid(getuid());/pw=0;/' "$(DJVU_SRC)/libdjvu/GURL.cpp"
+	sed -i 's/if ((pw = getpwuid(getuid())))/if ((pw = 0))/' "$(DJVU_SRC)/libdjvu/DjVuMessage.cpp"
+	sed -i 's/passwd \*pswd = getpwuid(getuid());/passwd *pswd = 0;/' "$(DJVU_SRC)/libdjvu/DjVuToPS.cpp"
+	cd "$(DJVU_SRC)" && ./configure \
+		--prefix="$(abspath $(DJVU_DIR))" \
+		--disable-shared --enable-static --disable-desktopfiles \
+		--disable-xmltools --without-tiff --with-jpeg="$(abspath $(JPEG_DIR))" \
+		CFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections" \
+		CXXFLAGS="-O2 -fPIC -ffunction-sections -fdata-sections"
+	$(MAKE) -C "$(DJVU_SRC)/libdjvu"
+	cp "$(DJVU_SRC)/libdjvu/.libs/libdjvulibre.a" "$(DJVU_LIB)"
+	cp "$(DJVU_SRC)/libdjvu/ddjvuapi.h" "$(DJVU_SRC)/libdjvu/miniexp.h" "$(DJVU_DIR)/include/libdjvu/"
+	cp "$(DJVU_SRC)/COPYING" "$(DJVU_DIR)/LICENSE"
+
+# Go's cgo cache hashes included headers but not external archive contents.
+# Embed the archive identity in a generated header so rebuilt native code can
+# never be hidden by a stale cached cgo package.
+$(DJVU_STAMP): $(DJVU_LIB)
+	@mkdir -p "$(@D)"
+	@hash=$$(sha256sum "$(DJVU_LIB)" | cut -d' ' -f1); \
+		printf '#define ST_GO_DJVU_STATIC_SHA256 "%s"\n' "$$hash" > "$@.tmp"; \
+		mv "$@.tmp" "$@"
 
 # --- libwebp static (WebP decode; stb_image has no WebP support) ----------
 $(WEBP_LIB):
@@ -490,6 +549,11 @@ $(OUTPUT_DIR)/vimtex: $(VIMTEX_GO_SRC)
 $(OUTPUT_DIR)/zat: $(ZAT_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/zat build -trimpath -o $(abspath $@) .
 
+# DjVu viewer; the pinned static DjVuLibre decoder lives in this TUI.
+$(OUTPUT_DIR)/zat-djvu: Makefile $(DJVU_LIB) $(DJVU_STAMP) $(ZAT_DJVU_SRC) | $(OUTPUT_DIR)
+	go -C demo-go/zat-djvu build -trimpath -tags 'djvu_static' -o $(abspath $@) \
+		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' .
+
 # Raster image viewer; decoding and retained pixels live in the terminal.
 $(OUTPUT_DIR)/goiv: $(GOIV_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/goiv build -trimpath -o $(abspath $@) .
@@ -560,6 +624,10 @@ test-zat-x11: st zat
 	go test -tags '$(FULL_GO_TAGS)' ./platform_neutral/frontend -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' \
 		-run '^TestZat(PageText|Search)X11$$' -count=1 -v
 
+test-zat-djvu: $(DJVU_LIB) $(DJVU_STAMP)
+	GOWORK=off go -C demo-go/zat-djvu test -tags 'djvu_static' \
+		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' ./...
+
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
 	rm -f "$(DESTDIR)$(TERMINFO_DIR)/s/st-256color" \
@@ -571,4 +639,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-modules test-tui test-web-browser test-webp-x11 test-zat-x11 $(BINARY_NAMES) pinyin-assets pinyin-force terminal-profile-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu $(BINARY_NAMES) pinyin-assets pinyin-force terminal-profile-force

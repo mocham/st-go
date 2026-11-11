@@ -77,6 +77,13 @@ type RegionNavigationHooks interface {
 	NavigateRegion(RegionID, RegionNavigation) error
 }
 
+// RegionScrollEdgeHooks is an optional extension for a client that owns a
+// sequence of individually rendered pages. Local scrolling remains frontend-
+// owned, but an attempted scroll beyond either edge is reported to the client.
+type RegionScrollEdgeHooks interface {
+	SetRegionScrollEdgeReporting(RegionID, bool) error
+}
+
 // RegionSearchHooks locates text asynchronously in the native PDF worker.
 // Direction is -1/1; next advances an occurrence, including within a page.
 // Empty text clears highlights and cancels a pending search.
@@ -274,7 +281,19 @@ func (t *Term) dslRegion(args []string) error {
 		if !ok {
 			return fmt.Errorf("region navigation is not supported by this frontend")
 		}
-		if args[1] == "scroll" && (args[2] == "report" || args[2] == "pages") {
+		if args[1] == "scroll" && (args[2] == "report" || args[2] == "pages" || args[2] == "edges") {
+			if args[2] == "edges" {
+				edges, ok := t.hooks.(RegionScrollEdgeHooks)
+				if !ok {
+					return fmt.Errorf("region scroll-edge reporting is not supported by this frontend")
+				}
+				return edges.SetRegionScrollEdgeReporting(id, true)
+			}
+			if edges, ok := t.hooks.(RegionScrollEdgeHooks); ok {
+				if err := edges.SetRegionScrollEdgeReporting(id, false); err != nil {
+					return err
+				}
+			}
 			return navigation.SetRegionScrollReporting(id, args[2] == "report")
 		}
 		value, err := strconv.Atoi(args[2])

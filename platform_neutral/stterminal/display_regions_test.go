@@ -10,12 +10,13 @@ import (
 
 type regionTestHooks struct {
 	mockHooks
-	regions    []DisplayRegion
-	images     []RegionImage
-	targets    []RegionID
-	cleared    RegionID
-	metadata   []RegionDocumentQuery
-	navigation []RegionNavigation
+	regions     []DisplayRegion
+	images      []RegionImage
+	targets     []RegionID
+	cleared     RegionID
+	metadata    []RegionDocumentQuery
+	navigation  []RegionNavigation
+	scrollEdges bool
 }
 
 func (h *regionTestHooks) SetRegions(regions []DisplayRegion) error {
@@ -35,6 +36,10 @@ func (h *regionTestHooks) QueryRegionDocument(id RegionID, query RegionDocumentQ
 	return nil
 }
 func (h *regionTestHooks) SetRegionScrollReporting(RegionID, bool) error { return nil }
+func (h *regionTestHooks) SetRegionScrollEdgeReporting(_ RegionID, enabled bool) error {
+	h.scrollEdges = enabled
+	return nil
+}
 func (h *regionTestHooks) NavigateRegion(id RegionID, event RegionNavigation) error {
 	h.targets = append(h.targets, id)
 	h.navigation = append(h.navigation, event)
@@ -100,6 +105,14 @@ func TestDisplayRegionProtocol(t *testing.T) {
 	wantNavigation := []RegionNavigation{{Kind: "fit-height"}, {Kind: "fit-original"}, {Kind: "zoomstep", Value: -1}}
 	if !reflect.DeepEqual(h.navigation, wantNavigation) {
 		t.Fatalf("viewer navigation = %#v", h.navigation)
+	}
+	core.Twrite([]byte("\x1bPregion secondary scroll edges\x1b\\"), false)
+	if !h.scrollEdges {
+		t.Fatal("raster edge reporting was not enabled")
+	}
+	core.Twrite([]byte("\x1bPregion secondary scroll pages\x1b\\"), false)
+	if h.scrollEdges {
+		t.Fatal("default scrolling did not disable raster edge reporting")
 	}
 	core.Twrite([]byte("\x1bPregion secondary clear; region reset\x1b\\"), false)
 	if h.cleared != SecondaryRegion || h.regions != nil {

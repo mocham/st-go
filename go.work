@@ -10,6 +10,7 @@ use (
 	./demo-go/pinyind
 	./demo-go/vimtex
 	./demo-go/zat
+	./demo-go/zat-djvu
 	./functionalities/audio
 	./functionalities/config
 	./functionalities/latexpdf

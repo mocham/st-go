@@ -21,7 +21,8 @@ Options:
 
 CODE is evaluated by ` + "`bash -c`" + ` with FILE, NAME, and BROWSER_DIR exported.
 It may contain a complete shell command sequence or function definitions.
-By default, images open in goiv, .pdf opens in zat, and text/source/config files open in govim when available in PATH.
+By default, images open in goiv, .pdf opens in zat, .djvu opens in zat-djvu,
+and text/source/config files open in govim when available in PATH.
 Supported st-go hosts open them in new focused tabs, initializing the
 tab bar lazily. Without tab support, they use this terminal and return on exit.
 Ctrl+Shift+PageUp/PageDown switches tabs; Ctrl+Shift+W closes the current tab.

@@ -17,6 +17,8 @@ func terminalDocumentTool(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".pdf":
 		name = "zat"
+	case ".djvu":
+		name = "zat-djvu"
 	case ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".ico":
 		name = "goiv"
 	default:
@@ -41,10 +43,13 @@ func terminalDocumentTool(path string) string {
 // files, extensionless scripts and plain text, without duplicating a lexer list.
 // Keep native/binary formats on their existing routes, including empty fixtures.
 func editorTextFile(path string) bool {
+	if videoExtension(path) {
+		return false
+	}
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".ico",
+	case ".pdf", ".djvu", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tga", ".webp", ".ico",
 		".zip", ".tar", ".tgz", ".gz", ".bz2", ".xz", ".7z", ".rar", ".zst", ".jar", ".war", ".deb", ".rpm",
-		".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".mp4", ".mkv", ".webm", ".avi", ".mov", ".mpeg", ".mpg",
+		".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
 		".sqlite3", ".sqlite", ".db", ".db3", ".s3db", ".epub", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods",
 		".exe", ".dll", ".so", ".o", ".a", ".bin", ".wasm", ".pyc", ".class", ".mo", ".ttf", ".otf", ".woff", ".woff2":
 		return false

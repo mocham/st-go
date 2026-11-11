@@ -38,6 +38,7 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 		"third_party/freetype/libfreetype.a", "third_party/stb/stb_image.o",
 		"third_party/poppler/lib/libz.a", "third_party/poppler/lib/libpng16.a",
 		"third_party/jpeg/lib/libjpeg.a", "third_party/poppler/lib/libpoppler.a",
+		"third_party/djvu/lib/libdjvulibre.a",
 		"third_party/webp/lib/libwebp.a", "third_party/webp/lib/libwebpdemux.a",
 		"third_party/webp/webp_anim.o", "third_party/pdf_bridge.o",
 		"third_party/alsa/lib/libasound.a", "third_party/alsa/snd.o",

@@ -17,6 +17,7 @@ go -C demo-go/govim test ./...
 GOWORK=off go -C demo-go/zat test ./...   # standalone, without workspace help
 GOWORK=off go -C demo-go/goiv test ./...  # retained raster image viewer
 make test-tui                           # all demo/shared client modules
+make test-zat-djvu                     # bundled static DjVuLibre profile
 ```
 
 The checked-in `go.work` supports cross-module development. Every module also
@@ -30,6 +31,7 @@ The sibling `demo-go` module contains architecture/dependency guards only.
 | Native Go modal editor, recovery journals, retained document preview, and lazy CJK input | [govim](govim/README.md), [roadmap](govim/ROADMAP.md), [Pinyin helper](pinyind/README.md) |
 | Real Vim with a saved-document LaTeX preview | [vimtex](vimtex/README.md) |
 | Native, smoothly scrolling PDF viewer | [zat](zat/README.md), [performance notes](zat/PERFORMANCE.md) |
+| DjVuLibre-backed DjVu viewer with retained page rasters, outline, text, and search | [zat-djvu](zat-djvu/README.md) |
 | Retained raster image viewer with fit, zoom, drag, and sibling navigation | [goiv](goiv/README.md) |
 | Filesystem/archive browser, document previews, and backend-aware openers | [file-browser](file-browser/README.md) |
 | Immutable SQLite corpus browser and document search | [gols](gols/README.md) |
@@ -62,10 +64,12 @@ without audio support. The optional Pinyin helper alone owns its native decoder.
 These are OS/runtime constraints, not graphical dependencies. On the web backend
 the clients, PTYs, and native audio still run on the Linux server.
 
-Reusable modules live under [`functionalities/`](../functionalities/README.md),
+`zat-djvu` is the deliberate native-code exception among the document clients:
+it links DjVuLibre for DjVu page, hidden-text, and outline APIs but still has no
+display-server dependency. Reusable modules live under [`functionalities/`](../functionalities/README.md),
 with unchanged import paths (`st-go/tui`, `st-go/limits`, etc.). The terminal
 engine/contracts are separate modules under `platform_neutral/`; no TUI module
-requires the root host or native graphical codecs.
+requires the root graphical host.
 
 `TestNoDisplayBackendDependencies` guards source imports and display-server
 environment probes. `TestApplicationModulesDoNotDependOnGraphicalHost` checks
