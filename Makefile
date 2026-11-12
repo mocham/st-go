@@ -33,13 +33,13 @@ FT_A        = $(FT_DIR)/libfreetype.a
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
-BINARY_NAMES = st st-min st-pdf st-web st-fb file-browser gols vimtex zat zat-djvu goiv govim opencode-tui
+BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv govim opencode-tui
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
-DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/vimtex demo-go/zat $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
 MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
 CFG         = functionalities/config/config.json
@@ -51,7 +51,7 @@ TERMINFO_DIR ?= $(PREFIX)/share/terminfo
 TABS ?= 1
 TAB_GO_TAGS = $(if $(filter 1,$(TABS)),terminal_tabs,)
 FULL_GO_TAGS = fastimage libwebp webpcache $(TAB_GO_TAGS)
-TERMINAL_NAMES = st st-web st-fb st-pdf st-min
+TERMINAL_NAMES = st st-web st-fb st-min st-fb-min
 TERMINAL_PROFILE = $(OUTPUT_DIR)/.terminal-profile
 
 # Sources that affect the Go file-browser demo, including the sibling
@@ -68,7 +68,6 @@ FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 	       $(wildcard platform_neutral/api/*.go) \
 	       $(wildcard demo-go/file-browser/*.conf functionalities/tui/audio/*.go functionalities/tui/tabs/*.go functionalities/tui/preview/*.go) go.mod go.sum $(LATEXPDF_SRC) $(SEMHTML_SRC) $(TUI_NAV_SRC) $(TUI_READLINE_SRC)
 GOLS_GO_SRC  = $(wildcard demo-go/gols/*.go) go.mod go.sum $(LATEXPDF_SRC) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go)
-VIMTEX_GO_SRC = $(wildcard demo-go/vimtex/*.go demo-go/vimtex/*.vim functionalities/ptyutil/*.go functionalities/limits/*.go) go.mod go.sum $(LATEXPDF_SRC)
 ZAT_GO_SRC = $(wildcard demo-go/zat/*.go functionalities/limits/*.go functionalities/pdfmeta/*.go) \
 	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
 ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat-djvu/*.h demo-go/zat-djvu/go.mod demo-go/zat-djvu/go.sum functionalities/limits/*.go functionalities/pdfmeta/*.go) \
@@ -318,17 +317,16 @@ $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB) $(JPEG_LIB)
 	cp "$(POPPLER_BUILD)/cpp/poppler_cpp_export.h" third_party/poppler/include/
 
 # --- st targets ------------------------------------------------------------
-# Three build levels with an increasing set of native libraries. Every level
+# Full and minimal native profiles for X11 and Linux framebuffer. Every profile
 # decodes ordinary raster images with Go; full profiles prefer libpng,
 # libjpeg-turbo and libwebp where available:
-#   st      (full) : freetype + libpng/jpeg + libwebp + poppler
-#   st-pdf         : freetype + poppler                      (Go raster codecs)
-#   st-min         : freetype only                           (Go raster codecs)
+#   st, st-fb         : freetype + libpng/jpeg + libwebp + poppler
+#   st-min, st-fb-min : freetype only (Go raster codecs)
 #
-# Reduced profiles compile a Go static-WebP decoder and animation stubs; st-min
-# also links a no-op PDF bridge. Unsupported animation and PDF requests degrade
+# Minimal profiles compile a Go static-WebP decoder and animation stubs, and
+# link a no-op PDF bridge. Unsupported animation and PDF requests degrade
 # gracefully. All extra objects/libs are passed via -extldflags so one source
-# tree works for every level.
+# tree works for every profile.
 
 DUMMY_DIR    = third_party/dummy
 DUMMY_PDF    = $(DUMMY_DIR)/dummy-pdf.o
@@ -340,7 +338,6 @@ IMAGE_DECODE_O = third_party/image_decode.o
 # poppler objects; --gc-sections relies on the libs being built with
 # -ffunction-sections -fdata-sections).
 MIN_EXTRA  = $(DUMMY_PDF)
-PDF_EXTRA  = $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm
 FULL_EXTRA = $(IMAGE_DECODE_O) $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
 
 # Animated-WebP items for the Go file-browser (WebPAnimDecoder playback).
@@ -393,8 +390,8 @@ $(FB_STATUS_FONT): Monaco_Linux.ttf platform_dependent/fb/generate_system_bar_fo
 $(OUTPUT_DIR)/st-fb: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(FB_STATUS_FONT) $(GO_SRC)
 	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
-$(OUTPUT_DIR)/st-pdf: $(FT_A) $(POPPLER_LIB) $(PDF_BRIDGE_O) $(GO_SRC)
-	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(PDF_EXTRA)"' .
+$(OUTPUT_DIR)/st-fb-min: $(FT_A) $(DUMMY_PDF) $(FB_STATUS_FONT) $(GO_SRC)
+	go build -trimpath -tags 'backend_fb netgo osusergo $(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_PDF) $(GO_SRC)
 	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
@@ -413,10 +410,6 @@ $(FILE_BROWSER): $(FB_GO_SRC)
 # vector PDFs through the existing DCS open protocol; no HTTP server is used.
 $(OUTPUT_DIR)/gols: $(GOLS_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/gols build -trimpath -o $(abspath $@) .
-
-# Real Vim on a pane-sized PTY, with save-triggered LaTeX PDF previews.
-$(OUTPUT_DIR)/vimtex: $(VIMTEX_GO_SRC)
-	CGO_ENABLED=0 go -C demo-go/vimtex build -trimpath -o $(abspath $@) .
 
 # PDF viewer; Poppler and the pixel cache live in the terminal, not this TUI.
 $(OUTPUT_DIR)/zat: $(ZAT_GO_SRC)

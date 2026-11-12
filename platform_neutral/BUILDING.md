@@ -15,7 +15,9 @@ Run commands from the repository root. Executables are written to `BINARIES/`.
 | --- | --- |
 | `make` | All terminals and applications |
 | `make st` | Full X11 terminal |
+| `make st-min` | Minimal X11 terminal |
 | `make st-fb` | Full native renderer on Linux framebuffer |
+| `make st-fb-min` | Minimal Linux framebuffer terminal |
 | `make st-web` | CGO-free HTTP server and embedded browser client |
 | `make file-browser govim` | Build named applications; see the [application index](../demo-go/README.md) |
 | `make install` | Install `st`, `st.json`, and terminfo under `PREFIX` (default `/usr/local`) |
@@ -28,7 +30,7 @@ To make the applications available as file-browser openers:
 export PATH="$PWD/BINARIES:$PATH"
 ```
 
-Make builds include terminal tabs. Use `make TABS=0 st st-fb st-web` to omit
+Make builds include terminal tabs. Use `make TABS=0 st st-min st-fb st-fb-min st-web` to omit
 them, or `-no-tabs` to disable them at runtime. Direct Go builds must explicitly
 select the `terminal_tabs` tag. X11 is the default backend; select only one of
 `backend_web` and `backend_fb` for another backend.
@@ -39,6 +41,9 @@ Make's binaries are statically linked and embed their default fonts/configuratio
 X11 uses pure-Go XGB, without libX11, Xft, or fontconfig. Native terminals use
 FreeType; full profiles add accelerated PNG/JPEG/WebP decoding, animated WebP,
 and Poppler PDF rendering.
+
+`st-min` and `st-fb-min` use FreeType and Go raster codecs, including static WebP.
+They omit native PDF rendering and animated WebP.
 
 `st-web` embeds Canvas code, PDF.js, workers, fonts, and other browser assets.
 It needs no native media libraries, npm build, CDN, or companion asset directory.

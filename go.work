@@ -8,7 +8,6 @@ use (
 	./demo-go/gols
 	./demo-go/govim
 	./demo-go/opencode-tui
-	./demo-go/vimtex
 	./demo-go/zat
 	./demo-go/zat-djvu
 	./functionalities/audio

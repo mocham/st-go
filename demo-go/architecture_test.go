@@ -66,7 +66,7 @@ func TestNoDisplayBackendDependencies(t *testing.T) {
 }
 
 func TestApplicationModulesDoNotDependOnGraphicalHost(t *testing.T) {
-	for _, name := range []string{"file-browser", "goiv", "gols", "govim", "opencode-tui", "vimtex", "zat", "zat-djvu"} {
+	for _, name := range []string{"file-browser", "goiv", "gols", "govim", "opencode-tui", "zat", "zat-djvu"} {
 		t.Run(name, func(t *testing.T) {
 			if name == "zat-djvu" {
 				if err := exec.Command("pkg-config", "--exists", "ddjvuapi").Run(); err != nil {

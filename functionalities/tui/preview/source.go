@@ -140,8 +140,8 @@ func Load(path string, read Reader) (*Snapshot, error) {
 
 func (s *Snapshot) HasFile(path string) bool { return s != nil && s.files[cleanPath(path)] }
 
-// Position is the same approximate source-line-to-scroll-range mapping used by
-// vimtex, with mappings for included files as well as the root. It is not SyncTeX.
+// Position approximately maps a source line to the scroll range, including lines
+// in included files as well as the root. It is not SyncTeX.
 func (s *Snapshot) Position(path string, line int) int {
 	if offsets := s.lines[cleanPath(path)]; len(offsets) > 0 {
 		line = offsets[max(0, min(line-1, len(offsets)-1))]
