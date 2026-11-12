@@ -11,7 +11,7 @@ import (
 )
 
 // Keep the generated text atlas in source control so headless/pure-Go builds
-// need neither FreeType nor the TTF. make st-fb refreshes it when inputs change.
+// need no font loader. make st-fb/st-fb-min refresh it with the Go rasterizer.
 //go:generate go run generate_system_bar_font.go -font ../../Monaco_Linux.ttf -output system_bar_font_generated.go
 
 var systemBarGlyphs = loadSystemBarGlyphs()

@@ -58,6 +58,12 @@ colors, and decorations. Browser Canvas and the native raster adapter consume
 the same operations. The server remains authoritative for the terminal grid.
 Caret updates are separate from glyph content, reducing redraw work.
 
+Native text uses [`fontraster`](../fontraster/README.md): shared ordered fallback,
+baseline placement, clipping, and ARGB composition over grayscale masks. Full
+builds rasterize with FreeType C; CGO-free minimal builds use the Go FreeType port.
+The 32 MiB glyph cache budget is split into 8 MiB of masks and 24 MiB of colored
+cells, with 4,096 and 12,288 entries respectively. Font reloads invalidate both.
+
 Native previews use a background decoder with one replaceable pending request.
 Stale results are discarded and the last successful preview remains visible.
 Continuous PDFs retain their document across zoom/resize and cache up to five

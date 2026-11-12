@@ -53,7 +53,6 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 	}
 	for _, path := range append(append([]string{}, artifacts...),
 		"third_party_wrapper/image_decode.c", "third_party_wrapper/webp_anim.c",
-		"third_party_wrapper/ff2.h", "third_party_wrapper/plugin-ff2.c",
 		"platform_dependent/fb/generate_system_bar_font.go", "platform_dependent/fb/system_bar_font_generated.go",
 		"third_party_wrapper/pdf_bridge.cpp", "pdf_bridge.h", "go.mod", "go.sum", "Monaco_Linux.ttf", "st", "file-browser") {
 		write(path, nil, old)

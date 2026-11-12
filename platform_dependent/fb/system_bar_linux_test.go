@@ -211,6 +211,7 @@ func TestSystemBarUsesBundledMonacoAt28Pixels(t *testing.T) {
 	if systemBarFontSize != 28 {
 		t.Fatal("bar did not retain its enlarged 28 px font size")
 	}
+	antialiased := false
 	for _, ch := range systemBarFontAlphabet {
 		glyph := systemBarGlyphs[ch]
 		if len(glyph) != systemBarFontCellWidth*systemBarFontCellHeight {
@@ -228,9 +229,14 @@ func TestSystemBarUsesBundledMonacoAt28Pixels(t *testing.T) {
 			if ink {
 				t.Fatal("space glyph contains ink")
 			}
-		} else if !ink || !antialias {
-			t.Fatalf("Monaco glyph %q is blank/not anti-aliased", ch)
+		} else if !ink {
+			t.Fatalf("Monaco glyph %q is blank", ch)
 		}
+		antialiased = antialiased || antialias
+	}
+	// Fully hinted straight strokes (e.g. '-') can land exactly on pixels.
+	if !antialiased {
+		t.Fatal("Monaco atlas contains no antialiased coverage")
 	}
 	if systemBarBlend(0) != systemBarBackground || systemBarBlend(255) != systemBarForeground {
 		t.Fatal("anti-alias blending changed the bar palette")

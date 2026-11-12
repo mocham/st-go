@@ -1,4 +1,4 @@
-//go:build !libwebp || backend_web
+//go:build !libwebp || backend_web || !cgo || purego
 
 package frontend
 

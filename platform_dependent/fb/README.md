@@ -6,12 +6,13 @@ make st-fb
 ```
 
 For the minimal profile, build `make st-fb-min` and run `BINARIES/st-fb-min`
-with the same options. It uses FreeType and Go raster codecs, including static
-WebP, and omits PDF rendering and animated WebP.
+with the same options. It uses the Go FreeType port and Go raster codecs, including
+static WebP, and omits PDF rendering and animated WebP. This target and its status
+font generator are CGO-free and require no C compiler or native libraries.
 
 Run from an active foreground Linux text VT with permission to use its framebuffer
 and input devices. PTYs and already-owned graphics consoles are rejected. The
-driver is pure Go; the executable uses the shared static native font/media renderer.
+driver is pure Go; the executable uses the shared font/media rendering frontend.
 
 ## Devices and permissions
 

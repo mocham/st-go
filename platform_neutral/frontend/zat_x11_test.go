@@ -1,4 +1,4 @@
-//go:build webpcache
+//go:build webpcache && !backend_web && cgo && !purego
 
 package frontend
 

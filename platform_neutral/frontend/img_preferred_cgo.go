@@ -1,4 +1,4 @@
-//go:build fastimage && !backend_web
+//go:build fastimage && !backend_web && cgo && !purego
 
 package frontend
 

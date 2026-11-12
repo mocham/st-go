@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/BurntSushi/xgb v0.0.0-20210121224620-deaf085860bc
 	github.com/BurntSushi/xgbutil v0.0.0-20190907113008-ad855c713046
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	golang.org/x/sys v0.49.0
 )
 

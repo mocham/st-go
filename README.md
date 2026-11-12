@@ -12,7 +12,7 @@ Its web backend allows for operating on a remote server.
 ```sh
 make st          # X11: BINARIES/st
 make st-fb       # Linux framebuffer/virtual console: BINARIES/st-fb
-make st-fb-min   # Minimal framebuffer profile: BINARIES/st-fb-min
+make st-fb-min   # CGO-free framebuffer profile: BINARIES/st-fb-min
 make st-web      # CGO-free web server/client: BINARIES/st-web
 
 ./BINARIES/st

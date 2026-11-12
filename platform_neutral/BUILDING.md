@@ -5,9 +5,10 @@ Run commands from the repository root. Executables are written to `BINARIES/`.
 ## Requirements
 
 - Go 1.26 or newer and Make.
-- Native terminals and `zat-djvu`: cgo, C/C++ compilers, static glibc, `curl`,
+- Full native terminals (`st`, `st-fb`) and `zat-djvu`: cgo, C/C++ compilers, static glibc, `curl`,
   `tar`, and `cmake`. Make downloads and builds the required native libraries.
-- `st-web` and the other Go applications build with `CGO_ENABLED=0`.
+- `st-min`, `st-fb-min`, `st-web`, and the other Go applications build with
+  `CGO_ENABLED=0`. Minimal targets require no C compiler or `third_party/` assets.
 
 ## Targets
 
@@ -15,9 +16,9 @@ Run commands from the repository root. Executables are written to `BINARIES/`.
 | --- | --- |
 | `make` | All terminals and applications |
 | `make st` | Full X11 terminal |
-| `make st-min` | Minimal X11 terminal |
+| `make st-min` | CGO-free minimal X11 terminal |
 | `make st-fb` | Full native renderer on Linux framebuffer |
-| `make st-fb-min` | Minimal Linux framebuffer terminal |
+| `make st-fb-min` | CGO-free minimal Linux framebuffer terminal |
 | `make st-web` | CGO-free HTTP server and embedded browser client |
 | `make file-browser govim` | Build named applications; see the [application index](../demo-go/README.md) |
 | `make install` | Install `st`, `st.json`, and terminfo under `PREFIX` (default `/usr/local`) |
@@ -38,12 +39,19 @@ select the `terminal_tabs` tag. X11 is the default backend; select only one of
 ## Standalone binaries
 
 Make's binaries are statically linked and embed their default fonts/configuration.
-X11 uses pure-Go XGB, without libX11, Xft, or fontconfig. Native terminals use
-FreeType; full profiles add accelerated PNG/JPEG/WebP decoding, animated WebP,
+X11 uses pure-Go XGB, without libX11, Xft, or fontconfig. Full native profiles use
+FreeType C, accelerated PNG/JPEG/WebP decoding, animated WebP,
 and Poppler PDF rendering.
 
-`st-min` and `st-fb-min` use FreeType and Go raster codecs, including static WebP.
-They omit native PDF rendering and animated WebP.
+`st-min` and `st-fb-min` use the Go FreeType port and Go raster codecs, including
+static WebP. PDF rendering and animated WebP use unsupported-operation stubs.
+Font selection, cell placement, and color composition are shared with full builds.
+The Go rasterizer accepts TrueType fonts and the first face of TrueType collections;
+unsupported font overrides fall back to embedded Monaco. Hinting can differ slightly
+between font engines. The framebuffer status atlas also regenerates without cgo.
+
+The `purego` tag selects this implementation even when cgo is enabled (useful for
+race tests). Disabling cgo selects it automatically for X11/framebuffer builds.
 
 `st-web` embeds Canvas code, PDF.js, workers, fonts, and other browser assets.
 It needs no native media libraries, npm build, CDN, or companion asset directory.
@@ -58,6 +66,12 @@ decoded WebP frames; every backend supports opt-in shared clipboard storage.
 Native archives in `third_party/` are reused across Makefile edits. After changing
 a library version/build setting, force its archive target or use `make distclean`.
 Use Make for native linking: bare root Go build/test commands lack its link objects.
+Minimal builds need no link flags, for example:
+
+```sh
+CGO_ENABLED=0 go build -tags 'purego terminal_tabs' -o BINARIES/st-min .
+CGO_ENABLED=0 go build -tags 'purego backend_fb terminal_tabs' -o BINARIES/st-fb-min .
+```
 
 ## Tests
 
@@ -67,6 +81,7 @@ make test-tui             # standalone modules, without graphical libraries
 make test-web             # web protocol, shared clipboard, service/PTY lifecycle
 make test-web-browser     # direct + shared-service Chromium checks; Node >=22, no npm
 make test-zat-djvu        # bundled static DjVuLibre profile
+go test -race ./platform_neutral/fontraster
 ```
 
 Set `CHROMIUM=/path/to/chromium` if needed. The module sweep includes `zat-djvu`

@@ -1,4 +1,4 @@
-//go:build !backend_web
+//go:build !backend_web && cgo && !purego
 
 package frontend
 

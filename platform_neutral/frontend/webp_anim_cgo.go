@@ -1,4 +1,4 @@
-//go:build libwebp && !backend_web
+//go:build libwebp && !backend_web && cgo && !purego
 
 // webp_anim_cgo.go bridges full profiles to libwebp's WebPAnimDecoder (from
 // libwebpdemux) for animated WebP playback.

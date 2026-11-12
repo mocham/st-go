@@ -321,15 +321,11 @@ $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB) $(JPEG_LIB)
 # decodes ordinary raster images with Go; full profiles prefer libpng,
 # libjpeg-turbo and libwebp where available:
 #   st, st-fb         : freetype + libpng/jpeg + libwebp + poppler
-#   st-min, st-fb-min : freetype only (Go raster codecs)
+#   st-min, st-fb-min : Go FreeType port and Go raster codecs (CGO-free)
 #
-# Minimal profiles compile a Go static-WebP decoder and animation stubs, and
-# link a no-op PDF bridge. Unsupported animation and PDF requests degrade
-# gracefully. All extra objects/libs are passed via -extldflags so one source
-# tree works for every profile.
+# Minimal profiles use Go-only PDF/animation stubs. They need no C compiler,
+# native library archives, or external linker, including atlas regeneration.
 
-DUMMY_DIR    = third_party/dummy
-DUMMY_PDF    = $(DUMMY_DIR)/dummy-pdf.o
 PDF_BRIDGE_O = third_party/pdf_bridge.o
 IMAGE_DECODE_O = third_party/image_decode.o
 
@@ -337,7 +333,6 @@ IMAGE_DECODE_O = third_party/image_decode.o
 # pdf_bridge.o must precede -lpoppler-cpp so --gc-sections keeps the needed
 # poppler objects; --gc-sections relies on the libs being built with
 # -ffunction-sections -fdata-sections).
-MIN_EXTRA  = $(DUMMY_PDF)
 FULL_EXTRA = $(IMAGE_DECODE_O) $(PDF_BRIDGE_O) -Lthird_party/poppler/lib -lpoppler-cpp -lpoppler $(JPEG_LIB) -Lthird_party/poppler/lib -lpng16 -lz -Lthird_party/freetype -lfreetype -lstdc++ -lm $(WEBP_ANIM_O) -Lthird_party/webp/lib -l:libwebpdemux.a $(WEBP_LIB)
 
 # Animated-WebP items for the Go file-browser (WebPAnimDecoder playback).
@@ -384,17 +379,18 @@ $(OUTPUT_DIR)/st-web: $(GO_SRC)
 
 # Linux console fbdev/evdev host, with the existing full software media renderer.
 FB_STATUS_FONT = platform_dependent/fb/system_bar_font_generated.go
-$(FB_STATUS_FONT): Monaco_Linux.ttf platform_dependent/fb/generate_system_bar_font.go third_party_wrapper/ff2.h third_party_wrapper/plugin-ff2.c $(FT_A)
-	CGO_ENABLED=1 go run platform_dependent/fb/generate_system_bar_font.go -font Monaco_Linux.ttf -output $@
+FONT_RASTER_SRC = $(filter-out %_test.go,$(wildcard platform_neutral/fontraster/*.go functionalities/limits/*.go))
+$(FB_STATUS_FONT): Monaco_Linux.ttf platform_dependent/fb/generate_system_bar_font.go $(FONT_RASTER_SRC) go.mod go.sum
+	CGO_ENABLED=0 GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go run platform_dependent/fb/generate_system_bar_font.go -font Monaco_Linux.ttf -output $@
 
 $(OUTPUT_DIR)/st-fb: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(FB_STATUS_FONT) $(GO_SRC)
 	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
-$(OUTPUT_DIR)/st-fb-min: $(FT_A) $(DUMMY_PDF) $(FB_STATUS_FONT) $(GO_SRC)
-	go build -trimpath -tags 'backend_fb netgo osusergo $(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
+$(OUTPUT_DIR)/st-fb-min: $(FB_STATUS_FONT) $(GO_SRC)
+	CGO_ENABLED=0 go build -trimpath -tags 'purego backend_fb netgo osusergo $(TAB_GO_TAGS)' -o $@ .
 
-$(OUTPUT_DIR)/st-min: $(FT_A) $(DUMMY_PDF) $(GO_SRC)
-	go build -trimpath -tags '$(TAB_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(MIN_EXTRA)"' .
+$(OUTPUT_DIR)/st-min: $(GO_SRC)
+	CGO_ENABLED=0 go build -trimpath -tags 'purego netgo osusergo $(TAB_GO_TAGS)' -o $@ .
 
 # --- Go file-browser demo --------------------------------------------------
 # Independent TUI module. TeX/Markdown previews are vector PDFs from latexpdf;
@@ -431,11 +427,6 @@ $(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC)
 # OpenCode V2 API client with a retained Markdown/LaTeX response pane.
 $(OUTPUT_DIR)/opencode-tui: $(OPENCODE_TUI_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/opencode-tui build -trimpath -o $(abspath $@) .
-
-# --- dummy objects (no-op stubs for dropped libraries) --------------------
-$(DUMMY_DIR)/dummy-pdf.o: third_party_wrapper/dummy-pdf.c
-	@mkdir -p $(DUMMY_DIR)
-	$(CC) -O2 -ffunction-sections -fdata-sections -c $< -o $@
 
 # --- pdf bridge object (real poppler bridge, compiled outside cgo) --------
 $(PDF_BRIDGE_O): third_party_wrapper/pdf_bridge.cpp pdf_bridge.h $(POPPLER_LIB)

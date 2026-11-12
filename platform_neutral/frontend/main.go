@@ -25,6 +25,7 @@ const Version = "0.9.2"
 func Main(open api.OpenHost, font []byte) {
 	openWindow = open
 	embeddedFont = font
+	defer closeFonts()
 	main()
 }
 
@@ -186,7 +187,7 @@ func main() {
 		log.Fatalf("invalid --ratio value: %v", ratio)
 	}
 
-	// the render size drives both the FreeType pixel size and the cell
+	// the render size drives both the font rasterizer's pixel size and the cell
 	// height, so characters fill their (scaled) cell.
 	renderSize := int(float64(cfg.GlyphHeight) * ratio)
 	if renderSize <= 0 {

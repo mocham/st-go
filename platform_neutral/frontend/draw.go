@@ -6,6 +6,7 @@ import (
 
 	"st-go/limits"
 	"st-go/platform_neutral/api"
+	"st-go/platform_neutral/fontraster"
 	term "st-go/platform_neutral/stterminal"
 )
 
@@ -66,8 +67,8 @@ type glyphKey struct {
 
 // True-color output can produce a new key on every cell. Bound both pixel
 // storage and map overhead instead of retaining every color seen forever.
-const maxGlyphCacheBytes = limits.GlyphCacheBytes
-const maxGlyphCacheEntries = limits.GlyphCacheEntries
+const maxGlyphCacheBytes = limits.GlyphCacheBytes - fontraster.MaskCacheBytes
+const maxGlyphCacheEntries = limits.GlyphCacheEntries - fontraster.MaskCacheEntries
 
 var (
 	glyphCache      = make(map[glyphKey][]uint32)
@@ -95,11 +96,11 @@ func (t *Terminal) glyphPixels(u rune, fg, bg uint32, wide bool) (int, []uint32)
 }
 
 func cachedGlyphPixels(u rune, fg, bg uint32, w, h, baseline int) []uint32 {
-	// FreeType owns mutable face slots. Serialize lookup identity and native
+	// Font engines own mutable faces. Serialize lookup identity and
 	// rasterization against font reloads and other terminal widgets.
 	fontMu.Lock()
 	defer fontMu.Unlock()
-	key := glyphKey{font: ft.generation, u: u, fg: fg, bg: bg, w: w, h: h, baseline: baseline}
+	key := glyphKey{font: fontGeneration, u: u, fg: fg, bg: bg, w: w, h: h, baseline: baseline}
 	glyphMu.RLock()
 	img, ok := glyphCache[key]
 	glyphMu.RUnlock()

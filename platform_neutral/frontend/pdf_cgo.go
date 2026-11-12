@@ -1,11 +1,9 @@
-//go:build !backend_web
+//go:build !backend_web && cgo && !purego
 
-// Package main bridges st-go to poppler for PDF rendering (C++ API).
+// This file bridges st-go to Poppler for PDF rendering (C++ API).
 //
 // The pdf_render_page / pdf_page_count symbols are defined by the C++ bridge
-// third_party_wrapper/pdf_bridge.cpp (linked when poppler is enabled) or by
-// the no-op dummy-pdf.o (see Makefile targets); a dummy makes the PDF path
-// fail gracefully (no image) instead of crashing.
+// third_party_wrapper/pdf_bridge.cpp. Minimal builds use Go-only stubs.
 package frontend
 
 /*

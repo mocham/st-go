@@ -1,22 +1,7 @@
 //go:build ignore
 
-// Generate the fixed-size status alphabet with the terminal's existing
-// FreeType renderer. Only this build tool uses cgo, not the framebuffer host.
+// Generate the fixed-size status alphabet with the terminal's Go rasterizer.
 package main
-
-/*
-#cgo CFLAGS: -I${SRCDIR}/../../third_party/freetype/include -I${SRCDIR}/../..
-#cgo LDFLAGS: ${SRCDIR}/../../third_party/freetype/libfreetype.a -lm -lpthread
-#include <stdlib.h>
-#include "third_party_wrapper/ff2.h"
-#include "third_party_wrapper/plugin-ff2.c"
-
-static int load_status_font(const char *path, int size) {
-	char *paths[] = {(char *)path};
-	return ft_init(paths, 1, size);
-}
-*/
-import "C"
 
 import (
 	"bytes"
@@ -29,12 +14,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"unsafe"
+
+	"st-go/platform_neutral/fontraster"
 )
 
 const (
 	fontSize = 28
-	alphabet = " %?-0123456789:ABDEKPRSTU"
+	// Preserve the bar/icon layout independently of font-engine advances.
+	cellWidth  = 21
+	cellHeight = 35
+	baseline   = 28
+	alphabet   = " %?-0123456789:ABDEKPRSTU"
 )
 
 func main() {
@@ -51,32 +41,22 @@ func generate(font, output string) error {
 	if err != nil {
 		return err
 	}
-	path := C.CString(font)
-	defer C.free(unsafe.Pointer(path))
-	if C.load_status_font(path, fontSize) == 0 {
-		return fmt.Errorf("cannot load Monaco at %d pixels", fontSize)
+	face, err := fontraster.OpenGo(fontData, fontSize)
+	if err != nil {
+		return err
 	}
-	defer C.ft_cleanup()
-	var ascent, descent, advance C.int
-	if C.ft_metrics(&ascent, &descent, &advance) == 0 {
-		return fmt.Errorf("cannot read Monaco metrics")
-	}
-	w, h := int(advance), int(ascent+descent)
-	if w < 1 || h < 1 || w > 128 || h > 128 {
-		return fmt.Errorf("invalid Monaco cell %dx%d", w, h)
-	}
+	defer face.Close()
+	w, h := cellWidth, cellHeight
 	coverage := make([]byte, len(alphabet)*w*h)
 	for i, ch := range alphabet {
 		if ch == ' ' {
 			continue
 		}
-		glyph := make([]uint32, w*h)
-		text := C.CString(string(ch))
-		ok := C.make_ff2_glyph(text, 0xffffffff, 0xff000000, advance, ascent+descent, ascent, (*C.uint32_t)(unsafe.Pointer(&glyph[0])))
-		C.free(unsafe.Pointer(text))
-		if ok == 0 {
-			return fmt.Errorf("cannot rasterize Monaco character %q", ch)
+		mask, found, err := face.Glyph(ch)
+		if err != nil || !found {
+			return fmt.Errorf("cannot rasterize Monaco character %q: %v", ch, err)
 		}
+		glyph := fontraster.Compose(mask, 0xffffffff, 0xff000000, w, h, baseline)
 		for at, pixel := range glyph {
 			coverage[i*w*h+at] = byte(pixel)
 		}

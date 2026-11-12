@@ -1,4 +1,4 @@
-//go:build libwebp && !backend_web
+//go:build libwebp && !backend_web && cgo && !purego
 
 // webp_cgo.go bridges full st-go profiles to libwebp's WebPDecodeRGBA.
 // The WebP symbols are supplied by the full profile's static libwebp archive.

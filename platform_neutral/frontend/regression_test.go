@@ -1122,10 +1122,10 @@ func TestWebPDecode(t *testing.T) {
 	}
 }
 
-// TestDummyGracefulDegrades verifies that when a library is replaced by a
-// dummy object (st-min/st-fb-min builds), the decode paths fail gracefully
+// TestDummyGracefulDegrades verifies that when a library is replaced by
+// Go stubs (st-min/st-fb-min builds), the decode paths fail gracefully
 // (no panic, no image) instead of crashing. It passes with both real libs and
-// dummies since the failure-handling is the same.
+// stubs since the failure-handling is the same.
 func TestDummyGracefulDegrades(t *testing.T) {
 	cfg := config.Default()
 	if !loadFonts(cfg.Font, int(cfg.GlyphHeight)) {
