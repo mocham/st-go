@@ -14,6 +14,7 @@ import (
 type aiProposal struct {
 	ID, Document, Request, Manifest, Instruction, Status string
 	Text, Reasoning, Draft, Session, Error               string
+	contact                                              time.Time // last acknowledgement in this editor process
 }
 type aiStore struct {
 	db   *sql.DB
@@ -131,11 +132,11 @@ func (s *aiStore) request(p *aiProposal) error {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(`INSERT INTO requests(id,placeholder,manifest,instruction,status,created) VALUES(?,?,?,?,?,?)`, p.Request, p.ID, p.Manifest, p.Instruction, p.Status, time.Now().UnixNano())
+	_, err = tx.Exec(`INSERT INTO requests(id,placeholder,manifest,instruction,status,session,created) VALUES(?,?,?,?,?,?,?)`, p.Request, p.ID, p.Manifest, p.Instruction, p.Status, p.Session, time.Now().UnixNano())
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(`INSERT INTO proposals(id,document,request,manifest,instruction,status,updated) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET request=excluded.request,manifest=excluded.manifest,instruction=excluded.instruction,status=excluded.status,error='',updated=excluded.updated`, p.ID, p.Document, p.Request, p.Manifest, p.Instruction, p.Status, time.Now().UnixNano())
+	_, err = tx.Exec(`INSERT INTO proposals(id,document,request,manifest,instruction,status,session,updated) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET request=excluded.request,manifest=excluded.manifest,instruction=excluded.instruction,status=excluded.status,session=excluded.session,error='',updated=excluded.updated`, p.ID, p.Document, p.Request, p.Manifest, p.Instruction, p.Status, p.Session, time.Now().UnixNano())
 	if err != nil {
 		return err
 	}

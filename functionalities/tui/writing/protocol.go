@@ -46,38 +46,47 @@ type File struct {
 	Hash     string `json:"hash"`
 }
 type Manifest struct {
-	Version     int    `json:"version"`
-	Project     string `json:"project"`
-	Document    string `json:"document"`
-	Placeholder string `json:"placeholder"`
-	CursorRune  int    `json:"cursorRune"`
-	Files       []File `json:"files"`
+	Version     int           `json:"version"`
+	Project     string        `json:"project"`
+	Document    string        `json:"document"`
+	Placeholder string        `json:"placeholder"`
+	CursorRune  int           `json:"cursorRune"`
+	Context     *ContextRange `json:"context,omitempty"`
+	Files       []File        `json:"files"`
 }
 
 func Hash(text string) string { sum := sha256.Sum256([]byte(text)); return hex.EncodeToString(sum[:]) }
-func Root(path string) string {
-	path, _ = filepath.Abs(path)
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
+
+// Workdir is the local project selected when the user subscribes. Never walk
+// ancestors: creating the history store must not change project discovery.
+func Workdir() (string, error) {
+	path, err := os.Getwd()
+	if err != nil {
+		return "", err
 	}
-	if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		path = filepath.Dir(path)
-	}
-	initial := path
-	for {
-		for _, name := range []string{".govim", ".git", "go.mod"} {
-			if _, err := os.Stat(filepath.Join(path, name)); err == nil {
-				return path
-			}
-		}
-		parent := filepath.Dir(path)
-		if parent == path {
-			return initial
-		}
-		path = parent
+	return filepath.EvalSymlinks(path)
+}
+
+func Active(status string) bool {
+	return status == "queued" || status == "sent" || status == "pending" || status == "progress"
+}
+
+func StateLabel(status string) string {
+	switch status {
+	case "queued":
+		return "queued"
+	case "sent":
+		return "awaiting acknowledgement"
+	case "pending":
+		return "preparing"
+	case "progress":
+		return "generating"
+	case "result":
+		return "ready"
+	default:
+		return status
 	}
 }
-func Channel(root string) string { return "govim-ai:" + Hash(filepath.Clean(root))[:24] }
 func Marker(path, id string) string {
 	ext := strings.ToLower(filepath.Ext(path))
 	if ext == ".md" || ext == ".markdown" || ext == ".mdown" || ext == ".mkd" {
@@ -149,7 +158,6 @@ func ReadContext(request Message, project string) (string, error) {
 		return "", fmt.Errorf("snapshot identity mismatch")
 	}
 	var main string
-	var extras strings.Builder
 	bytes := 0
 	for _, file := range manifest.Files {
 		if !Within(storage, file.Snapshot) {
@@ -169,41 +177,32 @@ func ReadContext(request Message, project string) (string, error) {
 		}
 		if file.Path == request.Document {
 			main = text
-		} else if extras.Len() < 6000 {
-			for _, line := range strings.Split(text, "\n") {
-				s := strings.TrimSpace(line)
-				if strings.HasPrefix(s, "\\newcommand") || strings.HasPrefix(s, "\\def") || strings.HasPrefix(s, "\\section") || strings.HasPrefix(s, "#") {
-					if extras.Len()+len(line) < 6000 {
-						extras.WriteString(line + "\n")
-					}
-				}
-			}
 		}
 	}
 	marker := Marker(request.Document, request.Placeholder)
 	if strings.Count(main, marker) != 1 {
 		return "", fmt.Errorf("snapshot must contain exactly one placeholder")
 	}
-	before, after, _ := strings.Cut(main, marker)
-	left, right := []rune(before), []rune(after)
-	// Prioritize nearby prose; preserve an outline and declarations from earlier
-	// source rather than spending the entire model budget on a long document.
-	if len(left)+len(right) > ContextRunes-2000 {
-		left = left[max(0, len(left)-16000):]
-		right = right[:min(len(right), 4000)]
+	markerRune := utf8.RuneCountInString(main[:strings.Index(main, marker)])
+	cursor := manifest.CursorRune
+	if manifest.Context == nil {
+		// Older manifests did not record the selected range. Restrict them to
+		// the source before their durable insertion anchor too.
+		cursor = markerRune
 	}
-	var outline strings.Builder
-	for _, line := range strings.Split(main, "\n") {
-		s := strings.TrimSpace(line)
-		if strings.HasPrefix(s, "#") || strings.HasPrefix(s, "\\section") || strings.HasPrefix(s, "\\subsection") || strings.HasPrefix(s, "\\newcommand") {
-			if outline.Len()+len(line) < 4000 {
-				outline.WriteString(line + "\n")
-			}
-		}
+	if cursor > markerRune {
+		return "", fmt.Errorf("context cursor is after the insertion placeholder")
 	}
-	definitions := []rune(outline.String() + extras.String())
-	definitions = definitions[:min(len(definitions), max(0, ContextRunes-500-len(left)-len(right)))]
-	context := fmt.Sprintf("Document: %s\nOutline/definitions:\n%s\nBEFORE INSERTION:\n%s\n<<< INSERT NEXT PARAGRAPH HERE >>>\nAFTER INSERTION:\n%s", request.Document, string(definitions), string(left), string(right))
+	span, err := CheckpointRange(request.Document, main, cursor)
+	if err != nil {
+		return "", err
+	}
+	if manifest.Context != nil && *manifest.Context != span {
+		return "", fmt.Errorf("snapshot context range mismatch")
+	}
+	source := []rune(main)
+	excerpt := string(source[span.StartRune:span.EndRune])
+	context := fmt.Sprintf("Document: %s\nSource excerpt after the last checkpoint, ending at the request cursor (runes %d:%d):\n%s\n<<< END OF SOURCE EXCERPT >>>", request.Document, span.StartRune, span.EndRune, excerpt)
 	begin, end := Markers(request.RequestID)
-	return fmt.Sprintf("Predict the next paragraph for placeholder %s. The following immutable snapshot is the authoritative current writing. Match its language, voice and notation. Produce document source, preserving Markdown or LaTeX as appropriate. This is a writing suggestion; return text for the author to insert.\nInstruction: %s\nCurrent author-edited draft (when refining):\n%s\n\n%s\n\nEnclose the final prediction exactly once between these markers, each on its own line:\n%s\nparagraph source\n%s\nAny brief editorial explanation belongs outside that block. Return the new paragraph only inside the block; do not repeat surrounding source.", request.Placeholder, request.Instruction, request.Draft, context, begin, end), nil
+	return fmt.Sprintf("Predict the next paragraph for placeholder %s. Use the following current source excerpt and the existing conversation as writing context. Match its language, voice and notation. Produce document source, preserving Markdown or LaTeX as appropriate. This is a writing suggestion; return text for the author to insert.\nInstruction: %s\nCurrent author-edited draft (when refining):\n%s\n\n%s\n\nEnclose the final prediction exactly once between these markers, each on its own line:\n%s\nparagraph source\n%s\nAny brief editorial explanation belongs outside that block. Return the new paragraph only inside the block; do not repeat surrounding source.", request.Placeholder, request.Instruction, request.Draft, context, begin, end), nil
 }

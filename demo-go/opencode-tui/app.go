@@ -1021,9 +1021,12 @@ func (application *app) run() error {
 		application.status = "Terminal is too small for the rich pane; press F2 after resizing"
 	}
 	defer application.preview.close()
-	if application.writer != nil {
-		defer application.writer.close()
-	}
+	defer func() {
+		application.cancel() // Detaching must leave server-side execution recoverable.
+		if application.writer != nil {
+			application.writer.close()
+		}
+	}()
 	application.queuePreview()
 	application.startEventStream()
 	application.requestCatalog()

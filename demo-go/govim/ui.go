@@ -413,6 +413,16 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 				flags += " [RO]"
 			}
 			flags += " " + w.buffer.meta.Encoding
+			if w == e.window() && e.ai != nil {
+				label := "waiting"
+				if e.ai.provider != "" {
+					label = "connected"
+				}
+				if p := e.ai.proposals[e.ai.focus]; p != nil {
+					label = p.Status
+				}
+				flags += " AI[" + e.ai.bus.Channel + ":" + label + "]"
+			}
 			position := fmt.Sprintf("%d,%d", w.buffer.row(w.cursor)+1, logicalColumn(w.buffer.line(w.buffer.row(w.cursor)), w.cursor-w.buffer.start(w.buffer.row(w.cursor)))+1)
 			statusWidth := max(0, w.rect.w-len(position)-2)
 			// Keep readonly/modified indicators visible even for long file paths.

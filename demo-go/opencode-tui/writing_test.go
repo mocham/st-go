@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +16,88 @@ import (
 	"st-go/tui/appbus"
 	"st-go/tui/writing"
 )
+
+func TestSubscribeBindsCurrentExistingSessionAndRebinds(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("ST_GO_APPBUS_TOKEN", appbus.ID())
+	application, _ := promptTestApp(t, nil, false)
+	application.session.ID = "ses_existing"
+	if !application.slashCommand("/subscribe paper") || application.writer == nil {
+		t.Fatalf("subscribe not handled: %s", application.status)
+	}
+	first := application.writer
+	root, err := writing.Workdir()
+	if err != nil || first.project != root || first.session != "ses_existing" || first.bus.Channel != "paper" {
+		t.Fatalf("wrong subscription: %+v %v", first, err)
+	}
+	application.slashCommand("/Subscribe paper")
+	if application.writer != first {
+		t.Fatal("idempotent subscription lost running history")
+	}
+	application.session.ID = "ses_other_existing"
+	application.slashCommand("/subscribe paper")
+	if application.writer == first || application.writer.session != "ses_other_existing" || application.writer.bus.ID != first.bus.ID {
+		t.Fatal("same-channel subscription did not bind current session")
+	}
+	application.writer.tasks["active"] = &writingTask{cancel: func() {}}
+	application.session.ID = "ses_third"
+	application.slashCommand("/subscribe other")
+	if application.writer.session != "ses_other_existing" || !strings.Contains(application.status, "finish or cancel") {
+		t.Fatal("active work lost during rebind")
+	}
+	application.writer.close()
+}
+
+func TestWritingCancellationDoesNotInterruptAnotherNormalPrompt(t *testing.T) {
+	for _, scenario := range []string{"queued", "current", "completed", "another"} {
+		t.Run(scenario, func(t *testing.T) {
+			var interrupts, deletes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "GET /api/session/ses_test/inbox":
+					if scenario == "queued" {
+						io.WriteString(w, `{"data":[{"id":"msg_request","type":"user"}]}`)
+					} else {
+						io.WriteString(w, `{"data":[]}`)
+					}
+				case "DELETE /api/session/ses_test/inbox/msg_request":
+					deletes.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				case "GET /api/session/ses_test/message":
+					messages := []apiMessage{}
+					if scenario == "completed" {
+						messages = append(messages, apiMessage{ID: "idle", Type: "idle", Outcome: "succeeded"})
+					}
+					if scenario == "another" {
+						messages = append(messages, apiMessage{ID: "msg_normal", Type: "user"})
+					}
+					messages = append(messages, apiMessage{ID: "msg_request", Type: "user"})
+					json.NewEncoder(w).Encode(map[string]any{"data": messages})
+				case "POST /api/session/ses_test/interrupt":
+					interrupts.Add(1)
+					io.WriteString(w, `{}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			application, _ := promptTestApp(t, nil, false)
+			var err error
+			application.api, err = newAPIClient(server.URL, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			bridge, err := newWritingBridge(application, appbus.ID(), t.TempDir(), "paper")
+			if err != nil {
+				t.Fatal(err)
+			}
+			bridge.cancelRequest(application.ctx, "msg_request")
+			if (interrupts.Load() == 1) != (scenario == "current") || (deletes.Load() == 1) != (scenario == "queued") {
+				t.Fatalf("wrong cancellation: %d interrupts, %d deletes", interrupts.Load(), deletes.Load())
+			}
+		})
+	}
+}
 
 func TestWritingAmbiguousPromptAndRestartRecoverFromDurableHistory(t *testing.T) {
 	root := t.TempDir()
@@ -51,14 +134,14 @@ func TestWritingAmbiguousPromptAndRestartRecoverFromDurableHistory(t *testing.T)
 		case "POST /api/session/ses_test/fork":
 			forks.Add(1)
 			io.WriteString(w, `{"data":{"id":"ses_writing"}}`)
-		case "GET /api/session/ses_writing":
-			io.WriteString(w, `{"data":{"id":"ses_writing"}}`)
-		case "POST /api/session/ses_writing/prompt":
+		case "GET /api/session/ses_test":
+			io.WriteString(w, `{"data":{"id":"ses_test"}}`)
+		case "POST /api/session/ses_test/prompt":
 			prompts.Add(1)
 			http.Error(w, "ambiguous gateway failure", 502)
-		case "GET /api/session/ses_writing/message":
+		case "GET /api/session/ses_test/message":
 			json.NewEncoder(w).Encode(map[string]any{"data": []apiMessage{{ID: "msg_idle", Type: "idle", Outcome: "succeeded"}, {ID: "msg_answer", Type: "assistant", Content: []messageContent{{Type: "reasoning", Text: "Exposed reasoning recovered from history."}, {Type: "text", Text: answerText}}}, {ID: "msg_" + id, Type: "user", Text: "Writing prompt"}}})
-		case "GET /api/session/ses_writing/permission":
+		case "GET /api/session/ses_test/permission":
 			io.WriteString(w, `{"data":[]}`)
 		case "GET /api/session/active":
 			io.WriteString(w, `{"data":{}}`)
@@ -73,7 +156,7 @@ func TestWritingAmbiguousPromptAndRestartRecoverFromDurableHistory(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bridge, err := newWritingBridge(application, appbus.ID(), root, "")
+	bridge, err := newWritingBridge(application, appbus.ID(), root, "test-writing")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,26 +189,34 @@ func TestWritingAmbiguousPromptAndRestartRecoverFromDurableHistory(t *testing.T)
 	if result.Type != "result" || result.Prediction != "Predicted paragraph." || result.Reasoning != "Exposed reasoning recovered from history." {
 		t.Fatalf("bad recovered result: %+v", result)
 	}
-	if prompts.Load() != 1 || forks.Load() != 1 {
+	if prompts.Load() != 1 || forks.Load() != 0 || result.Session != "ses_test" {
 		t.Fatal("ambiguous request was resent or binding changed")
 	}
 	request.Type = "status"
 	request.Session = result.Session
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	application.session.ID = "ses_test"
+	bridge, err = newWritingBridge(application, appbus.ID(), root, "test-writing")
+	if err != nil {
+		t.Fatal(err)
+	}
 	result = run(request)
-	if result.Type != "result" || prompts.Load() != 1 || forks.Load() != 1 {
+	if result.Type != "result" || prompts.Load() != 1 || forks.Load() != 0 {
 		t.Fatalf("restart retriggered generation: %+v", result)
 	}
 }
 
-func TestWritingCancellationKeepsDocumentBusyUntilCleanupSettles(t *testing.T) {
+func TestWritingCancellationKeepsSessionBusyUntilCleanupSettles(t *testing.T) {
 	application, _ := promptTestApp(t, nil, false)
-	bridge, err := newWritingBridge(application, appbus.ID(), t.TempDir(), "")
+	bridge, err := newWritingBridge(application, appbus.ID(), t.TempDir(), "test-writing")
 	if err != nil {
 		t.Fatal(err)
 	}
 	bridge.bus.Out = io.Discard
 	first := &writingTask{started: true, document: "paper.md", cancel: func() {}}
-	second := &writingTask{document: "paper.md", ctx: application.ctx, cancel: func() {}, request: writing.Message{RequestID: "second"}}
+	second := &writingTask{document: "another.md", ctx: application.ctx, cancel: func() {}, request: writing.Message{RequestID: "second"}}
 	bridge.tasks["first"] = first
 	bridge.tasks["second"] = second
 	bridge.updates <- writing.Message{RequestID: "first", Type: "cancelled"}

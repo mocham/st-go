@@ -127,7 +127,6 @@ type Editor struct {
 	syntax                           *syntaxHighlighter
 	preview                          *editorPreview
 	ai                               *editorAI
-	aiProject, aiChannel             string
 	clip                             clipboard
 	clipboardError                   string
 	clipboardRead                    *clipboardRead

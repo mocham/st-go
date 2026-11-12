@@ -30,11 +30,20 @@ a reachable server address rather than another container's loopback address.
 
 ## Govim writing
 
-For govim paragraph prediction, run both applications in the same terminal
-instance and set `--ai-project /local/project` when needed. See the
-[AI writing workflow](../govim/AI-WRITING.md). Writing requests remain bound to
-their document conversation while you browse other sessions. Exposed reasoning
-is rendered in message order and restored from saved history after reconnects.
+Run both applications from the same local working directory in the same terminal
+instance. Select a normal OpenCode session, then enter `/subscribe paper` here and
+`:Subscribe paper` in govim. Govim automatically creates the project history DB
+if needed. See the [AI writing workflow](../govim/AI-WRITING.md).
+
+Govim requests run in the session selected by `/subscribe`, with live responses,
+reasoning, tools, and permissions in the normal interface. Use `/models` and
+`/variants` there. The writing activity panel shows connection and request status.
+Use govim's `:AICheckpoint` to mark the beginning of source context. Each new
+request sends the excerpt from the last checkpoint to the cursor; previous
+context remains in the normal session history.
+After a client crash, reopen the same existing session and `/subscribe paper`
+again to recover pending work. Select another session and repeat `/subscribe`
+to change the binding once active writing requests have settled.
 
 ## Rich responses
 

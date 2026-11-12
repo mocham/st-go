@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -24,27 +25,152 @@ type writingTask struct {
 	cancel   context.CancelFunc
 	latest   writing.Message
 	finished bool
+	opened   bool
 }
 type writingBridge struct {
 	app              *app
 	bus              *appbus.Client
 	project, session string
 	tasks            map[string]*writingTask
-	documents        map[string]string
 	updates          chan writing.Message
 	lastHello        time.Time
 	serial           uint64
+	peers            map[string]writingPeer
+	subscribed       time.Time
+	connection       string
+}
+
+type writingPeer struct {
+	seen    time.Time
+	project string
+}
+
+func (application *app) subscribeWriting(channel string) error {
+	if !appbus.ValidChannel(channel) {
+		return fmt.Errorf("usage: /Subscribe <Channel> (1–96 letters, digits, . _ : -)")
+	}
+	if application.session.ID == "" || application.attachTarget != "" {
+		return fmt.Errorf("select a session before /Subscribe %s", channel)
+	}
+	project, err := writing.Workdir()
+	if err != nil {
+		return err
+	}
+	if b := application.writer; b != nil {
+		if b.project == project && b.bus.Channel == channel && b.session == application.session.ID {
+			b.hello("")
+			application.status = b.connection + " · " + project
+			return nil
+		}
+		for _, task := range b.tasks {
+			if !task.finished {
+				return fmt.Errorf("finish or cancel writing requests before changing subscription")
+			}
+		}
+	}
+	bridge, err := newWritingBridge(application, os.Getenv("ST_GO_APPBUS_TOKEN"), project, channel)
+	if err != nil {
+		return fmt.Errorf("terminal channels unavailable; run both applications in an updated st instance")
+	}
+	if application.writer != nil {
+		if application.writer.bus.Channel == channel {
+			// Preserve the terminal identity when rebinding the same channel.
+			bridge.bus = application.writer.bus
+		}
+		application.writer.close()
+	}
+	application.writer = bridge
+	bridge.updateConnection(time.Now())
+	bridge.hello("")
+	application.scroll, application.sidebarFocus = 0, ""
+	return nil
 }
 
 func newWritingBridge(application *app, token, project, channel string) (*writingBridge, error) {
-	if channel == "" {
-		channel = writing.Channel(project)
-	}
 	bus, err := appbus.New(application.out, token, channel)
 	if err != nil {
 		return nil, err
 	}
-	return &writingBridge{app: application, bus: bus, project: project, session: application.session.ID, tasks: make(map[string]*writingTask), documents: make(map[string]string), updates: make(chan writing.Message, 16)}, nil
+	return &writingBridge{app: application, bus: bus, project: project, session: application.session.ID, tasks: make(map[string]*writingTask), updates: make(chan writing.Message, 16), peers: make(map[string]writingPeer), subscribed: time.Now()}, nil
+}
+
+func (b *writingBridge) updateConnection(now time.Time) {
+	label := "waiting for :Subscribe " + b.bus.Channel + " in govim"
+	count, mismatch := 0, ""
+	for id, peer := range b.peers {
+		if now.Sub(peer.seen) > 6*time.Second {
+			delete(b.peers, id)
+			continue
+		}
+		if peer.project == b.project {
+			count++
+		} else {
+			mismatch = peer.project
+		}
+	}
+	if count > 0 {
+		label = fmt.Sprintf("connected · %d govim", count)
+	} else if mismatch != "" {
+		label = "workdir mismatch: govim uses " + mismatch
+	}
+	if !b.bus.Ready {
+		label = "subscribing"
+		if now.Sub(b.subscribed) > 3*time.Second {
+			label = "terminal not responding; restart updated st"
+		}
+	}
+	label = "Writing [" + b.bus.Channel + "] " + label
+	if b.connection != label {
+		b.connection = label
+		b.app.status, b.app.dirty = label, true
+	}
+}
+
+// Keep writing activity visible even when the user browses another session.
+// Every session-bearing row can open the normal response/model/permission UI.
+func (b *writingBridge) rows(width int) []displayRow {
+	rows := []displayRow{}
+	for _, line := range wrapText(b.connection, width) {
+		rows = append(rows, displayRow{text: line, style: assistantStyle})
+	}
+	for _, line := range wrapText("Workdir: "+b.project, width) {
+		rows = append(rows, displayRow{text: line, style: workdirStyle})
+	}
+	for _, line := range wrapText("Subscribed session: "+b.session+" · click to open", width) {
+		rows = append(rows, displayRow{text: line, style: sessionNameStyle, sessionID: b.session})
+	}
+	var tasks []*writingTask
+	for _, task := range b.tasks {
+		tasks = append(tasks, task)
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].finished != tasks[j].finished {
+			return !tasks[i].finished
+		}
+		return tasks[i].order > tasks[j].order
+	})
+	for _, task := range tasks[:min(len(tasks), 4)] {
+		label := writing.StateLabel(task.latest.Type)
+		if !task.started && !task.finished {
+			label = "queued"
+		}
+		text := task.document + " · " + label
+		style := waitingSessionStyle
+		if task.latest.Type == "result" {
+			style = assistantStyle
+		}
+		if task.latest.Error != "" {
+			text += " · " + task.latest.Error
+			style = warningStyle
+		}
+		if task.latest.Session != "" {
+			text += " · click to open"
+		}
+		for _, line := range wrapText(text, width) {
+			rows = append(rows, displayRow{text: line, style: style, sessionID: task.latest.Session})
+		}
+	}
+	return append(rows, displayRow{text: "/models · /variants: writing session model", style: dimStyle}, displayRow{})
 }
 func (b *writingBridge) publish(m writing.Message) {
 	m.Version = writing.Version
@@ -57,6 +183,7 @@ func (b *writingBridge) hello(to string) {
 	b.publish(writing.Message{Type: "ready", To: to, Project: b.project, Session: b.session})
 }
 func (b *writingBridge) tick(now time.Time) {
+	b.updateConnection(now)
 	b.startPending()
 	if err := b.bus.Tick(now); err != nil {
 		b.app.status = err.Error()
@@ -74,16 +201,39 @@ func (b *writingBridge) tick(now time.Time) {
 			}
 			if update.Type == "settled" {
 				task.finished = true
+				b.app.dirty = true
 				continue
 			}
 			update.To = task.receiver
-			if update.Session != "" {
-				b.documents[task.document] = update.Session
+			if update.Type == "submitted" {
+				if b.app.session.ID == b.session {
+					id := "msg_" + update.RequestID
+					if _, exists := b.app.messageIndex[id]; !exists {
+						b.app.messages = append(b.app.messages, chatMessage{ID: id, Role: "user", Text: update.Text, Rich: update.Text, Pending: true})
+						b.app.rebuildIndex()
+						if b.app.followPreview {
+							b.app.selectLatestPreview()
+						}
+					}
+				}
+				b.app.dirty = true
+				continue
 			}
 			task.latest = update
 			b.publish(update)
-			b.app.status = "Writing: " + update.Type + " · " + update.Session
+			b.app.status = "Writing " + task.document + ": " + writing.StateLabel(update.Type)
+			if update.Error != "" {
+				b.app.status += " · " + update.Error
+			}
 			b.app.dirty = true
+			if update.Session != "" && !task.opened {
+				task.opened = true
+				b.app.filesMode = false
+				if b.app.session.ID != update.Session {
+					b.app.closePicker()
+					b.app.attachSession(update.Session)
+				}
+			}
 			if update.Session == b.app.session.ID {
 				b.app.requestSync()
 			}
@@ -99,6 +249,7 @@ func (b *writingBridge) close() {
 	_ = b.bus.Close()
 }
 func (b *writingBridge) receive(control string) {
+	defer b.updateConnection(time.Now())
 	frame, err := b.bus.Receive(control)
 	if err != nil {
 		b.app.status = err.Error()
@@ -113,10 +264,15 @@ func (b *writingBridge) receive(control string) {
 		return
 	}
 	if request.Type == "hello" {
+		b.peers[frame.Sender] = writingPeer{seen: time.Now(), project: request.Project}
 		b.hello(frame.Sender)
 		return
 	}
 	if request.To != b.bus.ID {
+		return
+	}
+	if request.Project != "" && request.Project != b.project {
+		b.publish(writing.Message{Type: "failed", To: frame.Sender, RequestID: request.RequestID, Error: "workdir mismatch: opencode-tui uses " + b.project})
 		return
 	}
 	if task := b.tasks[request.RequestID]; task != nil {
@@ -128,6 +284,7 @@ func (b *writingBridge) receive(control string) {
 				update := task.latest
 				update.To = task.receiver
 				b.publish(update)
+				b.app.dirty = true
 			}
 		}
 		if request.Type == "status" || request.Type == "suggest" {
@@ -138,9 +295,9 @@ func (b *writingBridge) receive(control string) {
 		}
 		return
 	}
-	resume := request.Type == "status" && request.Session != ""
-	if request.Type == "status" && !resume {
-		b.publish(writing.Message{Type: "unknown", To: frame.Sender, RequestID: request.RequestID})
+	resume := request.Type == "status"
+	if resume && request.Session != "" && request.Session != b.session {
+		b.publish(writing.Message{Type: "unknown", To: frame.Sender, RequestID: request.RequestID, Error: "Open session " + request.Session + " and /Subscribe " + b.bus.Channel + " to recover this request"})
 		return
 	}
 	if request.Type != "suggest" && !resume || request.To != b.bus.ID {
@@ -148,6 +305,11 @@ func (b *writingBridge) receive(control string) {
 	}
 	fail := func(err error) {
 		b.publish(writing.Message{Type: "failed", To: frame.Sender, RequestID: request.RequestID, Placeholder: request.Placeholder, Error: err.Error()})
+		b.app.status, b.app.dirty = "Writing request failed: "+err.Error(), true
+	}
+	if b.session == "" {
+		fail(fmt.Errorf("select an OpenCode session, then /Subscribe %s", b.bus.Channel))
+		return
 	}
 	queued := 0
 	for _, task := range b.tasks {
@@ -173,18 +335,20 @@ func (b *writingBridge) receive(control string) {
 	}
 	ctx, cancel := context.WithCancel(b.app.ctx)
 	b.serial++
-	b.tasks[request.RequestID] = &writingTask{order: b.serial, ctx: ctx, request: request, document: request.Document, receiver: frame.Sender, cancel: cancel, latest: writing.Message{Type: "pending", RequestID: request.RequestID, Placeholder: request.Placeholder}}
+	latest := writing.Message{Type: "pending", To: frame.Sender, RequestID: request.RequestID, Placeholder: request.Placeholder, Session: b.session}
+	b.tasks[request.RequestID] = &writingTask{order: b.serial, ctx: ctx, request: request, document: request.Document, receiver: frame.Sender, cancel: cancel, latest: latest}
+	b.publish(latest) // Acknowledge receipt before context loading or any HTTP call.
+	b.app.status, b.app.dirty = "Writing request received: "+request.Document, true
+	b.app.scroll, b.app.sidebarFocus = 0, ""
 	b.startPending()
 }
 
 func (b *writingBridge) startPending() {
 	active := 0
-	documents := make(map[string]bool)
 	var queued []*writingTask
 	for _, task := range b.tasks {
 		if task.started && !task.finished {
 			active++
-			documents[task.document] = true
 		}
 		if !task.started && !task.finished {
 			queued = append(queued, task)
@@ -192,23 +356,19 @@ func (b *writingBridge) startPending() {
 	}
 	sort.Slice(queued, func(i, j int) bool { return queued[i].order < queued[j].order })
 	for _, task := range queued {
-		if active >= 2 {
+		if active >= 1 {
 			return
 		}
-		if task.started || task.finished || documents[task.document] {
+		if task.started || task.finished {
 			continue
 		}
 		task.started = true
 		active++
-		documents[task.document] = true
 		request := task.request
-		if session := b.documents[task.document]; session != "" {
-			request.Session = session
-		}
 		go func() {
 			defer task.cancel()
 			b.generate(task.ctx, request)
-			// Only release this document after deferred interruption/stream
+			// Only release this session after deferred interruption
 			// cleanup completes, otherwise a retry could be interrupted by it.
 			select {
 			case b.updates <- writing.Message{Type: "settled", RequestID: request.RequestID}:
@@ -218,8 +378,36 @@ func (b *writingBridge) startPending() {
 	}
 }
 
+// A writing request shares an ordinary session with typed prompts. Cancel its
+// queued inbox item, or interrupt only while it is still the current turn.
+func (b *writingBridge) cancelRequest(ctx context.Context, messageID string) {
+	if items, err := b.app.api.inbox(ctx, b.session); err == nil {
+		for _, item := range items {
+			if item.ID == messageID {
+				_ = b.app.api.request(ctx, http.MethodDelete, "/api/session/"+url.PathEscape(b.session)+"/inbox/"+url.PathEscape(item.ID), nil, nil)
+				return
+			}
+		}
+	}
+	messages, _, err := b.app.api.promptHistory(ctx, b.session, 1)
+	if err != nil {
+		return
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		switch messages[i].Type {
+		case "idle":
+			return
+		case "user":
+			if messages[i].ID == messageID {
+				_ = b.app.api.interrupt(ctx, b.session)
+			}
+			return
+		}
+	}
+}
+
 func (b *writingBridge) generate(ctx context.Context, request writing.Message) {
-	update := writing.Message{RequestID: request.RequestID, Placeholder: request.Placeholder, Project: b.project}
+	update := writing.Message{RequestID: request.RequestID, Placeholder: request.Placeholder, Project: b.project, Session: b.session}
 	emit := func(kind string) bool {
 		update.Type = kind
 		select {
@@ -237,68 +425,38 @@ func (b *writingBridge) generate(ctx context.Context, request writing.Message) {
 			emit("failed")
 		}
 	}
-	prompt, err := writing.ReadContext(request, b.project)
-	if err != nil {
-		fail(err)
-		return
+	var prompt string
+	if request.Type != "status" {
+		var err error
+		prompt, err = writing.ReadContext(request, b.project)
+		if err != nil {
+			fail(err)
+			return
+		}
 	}
-	// Bind a dedicated writing conversation to the document. Browsing another
-	// session never changes this destination; govim persists it across restarts.
-	var fork struct {
-		Data sessionInfo `json:"data"`
-	}
-	fork.Data.ID = request.Session
-	if fork.Data.ID == "" {
-		err = b.app.api.request(ctx, http.MethodPost, "/api/session/"+url.PathEscape(b.session)+"/fork", map[string]any{}, &fork)
-	} else {
-		fork.Data, err = b.app.api.getSession(ctx, fork.Data.ID)
-	}
-	if err != nil {
-		fail(err)
-		return
-	}
-	update.Session = fork.Data.ID
-	if update.Session == "" {
-		fail(fmt.Errorf("server returned an empty writing session"))
-		return
-	}
+	// Recovery reads the existing server turn; it needs neither fresh context
+	// nor a re-upload of a previous document excerpt.
+	// /Subscribe binds the normal, currently selected session. Its server-side
+	// model/variant settings apply to these prompts just as to typed prompts.
 	if !emit("pending") {
 		return
 	}
 	completed := false
+	messageID := "msg_" + request.RequestID
 	defer func() {
-		if !completed && (ctx.Err() != nil || request.Type != "status") {
+		if !completed && ctx.Err() != nil && b.app.ctx.Err() == nil {
 			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_ = b.app.api.interrupt(cleanup, fork.Data.ID)
+			b.cancelRequest(cleanup, messageID)
 		}
 	}()
-	events := make(chan apiEvent, 128)
-	streamCtx, stop := context.WithCancel(ctx)
-	defer stop()
-	go func() {
-		for streamCtx.Err() == nil {
-			_ = b.app.api.subscribe(streamCtx, func(event apiEvent) error {
-				var d eventData
-				if json.Unmarshal(event.Data, &d) == nil && d.SessionID == fork.Data.ID {
-					select {
-					case events <- event:
-					case <-streamCtx.Done():
-						return streamCtx.Err()
-					}
-				}
-				return nil
-			})
-			select {
-			case <-time.After(time.Second):
-			case <-streamCtx.Done():
-				return
-			}
-		}
-	}()
-	messageID := "msg_" + request.RequestID
 	if request.Type != "status" {
-		if err = b.app.api.prompt(ctx, fork.Data.ID, prompt, messageID); err != nil {
+		update.Text = prompt
+		if !emit("submitted") {
+			return
+		}
+		update.Text = ""
+		if err := b.app.api.prompt(ctx, b.session, prompt, messageID); err != nil {
 			// Ambiguous acknowledgements are reconciled through history. Never send
 			// a second prompt as a transport retry.
 			if rejectedPrompt(err) {
@@ -328,7 +486,7 @@ func (b *writingBridge) generate(ctx context.Context, request writing.Message) {
 		return strings.Join(all, "\n\n")
 	}
 	refresh := func() (bool, error) {
-		snapshot, err := b.app.api.snapshot(ctx, fork.Data.ID, 100)
+		snapshot, err := b.app.api.snapshot(ctx, b.session, 100)
 		if err != nil {
 			return false, err
 		}
@@ -366,7 +524,7 @@ func (b *writingBridge) generate(ctx context.Context, request writing.Message) {
 			dirty = true
 		}
 		if len(snapshot.permissions) > 0 {
-			update.Error = "Writing session awaits permission; open " + fork.Data.ID + " in opencode-tui"
+			update.Error = "Session awaits permission; open " + b.session + " in opencode-tui"
 		} else {
 			update.Error = ""
 		}
@@ -396,34 +554,6 @@ func (b *writingBridge) generate(ctx context.Context, request writing.Message) {
 		case <-ctx.Done():
 			fail(ctx.Err())
 			return
-		case event := <-events:
-			var d eventData
-			if json.Unmarshal(event.Data, &d) != nil {
-				continue
-			}
-			key := fmt.Sprintf("%s:%08d", d.AssistantMessageID, d.Ordinal)
-			switch event.Type {
-			case "session.text.delta":
-				parts[key] += d.Delta
-				dirty = true
-			case "session.text.ended":
-				parts[key] = d.Text
-				dirty = true
-			case "session.reasoning.delta":
-				thoughts[key] += d.Delta
-				dirty = true
-			case "session.reasoning.ended":
-				thoughts[key] = d.Text
-				dirty = true
-			case "session.execution.succeeded":
-				if done, err := refresh(); err == nil && done {
-					finish()
-					return
-				}
-			case "session.execution.failed", "session.execution.interrupted":
-				fail(fmt.Errorf("writing execution stopped"))
-				return
-			}
 		case now := <-ticker.C:
 			if request.Type == "status" && !seen && now.Sub(started) > 15*time.Second {
 				update.Error = "Request not found in saved session; explicit retry required"
@@ -447,7 +577,7 @@ func (b *writingBridge) generate(ctx context.Context, request writing.Message) {
 					}
 				}
 			}
-			if dirty {
+			if dirty || update.Error != "" {
 				update.Text = join(parts)
 				update.Reasoning = join(thoughts)
 				if len(update.Text)+len(update.Reasoning) > writing.MaxResponse {

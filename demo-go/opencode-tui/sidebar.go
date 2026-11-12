@@ -314,6 +314,9 @@ func (application *app) sidebarRows(width int) []displayRow {
 		expanded = application.attachTarget
 	}
 	rows := []displayRow{{text: "+ New session", style: sessionNameStyle, action: "new"}, {}}
+	if application.writer != nil {
+		rows = append(application.writer.rows(width), rows...)
+	}
 	for _, session := range sessions {
 		active := session.ID == expanded
 		label, border, highlighted := application.sessionBoxState(session.ID, active)

@@ -198,7 +198,11 @@ func (application *app) statusLine() (string, string) {
 	if application.streamConnected {
 		connection = "live"
 	}
-	return " " + application.status + " · events " + connection + " ", statusStyle
+	status := application.status
+	if application.writer != nil {
+		status = "[" + application.writer.bus.Channel + "] " + status
+	}
+	return " " + status + " · events " + connection + " ", statusStyle
 }
 
 func (application *app) helpLine() string {
@@ -221,7 +225,7 @@ func (application *app) helpLine() string {
 	if application.preview == nil || !application.preview.enabled {
 		previewKey = "text response"
 	}
-	return "Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /sessions /models /variants /export · Ctrl-Q quit · " + previewKey
+	return "Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /Subscribe /sessions /models /variants /export · Ctrl-Q quit · " + previewKey
 }
 
 func writeFull(writer io.Writer, data []byte) error {

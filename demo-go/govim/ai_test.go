@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"st-go/tui/appbus"
 	"st-go/tui/writing"
@@ -25,17 +26,24 @@ func aiTestEditor(t *testing.T) *Editor {
 	}
 	e := memoryEditor(text)
 	e.buffer().meta.Path = path
-	e.aiProject = root
+	t.Chdir(root)
 	t.Setenv("ST_GO_APPBUS_TOKEN", appbus.ID())
-	if err := e.ensureAI(); err != nil {
+	if err := e.aiSubscribe("test-writing"); err != nil {
 		t.Fatal(err)
 	}
 	e.ai.bus.Out = io.Discard
 	e.ai.provider = appbus.ID()
+	e.ai.bus.Ready = true
+	e.ai.providers[e.ai.provider] = aiPeer{seen: time.Now(), project: root, session: "ses_writing"}
 	t.Cleanup(func() { e.close(false) })
 	return e
 }
 func deliverAI(t *testing.T, e *Editor, m writing.Message) {
+	t.Helper()
+	deliverAIFrom(t, e, e.ai.provider, m)
+}
+
+func deliverAIFrom(t *testing.T, e *Editor, sender string, m writing.Message) {
 	t.Helper()
 	m.Version = writing.Version
 	m.To = e.ai.bus.ID
@@ -47,8 +55,78 @@ func deliverAI(t *testing.T, e *Editor, m writing.Message) {
 	count := (len(data) + appbus.ChunkBytes - 1) / appbus.ChunkBytes
 	for i := 0; i < count; i++ {
 		part := data[i*appbus.ChunkBytes : min(len(data), (i+1)*appbus.ChunkBytes)]
-		e.Feed(keyEvent{Bus: fmt.Sprintf("app-bus %s message %s %d %s %s %d %d %s", e.ai.bus.ID, e.ai.provider, i+1, e.ai.bus.Channel, id, i, count, base64.RawStdEncoding.EncodeToString(part))})
+		e.Feed(keyEvent{Bus: fmt.Sprintf("app-bus %s message %s %d %s %s %d %d %s", e.ai.bus.ID, sender, i+1, e.ai.bus.Channel, id, i, count, base64.RawStdEncoding.EncodeToString(part))})
 	}
+}
+
+func TestAISubscribeUsesWorkdirAndRefusesDisconnectedRequests(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "project")
+	if err := os.MkdirAll(filepath.Join(root, "chapters"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "go.mod"), []byte("module parent\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	t.Setenv("ST_GO_APPBUS_TOKEN", appbus.ID())
+	e := memoryEditor("Paragraph.\n")
+	e.buffer().meta.Path = filepath.Join(root, "chapters", "paper.md")
+	t.Cleanup(func() { e.close(false) })
+	before := string(e.buffer().text)
+	e.aiCommand("AINext", "")
+	if e.ai != nil || !strings.Contains(e.message, ":Subscribe") || string(e.buffer().text) != before {
+		t.Fatalf("request implicitly subscribed: %s", e.message)
+	}
+	e.aiCommand("Subscribe", "paper")
+	if e.ai == nil || e.ai.store.root != root {
+		t.Fatalf("subscription did not use workdir: %s", e.message)
+	}
+	e.ai.bus.Out = io.Discard
+	if _, err := os.Stat(filepath.Join(root, ".govim", "ai.sqlite3")); err != nil {
+		t.Fatal(err)
+	}
+	e.aiReceive("app-bus " + e.ai.bus.ID + " ready")
+	if err := e.aiNext(""); err == nil || string(e.buffer().text) != before {
+		t.Fatal("created a placeholder without a responder")
+	}
+	deliverAIFrom(t, e, appbus.ID(), writing.Message{Type: "ready", Project: parent})
+	if e.ai.provider != "" || !strings.Contains(e.message, "workdir mismatch") {
+		t.Fatalf("mismatched workdir silently ignored: %s", e.message)
+	}
+	provider := appbus.ID()
+	deliverAIFrom(t, e, provider, writing.Message{Type: "ready", Project: root, Session: "ses_existing"})
+	if err := e.aiNext(""); err != nil {
+		t.Fatal(err)
+	}
+	p := e.ai.proposals[e.ai.focus]
+	if p.Session != "ses_existing" {
+		t.Fatal("request not bound to subscribed session")
+	}
+	e.aiTick(time.Now())
+	if p.Status != "sent" {
+		t.Fatalf("request not published: %s", p.Status)
+	}
+	e.aiTick(time.Now().Add(16 * time.Second))
+	if p.Status != "unknown" || !strings.Contains(e.message, "not acknowledged") {
+		t.Fatalf("request stayed queued forever: %s %s", p.Status, e.message)
+	}
+	// Reopening the existing server session reconciles this request, not a
+	// second suggest. A delayed final response may still finish it safely.
+	deliverAIFrom(t, e, provider, writing.Message{Type: "ready", Project: root, Session: "ses_existing"})
+	statuses, suggests := 0, 0
+	for _, m := range e.ai.outbox {
+		if m.Type == "status" && m.RequestID == p.Request {
+			statuses++
+		}
+		if m.Type == "suggest" {
+			suggests++
+		}
+	}
+	if statuses != 1 || suggests != 0 {
+		t.Fatalf("incorrect recovery: %d statuses, %d suggests", statuses, suggests)
+	}
+	completeAI(t, e, p, "Recovered prediction.")
 }
 func completeAI(t *testing.T, e *Editor, p *aiProposal, prediction string) {
 	begin, end := writing.Markers(p.Request)
@@ -61,6 +139,7 @@ func completeAI(t *testing.T, e *Editor, p *aiProposal, prediction string) {
 func TestAIPlaceholderAdaptInsertUndoAndImmutableHistory(t *testing.T) {
 	e := aiTestEditor(t)
 	source := e.buffer()
+	e.setPos(source.start(1))
 	if err := e.aiNext("Continue"); err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +203,80 @@ func TestAIPlaceholderAdaptInsertUndoAndImmutableHistory(t *testing.T) {
 	all, err := e.ai.store.all()
 	if err != nil || len(all) != 1 || all[0].Draft != "Author adaptation." {
 		t.Fatalf("durable history: %+v %v", all, err)
+	}
+}
+
+func TestAICheckpointIsOfflineJournaledSourceEdit(t *testing.T) {
+	for _, name := range []string{"paper.md", "paper.tex"} {
+		t.Run(name, func(t *testing.T) {
+			original := "Earlier paragraph.\n\n新文.\n"
+			e := memoryEditor(original)
+			e.buffer().meta.Path = filepath.Join(t.TempDir(), name)
+			t.Cleanup(func() { e.close(false) })
+			cursor := e.buffer().start(2)
+			e.setPos(cursor)
+			e.aiCommand("AICheckpoint", "")
+			marker := writing.Checkpoint(name) + "\n"
+			want := "Earlier paragraph.\n\n" + marker + "新文.\n"
+			if e.ai != nil || previewText(e.buffer()) != want || e.pos() != cursor+utf8.RuneCountInString(marker) {
+				t.Fatalf("bad checkpoint edit: %q %s", string(e.buffer().text), e.message)
+			}
+			e.aiCommand("AICheckpoint", "")
+			if previewText(e.buffer()) != want {
+				t.Fatal("repeated command duplicated checkpoint")
+			}
+			if _, err := e.buffer().undoChange(false); err != nil || previewText(e.buffer()) != original {
+				t.Fatalf("checkpoint not one undo operation: %v", err)
+			}
+		})
+	}
+}
+
+func TestAINextFreezesOriginalCursorAndRefinementUsesSourceAnchor(t *testing.T) {
+	e := aiTestEditor(t)
+	source := e.buffer()
+	text := "# Excluded heading\nOld source.\n" + writing.Checkpoint("paper.md") + "\n新文 prefix tail of paragraph.\n\nFollowing source.\n"
+	e.replace(0, len(source.text), text, 0)
+	cursor := utf8.RuneCountInString(strings.Split(text, "tail of paragraph")[0])
+	e.setPos(cursor)
+	if err := e.aiNext(""); err != nil {
+		t.Fatal(err)
+	}
+	p := e.ai.proposals[e.ai.focus]
+	request := e.ai.outbox[len(e.ai.outbox)-1]
+	request.Version = writing.Version
+	context, err := writing.ReadContext(request, e.ai.store.root)
+	if err != nil || !strings.Contains(context, "新文 prefix ") {
+		t.Fatalf("missing selected source: %v\n%s", err, context)
+	}
+	for _, excluded := range []string{"Excluded heading", "Old source", "tail of paragraph", "Following source"} {
+		if strings.Contains(context, excluded) {
+			t.Fatalf("source outside cursor range was sent: %s", excluded)
+		}
+	}
+	data, err := os.ReadFile(p.Manifest)
+	var manifest writing.Manifest
+	if err != nil || json.Unmarshal(data, &manifest) != nil || manifest.CursorRune != cursor || manifest.Context == nil {
+		t.Fatalf("original cursor/range not recorded: %s %v", data, err)
+	}
+	// Later unrelated editing must not change the request's frozen context.
+	e.replace(0, 0, "An unrelated edit.\n", 0)
+	if again, err := writing.ReadContext(request, e.ai.store.root); err != nil || again != context {
+		t.Fatal("later edits changed the submitted excerpt")
+	}
+	completeAI(t, e, p, "Draft paragraph.")
+	if err := e.aiEdit(p); err != nil {
+		t.Fatal(err)
+	}
+	e.setPos(0) // This draft cursor must never be used as a source offset.
+	if err := e.aiSubmit(p, "Revise"); err != nil {
+		t.Fatal(err)
+	}
+	request = e.ai.outbox[len(e.ai.outbox)-1]
+	request.Version = writing.Version
+	context, err = writing.ReadContext(request, e.ai.store.root)
+	if err != nil || !strings.Contains(context, "新文 prefix tail of paragraph.") || strings.Contains(context, "Following source") || strings.Contains(context, "An unrelated edit") {
+		t.Fatalf("refinement used wrong source bounds: %v\n%s", err, context)
 	}
 }
 
