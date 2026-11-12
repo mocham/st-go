@@ -597,6 +597,8 @@ func (t *Term) dcs() {
 			t.dslTabSpawn(args[1:])
 		case "clipboard-sync":
 			t.dslClipboardSync(args[1:])
+		case "refresh":
+			t.dslRefresh(args[1:])
 		case "region":
 			if err := t.dslRegion(args[1:]); err != nil {
 				log.Printf("dsl: region: %v", err)

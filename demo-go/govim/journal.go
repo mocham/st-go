@@ -52,6 +52,14 @@ func defaultJournalOptions() journalOptions {
 	return journalOptions{Interval: time.Second, Bytes: 64 << 10}
 }
 
+// Only normal file opens may fall back to readonly. Recovery and renaming a
+// writable buffer must still reject an existing journal.
+type swapExistsError struct{ path string }
+
+func (e *swapExistsError) Error() string {
+	return fmt.Sprintf("swap exists: %s (it is never overwritten)", e.path)
+}
+
 type Journal struct {
 	file           *os.File
 	path           string
@@ -104,7 +112,7 @@ func attachJournal(b *Buffer, options journalOptions, recoverFile bool) error {
 	for _, path := range paths {
 		if _, err := os.Lstat(path); err == nil {
 			if !recoverFile {
-				return fmt.Errorf("swap exists: %s; use govim -r %s to recover (it is never overwritten)", path, b.meta.Path)
+				return &swapExistsError{path: path}
 			}
 			return recoverJournal(b, path, options)
 		} else if !os.IsNotExist(err) {
@@ -123,7 +131,7 @@ func attachJournal(b *Buffer, options journalOptions, recoverFile bool) error {
 		j, err := openJournal(path, true, options)
 		if err != nil {
 			if os.IsExist(err) {
-				return fmt.Errorf("swap appeared while opening %s; refusing a concurrent edit", path)
+				return &swapExistsError{path: path}
 			}
 			failures = append(failures, err.Error())
 			continue

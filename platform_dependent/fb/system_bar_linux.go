@@ -46,6 +46,8 @@ const (
 type systemBar struct {
 	powerSupplyPath       string
 	nextRefresh           time.Time
+	nextPoll              time.Time
+	cachedStatus          string
 	text                  string
 	bounds                image.Rectangle
 	textLeft              int
@@ -131,12 +133,12 @@ func (d *Driver) AttachWidgets(container api.WidgetContainer) {
 
 // Called by New and the input loop, not by a separate timer/goroutine. Sysfs
 // reads happen outside the drawing lock and never on application redraws.
-func (d *Driver) refreshSystemBar(now time.Time) {
+func (d *Driver) refreshSystemBar(now time.Time) bool {
 	d.mu.Lock()
 	b := d.systemBar
 	if d.closed || b == nil || now.Before(b.nextRefresh) {
 		d.mu.Unlock()
-		return
+		return false
 	}
 	root := b.powerSupplyPath
 	output := b.audioOutput
@@ -147,12 +149,18 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	overrideMode, overrideValid := b.audioMode, b.audioModeValid
 	screenshotActive := d.screenshot.stage != screenshotIdle
 	showNewTerminal := b.newTerminalTab != nil
+	poll := !now.Before(b.nextPoll)
+	status := b.cachedStatus
+	cachedMode, cachedKnown := b.displayAudioMode, b.displayAudioModeValid
 	d.mu.Unlock()
-	if !brightnessOptimistic && readBrightness != nil {
+	if poll && !brightnessOptimistic && readBrightness != nil {
 		brightnessLevel, brightnessMaximum, brightnessKnown = readBrightness()
 	}
 
-	text := systemBarText(now, root)
+	if poll {
+		status = systemBarText(now, root)
+	}
+	text := status
 	clipboardLeft, clipboardRight := -1, -1
 	if d.clipboardSync != nil {
 		state := d.ClipboardSyncState()
@@ -201,7 +209,10 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	audioLeft := -1
 	displayMode, displayKnown := 0, false
 	if output != nil {
-		mode, known := output()
+		mode, known := cachedMode, cachedKnown
+		if poll {
+			mode, known = output()
+		}
 		if overrideValid {
 			mode, known = overrideMode, true
 		}
@@ -221,15 +232,18 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 	d.mu.Lock()
 	if d.closed || d.systemBar != b {
 		d.mu.Unlock()
-		return
+		return false
 	}
 	b.displayAudioMode, b.displayAudioModeValid = displayMode, displayKnown
 	b.brightnessLevel, b.brightnessMaximum, b.brightnessValid = brightnessLevel, brightnessMaximum, brightnessKnown
 	b.brightnessOptimistic = false
-	b.nextRefresh = now.Add(systemBarInterval)
+	if poll {
+		b.cachedStatus, b.nextPoll = status, now.Add(systemBarInterval)
+	}
+	b.nextRefresh = b.nextPoll
 	if b.text == text {
 		d.mu.Unlock()
-		return
+		return false
 	}
 	old := b.bounds
 	b.text = text
@@ -284,6 +298,7 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 		widget.Upload(pixels, bounds.Dx(), 0, 0, bounds.Dx(), bounds.Dy())
 		d.EndPaint()
 	}
+	return true
 }
 
 func systemBarText(now time.Time, powerSupplyPath string) string {

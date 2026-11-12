@@ -81,6 +81,20 @@ func (w *Window) callbacks() api.Callbacks {
 		PointerRelease: func(button byte, mods uint16, x, y int) { w.pointer(1, button, mods, x, y) },
 		PointerMotion:  func(mods uint16, x, y int) { w.pointer(2, 0, mods, x, y) },
 		Resize:         w.resize,
+		Visibility: func(visible bool) {
+			w.paintMu.Lock()
+			w.mu.Lock()
+			w.nativeHidden = !visible
+			all := append([]*Host(nil), w.widgets...)
+			for _, h := range all {
+				h.generation++
+			}
+			w.mu.Unlock()
+			w.paintMu.Unlock()
+			for _, h := range all {
+				h.notifyVisibility()
+			}
+		},
 		Focus: func(focused bool) {
 			w.mu.Lock()
 			w.nativeFocused = focused

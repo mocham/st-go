@@ -25,6 +25,22 @@ previews. Otherwise document generation uses the shared Go PDF renderer.
 Media presentation belongs to the host; applications do not open display
 connections. On web, applications and audio still run on the Linux server.
 
+## Presentation scheduling and document caching
+
+The apps keep using the PTY region/HTML protocols. st-web turns published HTML
+into immutable HTTP resources and caches them in the browser; app code does not
+need HTTP resource IDs or to resend documents on resize or reconnect. PDF/image
+viewers keep using retained regions and the host's media delivery.
+
+Refresh leases are optional: `DCS refresh INTERVAL_MS DURATION_MS ST` accelerates
+pending framebuffer output during time-sensitive work. Request/renew only while
+that work is active, and cancel with `DCS refresh 0 0 ST` on completion or terminal
+handoff. Ordinary input-driven updates already wake the host. A lease does not
+generate redraws or keep hidden tabs presenting. Hidden-tab suspension affects
+presentation; PTY input, protocol replies, and app jobs continue running.
+
+## Building and testing
+
 File-browser and GoLS use pure-Go SQLite. These applications build without cgo
 except `zat-djvu`, which statically links its DjVu decoder. Shared components
 live in [`functionalities/`](../functionalities/README.md).

@@ -51,6 +51,11 @@ Edits, undo, and redo are journaled before changing the buffer. Journals are
 private and locked, normally `.FILENAME.govim.swp` beside the file, with
 `$XDG_CACHE_HOME/govim/swap` as fallback. `--swap-dir DIR` selects another location.
 
+- An existing swap opens the disk file read-only (`[RO]`) with recovery guidance,
+  including when another editor owns the swap. Viewing and quitting leave that
+  journal untouched. Use `govim -r FILE` to recover after its owner has exited.
+  Read-only buffers reject edits and ordinary saves; `:w!` explicitly permits a
+  disk overwrite, as with `-R`.
 - Journals sync after one second or 64 KiB of edits. `:preserve` forces a sync;
   `--sync-interval` / `--sync-bytes` adjust the policy. Power loss can lose edits
   since the last successful sync.

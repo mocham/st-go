@@ -31,6 +31,7 @@ type Callbacks struct {
 	PointerMotion                func(modifiers uint16, x, y int)
 	Resize                       func(width, height int)
 	Focus                        func(bool)
+	Visibility                   func(bool) // presentation availability, independent of keyboard focus
 	Close                        func()
 	PaintDirty                   func()
 	Paste                        func(string)

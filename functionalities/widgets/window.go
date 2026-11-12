@@ -19,6 +19,7 @@ type Window struct {
 	next                 api.WidgetID
 	focused, captured    *Host
 	nativeFocused        bool
+	nativeHidden         bool
 	focusEpoch           uint64
 	buttons              uint32
 	width, height        int

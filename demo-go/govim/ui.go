@@ -405,15 +405,18 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 		}
 		statusY := w.rect.y + w.rect.h - 1
 		if statusY >= 0 && statusY < e.rows-1 {
-			status := fileLabel(w.buffer)
+			flags := ""
 			if w.buffer.dirty() {
-				status += " [+]"
+				flags += " [+]"
 			}
 			if w.buffer.readonly {
-				status += " [RO]"
+				flags += " [RO]"
 			}
-			status += " " + w.buffer.meta.Encoding
+			flags += " " + w.buffer.meta.Encoding
 			position := fmt.Sprintf("%d,%d", w.buffer.row(w.cursor)+1, logicalColumn(w.buffer.line(w.buffer.row(w.cursor)), w.cursor-w.buffer.start(w.buffer.row(w.cursor)))+1)
+			statusWidth := max(0, w.rect.w-len(position)-2)
+			// Keep readonly/modified indicators visible even for long file paths.
+			status := truncateCells(fileLabel(w.buffer), max(0, statusWidth-len(flags))) + flags
 			style := statusStyle
 			if w == e.window() {
 				style = activeStatusStyle
@@ -421,7 +424,7 @@ func (e *Editor) draw(r *renderer, out io.Writer) error {
 			for x := max(0, w.rect.x); x < min(e.cols, w.rect.x+w.rect.w); x++ {
 				canvas[statusY][x].style = style
 			}
-			putCanvas(canvas, w.rect.x, statusY, truncateCells(status, max(0, w.rect.w-len(position)-2)), style, w.rect.w)
+			putCanvas(canvas, w.rect.x, statusY, truncateCells(status, statusWidth), style, w.rect.w)
 			putCanvas(canvas, w.rect.x+max(0, w.rect.w-len(position)-1), statusY, position, style, len(position))
 		}
 	}

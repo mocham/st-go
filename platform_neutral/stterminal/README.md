@@ -16,6 +16,7 @@ For DCS syntax and behavior, use the implementation and adjacent tests:
 | Terminal tabs | [`tab_spawn.go`](tab_spawn.go) |
 | Shared clipboard | [`clipboard_sync.go`](clipboard_sync.go) |
 | Audio / framebuffer video | [`native_audio.go`](native_audio.go), [`native_video.go`](native_video.go) |
+| Temporary framebuffer presentation cadence (`refresh`) | [`refresh.go`](refresh.go), [scheduling](../../platform_dependent/fb/README.md#idle-and-activity-scheduling) |
 | OSC clipboard policy | [`clipboard.go`](clipboard.go) |
 
 Applications can reuse the clients in [`st-go/tui`](../../functionalities/tui/).

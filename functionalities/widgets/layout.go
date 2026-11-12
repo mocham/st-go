@@ -100,6 +100,7 @@ func (h *Host) SetVisible(visible bool) {
 	}
 	w.repaintLocked()
 	w.paintMu.Unlock()
+	h.notifyVisibility()
 	if !visible {
 		h.invoke(func(c api.Callbacks) {
 			if c.CancelInput != nil {

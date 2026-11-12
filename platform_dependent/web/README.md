@@ -77,7 +77,16 @@ selection and scrolling. Esc returns focus to the application. File-browser's
 navigation stays pinned; Tab hides/shows it even when a preview has focus.
 
 Previews follow resize, tabs, and reconnect. Large documents transfer atomically
-in chunks, up to 64 MiB. X11/framebuffer discard HTML content, so use `--web` in
+from the application in DCS chunks, up to 64 MiB. Server-to-browser HTML/CSS is
+an immutable, content-addressed HTTP resource with private caching, gzip and
+ETags. Navigation/geometry messages carry only its ID and view state. The client
+shares concurrent fetches and retains up to eight documents within a 64 MiB
+estimated string-memory budget across socket reconnects; eviction or explicit
+reload can request the resource again. Slow document fetches do not delay text
+painting or acknowledgements. PDF previews retain lazy page rendering and
+original-document HTTP ranges, avoiding duplicated shared PDF resources.
+
+X11/framebuffer discard HTML content, so use `--web` in
 st-web. See the [region implementation](../../platform_neutral/stterminal/display_regions.go).
 
 ## Clipboard

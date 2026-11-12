@@ -73,6 +73,36 @@ window placement/collapse requests are unsupported.
 
 ## VT ownership and shutdown
 
+### Idle and activity scheduling
+
+The input loop blocks in `poll` on keyboard/mouse descriptors and an `eventfd`
+for queued work, signals and shutdown. Device hotplug uses inotify, with a
+30-second rescan fallback. System-bar information is polled together every
+30 seconds; UI changes reuse that snapshot. Maintenance pauses on inactive VTs
+and refreshes on return.
+
+Pending terminal updates use 16, 33, 100, 250, then 1000 ms coalescing intervals
+after 0, 0.5, 2, 5, and 15 seconds without user input. Idle terminals have no
+refresh tick. Known animations use their frame deadlines. Hidden tabs with
+pending text/animation work have a two-second grace period (33/100/250 ms), then
+suspend until the tab is shown; static hidden tabs sleep immediately. PTY reads and protocol replies
+always continue.
+
+Applications can request a temporary maximum update interval, renewing as needed:
+
+```sh
+printf '\033Prefresh 33 120000\033\\'  # up to 30 FPS for two minutes
+printf '\033Prefresh 0 0\033\\'        # cancel
+```
+
+Intervals must be 16–1000 ms and leases 1–120000 ms. Requests affect pending
+framebuffer text updates, not keyboard readiness or system-bar polling; they
+never create periodic redraws on a static screen or prevent hidden suspension.
+Expiry is automatic, including after application exit. Other backends retain
+their own presentation policy.
+
+### Console lifecycle
+
 Ctrl-Alt-F1…F12 switches VTs; Ctrl-Alt-Backspace closes st-fb. VT release pauses
 input/scanout and return repaints retained content. Normal exit and handled
 signals restore console modes. Do not change framebuffer modes while running.

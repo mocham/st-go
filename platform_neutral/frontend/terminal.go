@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"st-go/audio"
 	"st-go/config"
@@ -64,6 +65,13 @@ type Terminal struct {
 	termCore                          *term.Term
 	inPTYWrite, ptyPaintRequested     bool
 	done                              chan struct{}
+	eventWake                         chan struct{}
+	visualHidden                      bool
+	hiddenSince                       time.Time
+	nextBlink, paintDeadline          time.Time
+	lastPaint, lastActivity           time.Time
+	refreshInterval                   time.Duration
+	refreshUntil                      time.Time
 	ttyResize                         func(rows, cols int)
 	displayRegions                    displayRegionState
 	pdfSearch                         pdfSearchState
@@ -170,7 +178,8 @@ func newTerminalState(cfg *config.Config, ratio float64, title string) *Terminal
 		cursorShape: int(cfg.CursorShape), cursorThick: int(cfg.CursorThick),
 		ignoreMod: cfg.IgnoreMod, forceMouseMod: uint16(cfg.ForceMouseMod),
 		doubleClick: cfg.DoubleClickMs, tripleClick: cfg.TripleClickMs, blinkMs: cfg.BlinkTimeout,
-		geometryTags: make(map[string]windowRect), done: make(chan struct{}), audio: &audio.Player{},
+		geometryTags: make(map[string]windowRect), done: make(chan struct{}), eventWake: make(chan struct{}, 1), audio: &audio.Player{},
+		lastActivity: time.Now(),
 	}
 }
 

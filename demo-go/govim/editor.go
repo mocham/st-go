@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -214,7 +215,12 @@ func (e *Editor) open(path string, recoverFile bool) (*Buffer, error) {
 		return nil, fmt.Errorf("total open-buffer text exceeds 64 MiB")
 	}
 	if err := attachJournal(b, e.options, recoverFile); err != nil {
-		return nil, err
+		var conflict *swapExistsError
+		if recoverFile || !errors.As(err, &conflict) {
+			return nil, err
+		}
+		b.readonly = true
+		b.warning = fmt.Sprintf("Opened readonly: swap exists at %s; use govim -r %s to recover", conflict.path, b.meta.Path)
 	}
 	if recoverFile {
 		total = b.byteSize

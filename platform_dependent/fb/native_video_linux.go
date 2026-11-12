@@ -51,6 +51,7 @@ func (d *Driver) StartNativeVideo(request api.NativeVideoRequest, done func(erro
 	}
 	d.nativeBusy = true
 	d.nativeJobs <- nativeVideoJob{request, done}
+	d.inputWake.signal()
 	return nil
 }
 
@@ -97,6 +98,9 @@ func (d *Driver) runNativeVideo(request api.NativeVideoRequest) (result error) {
 		return fmt.Errorf("native video requires the active owned VT")
 	}
 	d.suspendPresentation()
+	if cb.Visibility != nil {
+		cb.Visibility(false)
+	}
 	for _, m := range d.mice {
 		d.releaseMouse(m)
 		m.grab(false)
@@ -184,8 +188,14 @@ func (d *Driver) resumeNativeVideo() error {
 	d.callbacks.Lock()
 	d.mu.Lock()
 	d.active, d.restorePixels = owned, owned
+	if d.systemBar != nil {
+		d.systemBar.nextRefresh, d.systemBar.nextPoll = time.Time{}, time.Time{}
+	}
 	d.invalidate(image.Rect(0, 0, l.width, l.height))
 	d.mu.Unlock()
+	if d.callbacks.Visibility != nil {
+		d.callbacks.Visibility(owned)
+	}
 	d.callbacks.Focus(owned)
 	d.callbacks.Unlock()
 	return nil
@@ -246,7 +256,7 @@ func (d *Driver) runNativePlayer(request api.NativeVideoRequest, tty *os.File) e
 		case <-kill:
 			unix.Kill(-cmd.Process.Pid, unix.SIGKILL)
 			kill = nil
-		case sig := <-d.signals:
+		case sig := <-d.signalQueue():
 			if sig != unix.SIGUSR1 && sig != unix.SIGUSR2 {
 				d.callbacks.Lock()
 				d.callbacks.Close()

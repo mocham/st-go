@@ -121,8 +121,9 @@ func (t *Terminal) readSession(session *ptySession, core *term.Term) {
 		for {
 			t.mu.Lock()
 			paused, hasDamage := core.IsPaintPaused(), core.HasPendingPaint()
+			deferred := (t.visualHidden && hiddenRefresh(time.Since(t.hiddenSince)) == 0) || !t.paintDeadline.IsZero()
 			t.mu.Unlock()
-			if !hasDamage {
+			if !hasDamage || deferred {
 				break
 			}
 			timeout := 30 * time.Millisecond

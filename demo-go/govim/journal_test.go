@@ -163,17 +163,20 @@ func TestJournalLocksExistingSwapsSymlinksAndPermissions(t *testing.T) {
 	e, path := diskEditor(t, "a\n", defaultJournalOptions())
 	j := e.buffer().journal
 	other := newEditor(defaultJournalOptions())
-	if _, err := other.open(path, false); err == nil {
-		t.Fatal("existing swap overwritten")
+	defer other.close(true)
+	if b, err := other.open(path, false); err != nil || !b.readonly || b.journal != nil {
+		t.Fatalf("existing swap must open readonly without owning a journal: %v", err)
 	}
-	if _, err := other.open(path, true); err == nil {
+	recovery := newEditor(defaultJournalOptions())
+	defer recovery.close(false)
+	if _, err := recovery.open(path, true); err == nil {
 		t.Fatal("active swap lock bypassed")
 	}
 	link := filepath.Join(filepath.Dir(path), "link.txt")
 	if err := os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.open(link, true); err == nil {
+	if _, err := recovery.open(link, true); err == nil {
 		t.Fatal("symlink opened the same file concurrently")
 	}
 	info, err := os.Stat(j.path)
@@ -184,7 +187,7 @@ func TestJournalLocksExistingSwapsSymlinksAndPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Chmod(j.path, 0644)
-	if _, err := other.open(path, true); err == nil {
+	if _, err := recovery.open(path, true); err == nil {
 		t.Fatal("unsafe swap permissions accepted")
 	}
 }

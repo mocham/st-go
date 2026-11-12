@@ -476,7 +476,9 @@ func TestSystemBarRefreshesInRunWithoutApplicationDamage(t *testing.T) {
 	// Advance the deadline rather than sleeping for a real 30-second period.
 	d.mu.Lock()
 	d.systemBar.nextRefresh = time.Time{}
+	d.systemBar.nextPoll = time.Time{}
 	d.mu.Unlock()
+	d.inputWake.signal()
 	awaitBattery(string([]byte{systemBarBatteryIcon, ' ', '7', '2', '%'}))
 }
 

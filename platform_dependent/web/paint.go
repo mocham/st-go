@@ -94,6 +94,7 @@ func (d *Driver) SetTextCursor(cursor api.TextCursor) {
 }
 
 type surface struct {
+	htmlID string
 	scene  *sceneSurface
 	media  api.MediaView
 	id     uint64

@@ -89,6 +89,12 @@ try {
   // Observe the actual wire protocol before the embedded client attaches.
   await command("Page.addScriptToEvaluateOnNewDocument", { source: `
     window.paintLog = []; window.paintBatches = 0; window.resizeLog = [];
+    window.htmlFetches = []; window.htmlMessages = [];
+    const nativeFetch = window.fetch;
+    window.fetch = (...args) => {
+      if (String(args[0]).startsWith("html/")) window.htmlFetches.push(String(args[0]));
+      return nativeFetch(...args);
+    };
     const NativeSocket = window.WebSocket;
     window.WebSocket = class extends NativeSocket {
       send(data) {
@@ -105,7 +111,8 @@ try {
           if (!(event.data instanceof ArrayBuffer)) {
             const m=JSON.parse(event.data);
             if (m.type === "paint") window.paintBatches++;
-            if (m.type === "scene") window.paintLog.push(m);
+             if (m.type === "scene") window.paintLog.push(m);
+             if (m.type === "html") window.htmlMessages.push(m);
             return;
           }
           const d = new DataView(event.data);
@@ -370,8 +377,14 @@ finally: termios.tcsetattr(0,termios.TCSANOW,saved)
   await type(":%s/OLD/NEW/g");
   await type(":w");
   await wait(() => evaluate(`${preview}?.contentDocument?.getElementById("web-probe")?.textContent === "NEW web preview"`), "saved HTML preview refresh");
+  const documentFetches = await evaluate('htmlFetches.length');
+  if (!await evaluate('htmlMessages.every(m => JSON.stringify(m).length < 65536 && (m.overlays || []).every(o => o.document && !o.view.document))')) throw new Error("HTML body sent in interactive updates");
   await command("Emulation.setDeviceMetricsOverride", { width: 1200, height: 750, deviceScaleFactor: 1, mobile: false });
   await wait(() => evaluate(`(() => { const f = ${preview}; return f && document.querySelector("canvas").width === 1200 && f.getBoundingClientRect().width > 650; })()`), "HTML pane follows resize");
+  if (await evaluate('htmlFetches.length') !== documentFetches) throw new Error("Resize refetched unchanged HTML");
+  await evaluate('terminalSocket.close();true');
+  await wait(() => evaluate(`${preview}?.contentDocument?.getElementById("web-probe")?.textContent === "NEW web preview"`), "cached HTML restored after socket reconnect");
+  if (await evaluate('htmlFetches.length') !== documentFetches) throw new Error("Reconnect refetched cached HTML");
   await command("Page.reload");
   await wait(() => evaluate(`${preview}?.contentDocument?.getElementById("web-probe")?.textContent === "NEW web preview"`), "HTML pane restored on reconnect");
   await type(":e web.md");

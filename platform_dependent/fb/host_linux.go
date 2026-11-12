@@ -77,6 +77,8 @@ type Driver struct {
 	restorePixels           bool
 	done                    chan struct{}
 	signals                 chan os.Signal
+	eventSignals            chan os.Signal
+	inputWake               inputWake
 	mice                    []*mouse
 	mousePaths              string
 	grabMouse               bool
@@ -273,6 +275,7 @@ func (d *Driver) sharedClipboardChanged(entry sharedclipboard.Entry) {
 		}
 	}
 	d.mu.Unlock()
+	d.inputWake.signal()
 }
 
 func (d *Driver) sharedClipboardStatus(sharedclipboard.State) {
@@ -281,6 +284,7 @@ func (d *Driver) sharedClipboardStatus(sharedclipboard.State) {
 		d.systemBar.nextRefresh = time.Time{}
 	}
 	d.mu.Unlock()
+	d.inputWake.signal()
 }
 func (d *Driver) RequestPaste() {
 	d.QueryClipboard('c', func(text string, ok bool) {
@@ -302,6 +306,7 @@ func (d *Driver) Close() {
 	close(d.done)
 	running := d.running
 	d.mu.Unlock()
+	d.inputWake.signal()
 	if !running {
 		d.presentMu.Lock()
 		d.cleanup()
@@ -310,6 +315,7 @@ func (d *Driver) Close() {
 }
 
 func (d *Driver) cleanup() {
+	d.inputWake.close()
 	if d.clipboardSync != nil {
 		d.clipboardSync.Close()
 	}
@@ -357,6 +363,43 @@ func (d *Driver) Run() {
 		d.presentMu.Unlock()
 	}()
 	cb := d.callbacks
+	wakeFD, err := d.inputWake.init()
+	if err != nil {
+		log.Printf("fb eventfd: %v", err)
+		cb.Lock()
+		cb.Close()
+		cb.Unlock()
+		return
+	}
+	d.eventSignals = make(chan os.Signal, 16)
+	relayDone := make(chan struct{})
+	go func() {
+		defer close(relayDone)
+		for {
+			select {
+			case <-d.done:
+				return
+			case sig := <-d.signals:
+				select {
+				case d.eventSignals <- sig:
+					d.inputWake.signal()
+				case <-d.done:
+					return
+				}
+			}
+		}
+	}()
+	defer func() { d.Close(); <-relayDone }()
+	watchFD := -1
+	if d.mousePaths != "none" {
+		watchFD = watchInputDevices()
+	}
+	defer func() {
+		if watchFD >= 0 {
+			unix.Close(watchFD)
+		}
+	}()
+	fds := make([]unix.PollFd, 0, 19)
 	cb.Lock()
 	if cb.Closed() {
 		cb.Unlock()
@@ -376,7 +419,7 @@ func (d *Driver) Run() {
 		}
 		// Process ownership signals before input or another scanout write.
 		select {
-		case sig := <-d.signals:
+		case sig := <-d.eventSignals:
 			cb.Lock()
 			if sig == unix.SIGUSR1 {
 				d.release()
@@ -405,17 +448,26 @@ func (d *Driver) Run() {
 			continue
 		default:
 		}
-		d.refreshSystemBar(time.Now())
-		if time.Since(d.lastScan) > 2*time.Second {
+		if d.isActive() && d.refreshSystemBar(time.Now()) {
+			cb.Lock()
+			if !cb.Closed() {
+				cb.PaintDirty()
+			}
+			cb.Unlock()
+		}
+		if d.isActive() && watchFD < 0 && d.mousePaths != "none" && time.Since(d.lastScan) >= systemBarInterval {
 			if err := d.scanMice(false); err != nil {
 				limits.Report("fb mouse", "%v", err)
 			}
 		}
-		fds := []unix.PollFd{{Fd: int32(d.console.fd), Events: unix.POLLIN}}
+		fds = append(fds[:0], unix.PollFd{Fd: int32(d.console.fd), Events: unix.POLLIN})
 		for _, m := range d.mice {
 			fds = append(fds, unix.PollFd{Fd: int32(m.fd), Events: unix.POLLIN})
 		}
-		_, err := unix.Poll(fds, 40)
+		wakeIndex := len(fds)
+		fds = append(fds, unix.PollFd{Fd: int32(wakeFD), Events: unix.POLLIN}, unix.PollFd{Fd: int32(watchFD), Events: unix.POLLIN})
+		now := time.Now()
+		_, err := unix.Poll(fds, pollTimeout(now, d.maintenanceDeadline(now, watchFD >= 0)))
 		if err == unix.EINTR {
 			continue
 		}
@@ -428,7 +480,11 @@ func (d *Driver) Run() {
 		}
 		// A switch signal may have arrived while poll was waiting. Defer input
 		// until the signal is acknowledged; queued events are discarded on switch.
-		if len(d.signals) != 0 {
+		if fds[wakeIndex].Revents != 0 {
+			var data [8]byte
+			unix.Read(wakeFD, data[:])
+		}
+		if len(d.eventSignals) != 0 {
 			continue
 		}
 		cb.Lock()
@@ -472,6 +528,18 @@ func (d *Driver) Run() {
 			cb.PaintDirty()
 		}
 		cb.Unlock()
+		if fds[wakeIndex+1].Revents != 0 {
+			var events [4096]byte
+			unix.Read(watchFD, events[:])
+			// Recreate the watch too: /dev/input itself may have been replaced.
+			unix.Close(watchFD)
+			watchFD = watchInputDevices()
+			if d.isActive() {
+				if err := d.scanMice(false); err != nil {
+					limits.Report("fb mouse", "%v", err)
+				}
+			}
+		}
 	}
 }
 
@@ -479,6 +547,9 @@ func (d *Driver) isActive() bool { d.mu.Lock(); defer d.mu.Unlock(); return d.ac
 
 func (d *Driver) release() {
 	d.suspendPresentation()
+	if d.callbacks.Visibility != nil {
+		d.callbacks.Visibility(false)
+	}
 	for _, m := range d.mice {
 		d.releaseMouse(m)
 		m.grab(false)
@@ -528,8 +599,17 @@ func (d *Driver) acquire() error {
 	d.mu.Lock()
 	d.active = true
 	d.restorePixels = true
+	if d.systemBar != nil {
+		d.systemBar.nextRefresh, d.systemBar.nextPoll = time.Time{}, time.Time{}
+	}
 	d.invalidate(image.Rect(0, 0, l.width, l.height))
 	d.mu.Unlock()
+	if err := d.scanMice(false); err != nil {
+		limits.Report("fb mouse", "%v", err)
+	}
+	if d.callbacks.Visibility != nil {
+		d.callbacks.Visibility(true)
+	}
 	d.callbacks.Focus(true)
 	return nil
 }

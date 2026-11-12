@@ -229,10 +229,18 @@ func (client *apiClient) exportGoLS(ctx context.Context, id, destination string)
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-	if _, err := db.ExecContext(ctx, "PRAGMA journal_mode=DELETE"); err != nil {
+	// Pin the connection so Close waits for database/sql's asynchronous rollback
+	// on cancellation. Tx.Rollback alone can return ErrTxDone while that rollback
+	// still owns the SQLite journal, racing staging-file cleanup and completion.
+	conn, err := db.Conn(ctx)
+	if err != nil {
 		return stats, err
 	}
-	tx, err := db.BeginTx(ctx, nil)
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "PRAGMA journal_mode=DELETE"); err != nil {
+		return stats, err
+	}
+	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return stats, err
 	}
@@ -283,6 +291,9 @@ func (client *apiClient) exportGoLS(ctx context.Context, id, destination string)
 		return stats, err
 	}
 	if err := tx.Commit(); err != nil {
+		return stats, err
+	}
+	if err := conn.Close(); err != nil {
 		return stats, err
 	}
 	if err := db.Close(); err != nil {

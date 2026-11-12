@@ -110,6 +110,46 @@
     scroll.scrollTop += (view.scroll - pane.scroll) * metrics.cellHeight / (window.devicePixelRatio || 1);
     pane.scroll = view.scroll;
   }
+  // Connection-independent, byte-bounded LRU. HTTP private caching also lets a
+  // page reload reuse immutable bodies. Concurrent views share a single fetch.
+  const htmlDocuments = new Map();
+  let htmlBytes = 0;
+  const htmlBudget = 64 * 1024 * 1024;
+  function htmlDocument(id) {
+    let entry = htmlDocuments.get(id);
+    if (entry) {
+      htmlDocuments.delete(id); htmlDocuments.set(id, entry);
+      return entry.ready;
+    }
+    entry = { bytes: 0, complete: false, abort: new AbortController() };
+    entry.ready = fetch(`html/${encodeURIComponent(id)}`, { signal: entry.abort.signal }).then(async response => {
+      if (!response.ok) throw new Error(`Document fetch failed (${response.status})`);
+      const doc = await response.json();
+      if (htmlDocuments.get(id) !== entry) return doc;
+      entry.complete = true;
+      entry.bytes = 2 * ((doc.html || "").length + (doc.css || "").length);
+      htmlBytes += entry.bytes;
+      for (const [key, cached] of htmlDocuments) {
+        if (htmlBytes <= htmlBudget && htmlDocuments.size <= 8) break;
+        if (!cached.complete) continue;
+        htmlDocuments.delete(key); htmlBytes -= cached.bytes;
+      }
+      return doc;
+    }).catch(error => {
+      if (htmlDocuments.get(id) === entry) htmlDocuments.delete(id);
+      throw error;
+    });
+    htmlDocuments.set(id, entry);
+    return entry.ready;
+  }
+
+  function cancelObsoleteHTML() {
+    const live = new Set(Array.from(htmlPanes.values(), pane => pane.data.document));
+    for (const [id, entry] of htmlDocuments) {
+      if (!entry.complete && !live.has(id)) { htmlDocuments.delete(id); entry.abort.abort(); }
+    }
+  }
+
   function renderHTML(data) {
     htmlState = data;
     const live = new Set();
@@ -126,38 +166,50 @@
         pane = { element, loaded: false, positionID: -1, scroll: 0 };
         htmlPanes.set(overlay.id, pane); viewport.appendChild(element);
       }
-      const doc = overlay.view.document, previous = pane.data?.view.document;
+      const previous = pane.data?.document;
       pane.data = overlay;
-      if (!previous || previous.html !== doc.html || previous.css !== doc.css) {
+      if (previous !== overlay.document || pane.failed) {
         const oldScroll = pane.loaded ? pane.element.contentDocument.scrollingElement.scrollTop : 0;
-        pane.loaded = false;
-        pane.element.onload = () => {
-          pane.loaded = true; pane.positionID = -1; pane.scroll = 0;
-          const content = pane.element.contentDocument;
-          content.scrollingElement.scrollTop = oldScroll;
-          content.addEventListener("click", e => {
-            const link = e.target.closest?.("a");
-            if (link && !link.getAttribute("href")?.startsWith("#")) e.preventDefault();
-          });
-          content.addEventListener("keydown", e => {
-            if (e.key === "Escape") { e.preventDefault(); focus(); }
-            else if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key.toLowerCase() === "u" || e.key.toLowerCase() === "d")) {
-              e.preventDefault();
-              const scroll = content.scrollingElement;
-              scroll.scrollTop += (e.key.toLowerCase() === "u" ? -1 : 1) * scroll.clientHeight;
-            }
-            else if (e.key === "Tab" && pane.data.view.captureTab) {
-              e.preventDefault(); focus();
-              send({ type: "key", key: "Tab", modifiers: modifiers(e) });
-            }
-          });
-          scrollHTML(pane);
-        };
-        const css = (doc.css || "").replace(/<\/style/gi, "<\\/style");
-        pane.element.srcdoc = '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; form-action \'none\'; base-uri \'none\'"><style>html{color-scheme:light}body{margin:16px;overflow-wrap:anywhere}img,svg{max-width:100%}pre{white-space:pre-wrap}' + css + '</style>' + doc.html;
+        pane.loaded = false; pane.failed = false;
+        const request = pane.request = {};
+        // Do not join the ordered text/ACK queue: documents can be large or
+        // slow, and an obsolete completion must never replace a newer preview.
+        htmlDocument(overlay.document).then(doc => {
+          if (htmlPanes.get(overlay.id) !== pane || pane.request !== request) return;
+          pane.element.onload = () => {
+            if (htmlPanes.get(overlay.id) !== pane || pane.request !== request) return;
+            pane.loaded = true; pane.positionID = -1; pane.scroll = 0;
+            const content = pane.element.contentDocument;
+            content.scrollingElement.scrollTop = oldScroll;
+            content.addEventListener("click", e => {
+              const link = e.target.closest?.("a");
+              if (link && !link.getAttribute("href")?.startsWith("#")) e.preventDefault();
+            });
+            content.addEventListener("keydown", e => {
+              if (e.key === "Escape") { e.preventDefault(); focus(); }
+              else if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key.toLowerCase() === "u" || e.key.toLowerCase() === "d")) {
+                e.preventDefault();
+                const scroll = content.scrollingElement;
+                scroll.scrollTop += (e.key.toLowerCase() === "u" ? -1 : 1) * scroll.clientHeight;
+              }
+              else if (e.key === "Tab" && pane.data.view.captureTab) {
+                e.preventDefault(); focus();
+                send({ type: "key", key: "Tab", modifiers: modifiers(e) });
+              }
+            });
+            scrollHTML(pane);
+          };
+          const css = (doc.css || "").replace(/<\/style/gi, "<\\/style");
+          pane.element.srcdoc = '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; form-action \'none\'; base-uri \'none\'"><style>html{color-scheme:light}body{margin:16px;overflow-wrap:anywhere}img,svg{max-width:100%}pre{white-space:pre-wrap}' + css + '</style>' + doc.html;
+        }).catch(error => {
+          if (htmlPanes.get(overlay.id) !== pane || pane.request !== request) return;
+          pane.failed = true;
+          message(error.message + "; reconnect or navigate to retry");
+        });
       } else scrollHTML(pane);
     }
     for (const [id, pane] of htmlPanes) if (!live.has(id)) { pane.element.remove(); htmlPanes.delete(id); }
+    cancelObsoleteHTML();
     placeHTML();
   }
 
@@ -302,6 +354,7 @@
         clearInterval(heartbeat);
         for (const pane of htmlPanes.values()) pane.element.remove();
         htmlPanes.clear(); htmlState = null;
+        cancelObsoleteHTML();
         if (managed) {
           metrics = null;
           message("Disconnected — refresh the terminal list to attach again");

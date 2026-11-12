@@ -268,6 +268,7 @@ func (t *Terminal) queueRegionReply(reply regionReply) {
 	default:
 	}
 	s.replies <- reply
+	t.wakeEvents()
 }
 
 // Native workers publish bounded replies; only the terminal event loop writes

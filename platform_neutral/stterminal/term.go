@@ -553,6 +553,20 @@ func (t *Term) SetAnim(data []byte, opts ImageDecodeOptions, durations []int, co
 // HasAnim reports whether an animation is currently running (not yet done).
 func (t *Term) HasAnim() bool { return t.anim != nil && !t.anim.done }
 
+// NextAnimDeadline is zero when no animation needs service. Hidden frontends
+// can ignore it and catch up using TickAnim's elapsed-time selection on return.
+func (t *Term) NextAnimDeadline() time.Time {
+	a := t.anim
+	if a == nil || a.done || a.frameCount == 0 {
+		return time.Time{}
+	}
+	var elapsed time.Duration
+	for i := 0; i <= a.idx && i < len(a.durations); i++ {
+		elapsed += time.Duration(a.durations[i]) * time.Millisecond
+	}
+	return a.startAt.Add(elapsed)
+}
+
 // CancelAnims removes all running animations (e.g. terminal clear/reset).
 func (t *Term) CancelAnims() { t.anim = nil }
 

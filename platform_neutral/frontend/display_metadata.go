@@ -92,6 +92,7 @@ func (t *Terminal) querySceneDocument(surface *regionSurface, q term.RegionDocum
 		default:
 		}
 		s.metadataReplies <- regionMetadataReply{revision, text}
+		t.wakeEvents()
 	})
 	return nil
 }
@@ -157,4 +158,5 @@ func (t *Terminal) processRegionMetadata(job regionMetadataJob, document **scrol
 	default:
 	}
 	s.metadataReplies <- regionMetadataReply{job.revision, frame}
+	t.wakeEvents()
 }

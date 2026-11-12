@@ -368,6 +368,10 @@ func (d *Driver) serveResource(w http.ResponseWriter, r *http.Request, resource 
 		d.serveMedia(w, r, resource)
 		return
 	}
+	if strings.HasPrefix(resource, "html/") {
+		d.serveHTML(w, r, resource)
+		return
+	}
 	if resource == "font.ttf" {
 		d.mu.Lock()
 		font := d.font

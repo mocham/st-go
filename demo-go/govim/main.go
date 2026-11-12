@@ -131,7 +131,7 @@ func run(args []string) (code int) {
 			return 1
 		}
 	}
-	b.readonly = *readonly
+	b.readonly = b.readonly || *readonly
 	if line > 0 {
 		e.setPos(firstNonblank(b, clamp(line-1, 0, len(b.lineStarts())-1)))
 	}

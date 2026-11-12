@@ -88,6 +88,39 @@ func (s *testSurface) SetVisible(visible bool) { s.visible = visible }
 func (s *testSurface) Expose() bool            { s.exposes++; return s.visible && !s.closed }
 func (s *testSurface) Close()                  { s.closed = true }
 
+func TestPresentationVisibilityTracksTabsAndVTIndependentlyOfFocus(t *testing.T) {
+	n, root := newTestHost(t)
+	other, err := root.NewWidget(api.WidgetOptions{Kind: api.TerminalWidget, Bounds: image.Rect(0, 0, 4, 4), Hidden: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+	var first, second []bool
+	root.Bind(api.Callbacks{Visibility: func(v bool) { first = append(first, v) }})
+	other.Bind(api.Callbacks{Visibility: func(v bool) { second = append(second, v) }})
+	if !slices.Equal(first, []bool{true}) || !slices.Equal(second, []bool{false}) {
+		t.Fatal("initial visibility", first, second)
+	}
+	n.dispatch(func(c api.Callbacks) { c.Focus(false) })
+	if len(first) != 1 {
+		t.Fatal("keyboard focus suspended a visible widget")
+	}
+	n.dispatch(func(c api.Callbacks) { c.Visibility(false) })
+	other.SetVisible(true)
+	if _, visible := other.(api.WidgetPresentation).PresentationState(); visible {
+		t.Fatal("tab switch exposed inactive VT")
+	}
+	root.SetVisible(false)
+	n.dispatch(func(c api.Callbacks) { c.Visibility(true) })
+	if first[len(first)-1] || !second[len(second)-1] {
+		t.Fatal("VT acquisition resumed hidden tab", first, second)
+	}
+	root.SetVisible(true)
+	if !first[len(first)-1] {
+		t.Fatal("shown tab did not resume")
+	}
+}
+
 func TestBuffersClipTranslateAndRemainIndependent(t *testing.T) {
 	n, root := newTestHost(t)
 	other, err := root.NewWidget(api.WidgetOptions{Kind: api.TerminalWidget, Bounds: image.Rect(5, 2, 9, 5)})

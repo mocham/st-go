@@ -30,7 +30,21 @@ func (h *Host) ID() api.WidgetID                                  { return h.id 
 func (h *Host) Kind() api.WidgetKind                              { return h.options.Kind }
 func (h *Host) NativeHost() api.Host                              { return h.window.native }
 func (h *Host) NewWidget(o api.WidgetOptions) (api.Widget, error) { return h.window.NewWidget(o) }
-func (h *Host) Bind(c api.Callbacks)                              { h.window.mu.Lock(); h.callbacks = c; h.window.mu.Unlock() }
+func (h *Host) Bind(c api.Callbacks) {
+	h.window.mu.Lock()
+	h.callbacks = c
+	h.window.mu.Unlock()
+	h.notifyVisibility()
+}
+
+func (h *Host) notifyVisibility() {
+	h.invoke(func(c api.Callbacks) {
+		if c.Visibility != nil {
+			_, visible := h.PresentationState()
+			c.Visibility(visible)
+		}
+	})
+}
 func (h *Host) Bounds() image.Rectangle {
 	h.window.mu.Lock()
 	defer h.window.mu.Unlock()
@@ -172,7 +186,7 @@ func (h *Host) isFocused() bool {
 func (h *Host) PresentationState() (uint64, bool) {
 	h.window.mu.Lock()
 	defer h.window.mu.Unlock()
-	return h.generation, h.visible && !h.closed && !h.window.closed.Load()
+	return h.generation, h.visible && !h.window.nativeHidden && !h.closed && !h.window.closed.Load()
 }
 func (h *Host) invoke(call func(api.Callbacks)) {
 	h.window.mu.Lock()

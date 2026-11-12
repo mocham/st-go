@@ -63,6 +63,7 @@ func (t *Terminal) SearchPDF(request term.PDFSearchRequest) error {
 	if request.Path == "" {
 		if request.Token == s.token && s.data != nil {
 			s.chunk(request.Offset)
+			t.wakeEvents()
 		}
 		return nil
 	}
@@ -86,6 +87,7 @@ func (t *Terminal) SearchPDF(request term.PDFSearchRequest) error {
 			}
 			s.data = data
 			s.chunk(0)
+			t.wakeEvents()
 		})
 		return nil
 	}
@@ -141,6 +143,7 @@ func (t *Terminal) pdfSearchWorker(jobs <-chan pdfSearchJob, done <-chan struct{
 			if !t.closed() && job.generation == s.generation {
 				s.result, s.data = result, data
 				s.chunk(0)
+				t.wakeEvents()
 			}
 			s.mu.Unlock()
 		}
