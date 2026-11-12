@@ -17,6 +17,7 @@ const (
 	systemBarBrightnessDown
 	systemBarBrightnessUp
 	systemBarScreenshot
+	systemBarRecording
 	systemBarNewTerminal
 	systemBarAudioOutput
 )
@@ -45,6 +46,7 @@ func (b *systemBar) buttons() []systemBarButton {
 	add(systemBarBrightnessDown, b.brightnessDownLeft, b.brightnessDownLeft+systemBarFontCellWidth)
 	add(systemBarBrightnessUp, b.brightnessUpLeft, b.brightnessUpLeft+systemBarFontCellWidth)
 	add(systemBarScreenshot, b.screenshotLeft, b.screenshotRight)
+	add(systemBarRecording, b.recordingLeft, b.recordingRight)
 	add(systemBarNewTerminal, b.newTerminalLeft, b.newTerminalRight)
 	if b.audioLeft >= 0 {
 		add(systemBarAudioOutput, b.audioLeft+2*systemBarFontCellWidth, b.audioLeft+3*systemBarFontCellWidth)

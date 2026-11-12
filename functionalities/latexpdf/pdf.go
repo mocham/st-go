@@ -51,6 +51,7 @@ type pdfRenderer struct {
 type cachedPDFDocument struct {
 	data         []byte
 	sectionPages map[string]int
+	anchors      map[string]PDFAnchor
 }
 
 type pdfFormula struct {
@@ -128,6 +129,7 @@ type pdfDocumentLayout struct {
 	fontScale                                        float64
 	marginLeft, marginRight, marginTop, marginBottom float64
 	anchors                                          map[string]pdfAnchor
+	regions                                          map[string][]PDFRegion
 	links                                            map[string]int
 	tocEntries                                       []pdfTOCEntry
 	pageEnds                                         map[int]float64 // compact preview crop heights
@@ -270,13 +272,21 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 		return nil, nil, errors.New("PDF writer returned an invalid document")
 	}
 	sectionPages := make(map[string]int, len(sections))
+	anchors := make(map[string]PDFAnchor, len(layout.anchors))
+	for id, anchor := range layout.anchors {
+		height := pageHeight
+		if used, ok := layout.pageEnds[anchor.page]; ok {
+			height = used
+		}
+		anchors[id] = PDFAnchor{Page: anchor.page, Position: int(max(0, anchor.y-2) * 1e6 / height), Regions: layout.regions[id]}
+	}
 	for _, section := range sections {
 		if anchor, ok := layout.anchors[section.ID]; ok {
 			sectionPages[section.ID] = anchor.page
 		}
 	}
 	renderer.documents.Store(cacheKey, cachedPDFDocument{
-		data: append([]byte(nil), data...), sectionPages: sectionPages,
+		data: append([]byte(nil), data...), sectionPages: sectionPages, anchors: anchors,
 	})
 	return data, sectionPages, nil
 }
@@ -447,7 +457,7 @@ func (layout *pdfDocumentLayout) renderNode(node *html.Node, indent float64) {
 			layout.renderNumberedEquation(node, indent)
 			return
 		}
-		if classes["statement"] || classes["abstract"] || classes["lecture-box"] {
+		if classes["statement"] || classes["abstract"] || classes["lecture-box"] || classes["govim-ai"] {
 			layout.renderBoxedEnvironment(node, indent, classes)
 			return
 		}
@@ -517,6 +527,21 @@ func (layout *pdfDocumentLayout) renderBoxedEnvironment(node *html.Node, indent 
 	layout.rightInset = previousRightInset
 	endPage, endY := layout.pdf.PageNo(), layout.y
 	layout.drawBoxAcrossPages(startPage, startY, endPage, endY, indent, theme)
+	if id := htmlAttribute(node, "id"); id != "" {
+		if layout.regions == nil {
+			layout.regions = make(map[string][]PDFRegion)
+		}
+		for page := startPage; page <= endPage; page++ {
+			top, bottom := layout.marginTop, layout.pageHeight-layout.marginBottom
+			if page == startPage {
+				top = startY
+			}
+			if page == endPage {
+				bottom = endY
+			}
+			layout.regions[id] = append(layout.regions[id], PDFRegion{Page: page, X: layout.marginLeft + indent, Y: top, Width: layout.pageWidth - layout.marginLeft - layout.marginRight - 2*indent, Height: bottom - top})
+		}
+	}
 	layout.verticalSpace(2.5)
 }
 

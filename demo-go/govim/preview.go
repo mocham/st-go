@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/mocham/GoLS/latexpdf"
 	"io"
 	"os"
 	"path/filepath"
@@ -28,19 +29,23 @@ func defaultPreviewOptions() previewOptions {
 }
 
 type previewRequest struct {
-	web        bool
-	id         uint64
-	path       string
-	line       int
-	noMove     bool
-	cursorOnly bool // explicit navigation ignores a document's %cursor marker
-	immediate  bool // explicit toggles bypass the automatic save-refresh gap
-	navigation uint64
-	overrides  map[string]string
-	reuse      bool
-	hash       [sha256.Size]byte
+	forceRender bool
+	annotations []preview.Annotation
+	focusAnchor string
+	web         bool
+	id          uint64
+	path        string
+	line        int
+	noMove      bool
+	cursorOnly  bool // explicit navigation ignores a document's %cursor marker
+	immediate   bool // explicit toggles bypass the automatic save-refresh gap
+	navigation  uint64
+	overrides   map[string]string
+	reuse       bool
+	hash        [sha256.Size]byte
 }
 type previewResult struct {
+	anchor     *latexpdf.PDFAnchor
 	request    previewRequest
 	source     *preview.Snapshot
 	pdf        []byte
@@ -125,7 +130,23 @@ func renderPreview(request previewRequest, stop <-chan struct{}) (result preview
 		return
 	default:
 	}
-	if request.reuse && request.hash == result.source.Hash {
+	if request.reuse && !request.forceRender && request.hash == result.source.Hash {
+		if len(request.annotations) == 0 {
+			return
+		}
+	}
+	if len(request.annotations) > 0 {
+		if request.web {
+			body, count, err := preview.AnnotatedHTML(result.source, request.annotations)
+			result.mathErrors, result.err = count, err
+			result.html = &api.HTMLDocument{HTML: body, CSS: preview.HTMLStyle + preview.AnnotationStyle, Anchor: request.focusAnchor}
+		} else {
+			document, count, err := preview.RenderAnnotations(result.source, request.annotations)
+			result.pdf, result.mathErrors, result.err = document.PDF, count, err
+			if anchor, ok := document.Anchors[request.focusAnchor]; ok {
+				result.anchor = &anchor
+			}
+		}
 		return
 	}
 	if request.web {
@@ -146,6 +167,7 @@ func quotePreview(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\
 func (p *editorPreview) queue(e *Editor, noMove bool, overrides map[string]string) {
 	p.serial++
 	request := &previewRequest{web: p.options.web, id: p.serial, path: p.path, line: e.buffer().row(e.pos()) + 1, noMove: noMove, navigation: p.navigation, overrides: overrides, reuse: p.published}
+	e.aiAnnotate(request)
 	if p.source != nil {
 		request.hash = p.source.Hash
 	}
@@ -155,6 +177,9 @@ func (p *editorPreview) queue(e *Editor, noMove bool, overrides map[string]strin
 
 func (p *editorPreview) observe(e *Editor) {
 	path := e.buffer().meta.Path
+	if e.ai != nil && e.ai.viewDocument != "" {
+		path = e.ai.viewDocument
+	}
 	if !preview.Supported(path) && !(p.options.web && preview.WebSupported(path)) {
 		path = ""
 	}
@@ -174,9 +199,9 @@ func (p *editorPreview) observe(e *Editor) {
 	if path != "" {
 		var overrides map[string]string
 		b := e.buffer()
-		if !b.dirty() {
+		if b.meta.Path == path && !b.dirty() {
 			overrides = map[string]string{path: previewText(b)}
-		} else if !b.meta.Existed {
+		} else if b.meta.Path == path && !b.meta.Existed {
 			overrides = map[string]string{path: ""}
 		}
 		p.queue(e, false, overrides)
@@ -353,12 +378,18 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 		p.source = result.source
 		p.published = true
 		if !result.request.noMove && result.request.navigation == p.navigation {
-			position := result.source.Position(result.request.path, result.request.line)
-			if result.source.CursorLine > 0 && !result.request.cursorOnly {
-				position = result.source.ExpandedPosition(result.source.CursorLine)
-			}
-			if err := p.command(fmt.Sprintf("region secondary position %d", position)); err != nil {
-				return err
+			if result.anchor != nil {
+				if err := p.command(fmt.Sprintf("region secondary page-position %d %d", result.anchor.Page, result.anchor.Position)); err != nil {
+					return err
+				}
+			} else if result.request.focusAnchor == "" {
+				position := result.source.Position(result.request.path, result.request.line)
+				if result.source.CursorLine > 0 && !result.request.cursorOnly {
+					position = result.source.ExpandedPosition(result.source.CursorLine)
+				}
+				if err := p.command(fmt.Sprintf("region secondary position %d", position)); err != nil {
+					return err
+				}
 			}
 		}
 		if result.mathErrors > 0 {

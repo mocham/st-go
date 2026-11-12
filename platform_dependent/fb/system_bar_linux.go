@@ -74,6 +74,8 @@ type systemBar struct {
 	brightnessUpLeft      int
 	screenshotLeft        int
 	screenshotRight       int
+	recordingLeft         int
+	recordingRight        int
 	clipboardLeft         int
 	clipboardRight        int
 	newTerminalTab        func()
@@ -148,6 +150,7 @@ func (d *Driver) refreshSystemBar(now time.Time) bool {
 	brightnessKnown, brightnessOptimistic := b.brightnessValid, b.brightnessOptimistic
 	overrideMode, overrideValid := b.audioMode, b.audioModeValid
 	screenshotActive := d.screenshot.stage != screenshotIdle
+	recordingLabel := d.recordingLabelLocked()
 	showNewTerminal := b.newTerminalTab != nil
 	poll := !now.Before(b.nextPoll)
 	status := b.cachedStatus
@@ -199,6 +202,10 @@ func (d *Driver) refreshSystemBar(now time.Time) bool {
 		text += string([]byte{systemBarScreenshotIcon})
 	}
 	screenshotRight := len(text)
+	text += "  "
+	recordingLeft := len(text)
+	text += recordingLabel
+	recordingRight := len(text)
 	newTerminalLeft, newTerminalRight := -1, -1
 	if showNewTerminal {
 		text += "  "
@@ -241,6 +248,10 @@ func (d *Driver) refreshSystemBar(now time.Time) bool {
 		b.cachedStatus, b.nextPoll = status, now.Add(systemBarInterval)
 	}
 	b.nextRefresh = b.nextPoll
+	// Encoding can finish while sysfs/mixer reads run outside the lock.
+	if recordingLabel != d.recordingLabelLocked() {
+		b.nextRefresh = time.Time{}
+	}
 	if b.text == text {
 		d.mu.Unlock()
 		return false
@@ -275,6 +286,8 @@ func (d *Driver) refreshSystemBar(now time.Time) bool {
 	}
 	b.screenshotLeft = b.textLeft + screenshotLeft*systemBarFontCellWidth
 	b.screenshotRight = b.textLeft + screenshotRight*systemBarFontCellWidth
+	b.recordingLeft = b.textLeft + recordingLeft*systemBarFontCellWidth
+	b.recordingRight = b.textLeft + recordingRight*systemBarFontCellWidth
 	if clipboardLeft >= 0 {
 		b.clipboardLeft = b.textLeft + clipboardLeft*systemBarFontCellWidth
 		b.clipboardRight = b.textLeft + clipboardRight*systemBarFontCellWidth
@@ -333,6 +346,12 @@ func (d *Driver) systemBarClick(x, y int) {
 		d.screenshot.first = image.Point{}
 		b.nextRefresh = time.Time{}
 		d.mu.Unlock()
+		d.refreshSystemBar(time.Now())
+		return
+	}
+	if b.recordingLeft >= 0 && point.X >= b.recordingLeft && point.X < b.recordingRight {
+		d.mu.Unlock()
+		d.toggleRecording()
 		d.refreshSystemBar(time.Now())
 		return
 	}

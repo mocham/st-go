@@ -75,6 +75,7 @@ type RegionOverlayHooks interface {
 type RegionNavigation struct {
 	Kind  string
 	Value int
+	Page  int // one-based page for page-position; Value is a page-relative millionth
 }
 
 // RegionNavigationHooks is optional, keeping the base region API compatible.
@@ -299,6 +300,20 @@ func (t *Term) dslRegion(args []string) error {
 			return fmt.Errorf("region navigation is not supported by this frontend")
 		}
 		return navigation.NavigateRegion(id, RegionNavigation{Kind: "fit-" + args[2]})
+	case "page-position":
+		if len(args) != 4 {
+			return fmt.Errorf("page-position requires a page and position")
+		}
+		page, e1 := strconv.Atoi(args[2])
+		value, e2 := strconv.Atoi(args[3])
+		if e1 != nil || e2 != nil || page < 1 || page > limits.PreviewPages || value < 0 || value > 1000000 {
+			return fmt.Errorf("invalid page-position")
+		}
+		navigation, ok := t.hooks.(RegionNavigationHooks)
+		if !ok {
+			return fmt.Errorf("region navigation unavailable")
+		}
+		return navigation.NavigateRegion(id, RegionNavigation{Kind: "page-position", Page: page, Value: value})
 	case "scroll", "seek", "position", "page", "pages", "view", "zoom", "zoomstep", "pan":
 		if len(args) != 3 {
 			return fmt.Errorf("region navigation requires one value")

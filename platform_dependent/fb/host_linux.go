@@ -85,6 +85,8 @@ type Driver struct {
 	lastScan                time.Time
 	buttonCounts            [12]int
 	screenshot              screenshotState
+	recording               *screenRecording
+	recordingFailed         bool
 	mouseFailures           map[string]string
 	nativeJobs              chan nativeVideoJob
 	nativeBusy              bool
@@ -315,6 +317,7 @@ func (d *Driver) Close() {
 }
 
 func (d *Driver) cleanup() {
+	d.finishRecording()
 	d.inputWake.close()
 	if d.clipboardSync != nil {
 		d.clipboardSync.Close()

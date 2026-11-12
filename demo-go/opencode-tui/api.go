@@ -131,6 +131,7 @@ type messageAttachment struct {
 }
 
 type apiMessage struct {
+	Outcome  string              `json:"outcome"`
 	ID       string              `json:"id"`
 	Type     string              `json:"type"`
 	Text     string              `json:"text"`
@@ -502,6 +503,7 @@ var streamTypes = []string{
 	"session.created", "session.deleted", "session.moved", "session.archived", "session.unarchived",
 	"session.inbox.enqueued", "session.inbox.delivered", "session.inbox.cancelled",
 	"session.text.started", "session.text.delta", "session.text.ended",
+	"session.reasoning.started", "session.reasoning.delta", "session.reasoning.ended",
 	"session.execution.started", "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted",
 	"permission.asked", "permission.replied", "session.renamed", "session.model.selected",
 	"session.step.started", "session.step.ended", "session.step.failed", "session.compaction.ended", "session.revert.staged", "session.revert.cleared", "session.revert.committed", "session.status",

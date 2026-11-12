@@ -28,7 +28,16 @@ needed; EOF before a response usually indicates an address, port, or HTTP/HTTPS
 mismatch. Browser sign-in is not inherited by this client. For containers, use
 a reachable server address rather than another container's loopback address.
 
+## Govim writing
+
+For govim paragraph prediction, run both applications in the same terminal
+instance and set `--ai-project /local/project` when needed. See the
+[AI writing workflow](../govim/AI-WRITING.md). Writing requests remain bound to
+their document conversation while you browse other sessions. Exposed reasoning
+is rendered in message order and restored from saved history after reconnects.
+
 ## Rich responses
+
 
 Native previews use selectable-text PDFs and vector math. Browser mode skips
 PDF generation and sends HTML/SVG to st-web:

@@ -105,7 +105,7 @@ func (application *app) recordSessionActivity(event apiEvent, id string) {
 	}
 	busy := false
 	switch event.Type {
-	case "session.execution.started", "session.step.started", "session.text.started":
+	case "session.execution.started", "session.step.started", "session.text.started", "session.reasoning.started":
 		busy = true
 	case "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted":
 	case "session.status":

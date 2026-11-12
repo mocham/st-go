@@ -68,10 +68,42 @@ type renderedLatex = Result
 // PDFResult contains PDF bytes and the diagnostics/navigation metadata from
 // the same render. Section page numbers refer to pages in PDF.
 type PDFResult struct {
+	Anchors              map[string]PDFAnchor
 	PDF                  []byte
 	MathErrors           int
 	MathErrorExpressions []string
 	Sections             []Section
+}
+
+// PDFAnchor locates a rendered element within its cropped page.
+type PDFAnchor struct {
+	Page     int
+	Position int
+	Regions  []PDFRegion // per-page bounding rectangles, in millimetres from the top left
+}
+
+type PDFRegion struct {
+	Page                int
+	X, Y, Width, Height float64
+}
+
+// RenderAnnotatedHTMLPDF renders trusted semantic HTML produced by a caller's
+// annotation pass, retaining the native selectable-text/vector-math pipeline.
+func (renderer *Renderer) RenderAnnotatedHTMLPDF(document Document, body string, options PDFOptions) (PDFResult, error) {
+	renderer.ensureInitialized()
+	key := PDFCacheKeyWithOptions(document, options) + "-annotations-" + sourceCacheKey(body)
+	pdf, _, err := renderer.pdf.render(document, template.HTML(body), nil, key, options)
+	if err != nil {
+		return PDFResult{}, err
+	}
+	anchors := make(map[string]PDFAnchor)
+	if cached, ok := renderer.pdf.documents.Load(key); ok {
+		for id, anchor := range cached.anchors {
+			anchor.Regions = append([]PDFRegion(nil), anchor.Regions...)
+			anchors[id] = anchor
+		}
+	}
+	return PDFResult{PDF: pdf, Anchors: anchors}, nil
 }
 
 // SourcePage is one structurally paginated LaTeX body fragment.

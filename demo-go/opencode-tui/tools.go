@@ -8,17 +8,27 @@ import (
 )
 
 type responsePart struct {
-	ordinal int
-	toolID  string
+	ordinal   int
+	toolID    string
+	reasoning bool
 }
 
 func (message *chatMessage) addTextPart(ordinal int) {
 	for _, part := range message.Order {
-		if part.toolID == "" && part.ordinal == ordinal {
+		if part.toolID == "" && !part.reasoning && part.ordinal == ordinal {
 			return
 		}
 	}
 	message.Order = append(message.Order, responsePart{ordinal: ordinal})
+}
+
+func (message *chatMessage) addReasoningPart(ordinal int) {
+	for _, part := range message.Order {
+		if part.reasoning && part.ordinal == ordinal {
+			return
+		}
+	}
+	message.Order = append(message.Order, responsePart{ordinal: ordinal, reasoning: true})
 }
 
 func rebuildMessage(message *chatMessage) {
@@ -27,7 +37,7 @@ func rebuildMessage(message *chatMessage) {
 	for ordinal := range message.Parts {
 		found := false
 		for _, part := range message.Order {
-			found = found || part.toolID == "" && part.ordinal == ordinal
+			found = found || part.toolID == "" && !part.reasoning && part.ordinal == ordinal
 		}
 		if !found {
 			missing = append(missing, ordinal)
@@ -40,6 +50,15 @@ func rebuildMessage(message *chatMessage) {
 	var text, rich, auxiliary []string
 	for _, part := range message.Order {
 		value := message.Parts[part.ordinal]
+		if part.reasoning {
+			value = message.Reasoning[part.ordinal]
+			if value != "" {
+				value = "### Reasoning\n\n" + safeText(value)
+				text = append(text, value)
+				rich = append(rich, value)
+			}
+			continue
+		}
 		if part.toolID != "" {
 			value = ""
 			for _, tool := range message.Tools {

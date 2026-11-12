@@ -595,6 +595,8 @@ func (t *Term) dcs() {
 			t.dslNativeAudio(args[1:])
 		case "tab-spawn":
 			t.dslTabSpawn(args[1:])
+		case "app-bus":
+			t.dslAppBus(args[1:])
 		case "clipboard-sync":
 			t.dslClipboardSync(args[1:])
 		case "refresh":

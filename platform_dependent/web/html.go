@@ -87,7 +87,7 @@ func htmlDocumentID(doc *api.HTMLDocument) string {
 	var size [8]byte
 	binary.BigEndian.PutUint64(size[:], uint64(len(doc.HTML)))
 	h.Write(size[:])
-	for _, text := range []string{doc.HTML, doc.CSS} {
+	for _, text := range []string{doc.HTML, doc.CSS, "\x00" + doc.Anchor} {
 		for len(text) > 0 {
 			n := min(len(text), 32<<10)
 			io.WriteString(h, text[:n])

@@ -105,6 +105,8 @@ func (writer *sessionArchiveWriter) message(raw json.RawMessage) error {
 		writer.content.WriteString("## Assistant\n\n")
 		for _, part := range message.Content {
 			switch part.Type {
+			case "reasoning":
+				writer.content.WriteString("## Reasoning\n\n" + part.Text + "\n\n")
 			case "text":
 				writer.content.WriteString(part.Text + "\n\n")
 			case "tool":

@@ -198,6 +198,7 @@
               }
             });
             scrollHTML(pane);
+            if (doc.anchor) content.getElementById(doc.anchor)?.scrollIntoView({block: "start"});
           };
           const css = (doc.css || "").replace(/<\/style/gi, "<\\/style");
           pane.element.srcdoc = '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; font-src data:; form-action \'none\'; base-uri \'none\'"><style>html{color-scheme:light}body{margin:16px;overflow-wrap:anywhere}img,svg{max-width:100%}pre{white-space:pre-wrap}' + css + '</style>' + doc.html;

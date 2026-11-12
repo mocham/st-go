@@ -52,6 +52,7 @@ type Buffer struct {
 	lines                                         []int
 	byteSize                                      int
 	version, savedVersion, nextVersion, nextGroup uint64
+	syncRevision                                  uint64 // increases on edits, undo and redo; never a history position
 	undo, redo                                    []historyEntry
 	journal                                       *Journal
 	readonly                                      bool
@@ -361,6 +362,7 @@ func (b *Buffer) append(record journalRecord) (bool, error) {
 }
 
 func (b *Buffer) apply(record journalRecord, result []rune) {
+	b.syncRevision++
 	b.invalidateSyntax(record)
 	previous := b.version
 	previousEmpty := b.placeholder

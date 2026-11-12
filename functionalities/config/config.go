@@ -23,6 +23,7 @@ type Config struct {
 	NativeVideoToken   string `json:"-"`
 	NativeAudioToken   string `json:"-"`
 	TabSpawnToken      string `json:"-"`
+	AppBusToken        string `json:"-"`
 	ClipboardSyncToken string `json:"-"`
 
 	Font                string   `json:"font"`

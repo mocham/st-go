@@ -126,6 +126,8 @@ type Editor struct {
 	fullRedraw                       bool
 	syntax                           *syntaxHighlighter
 	preview                          *editorPreview
+	ai                               *editorAI
+	aiProject, aiChannel             string
 	clip                             clipboard
 	clipboardError                   string
 	clipboardRead                    *clipboardRead
@@ -386,6 +388,10 @@ func firstNonblank(b *Buffer, row int) int {
 }
 
 func (e *Editor) Feed(event keyEvent) {
+	if event.Bus != "" {
+		e.aiReceive(event.Bus)
+		return
+	}
 	if e.quit {
 		return
 	}
@@ -470,6 +476,9 @@ func (e *Editor) Feed(event keyEvent) {
 		}
 	}
 	if len(e.pager) > 0 {
+		if e.aiPickerKey(key) {
+			return
+		}
 		e.pager = nil
 		return
 	}
@@ -1060,6 +1069,7 @@ func (e *Editor) playRegisterMacro(value register, count int) {
 }
 
 func (e *Editor) tick(now time.Time) {
+	e.aiTick(now)
 	e.pollCJK()
 	e.pollPrompt()
 	if read := e.clipboardRead; read != nil && !now.Before(read.deadline) {
@@ -1073,12 +1083,19 @@ func (e *Editor) tick(now time.Time) {
 	}
 }
 func (e *Editor) close(normalExit bool) error {
+	var first error
+	if e.ai != nil {
+		first = e.aiSaveDraft()
+		_ = e.ai.bus.Close()
+		if err := e.ai.store.db.Close(); first == nil {
+			first = err
+		}
+	}
 	e.closeCJK()
 	if e.promptEditor != nil {
 		e.promptEditor.Close()
 	}
 	e.syntax.close()
-	var first error
 	for _, b := range e.buffers {
 		if b.journal != nil {
 			err := b.journal.Close(normalExit && (e.discard || !b.dirty()))

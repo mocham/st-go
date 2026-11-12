@@ -45,7 +45,14 @@ returns focus to the editor. Split, save hooks, source navigation, and TOC remai
 available. Large documents use atomic chunked transfers, up to 64 MiB.
 X11/framebuffer discard HTML, so omit `--web` on those hosts.
 
+## AI writing
+
+For project-scoped paragraph prediction, adaptation, and insertion with
+opencode-tui, see [AI writing](AI-WRITING.md). Start with `:AINext`, edit with
+`:AIEdit`, and accept with `:AIIns`. The pending box uses the existing preview.
+
 ## Recovery and saving
+
 
 Edits, undo, and redo are journaled before changing the buffer. Journals are
 private and locked, normally `.FILENAME.govim.swp` beside the file, with

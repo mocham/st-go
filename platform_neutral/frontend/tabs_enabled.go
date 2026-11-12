@@ -199,6 +199,7 @@ func (m *terminalTabs) createTab(origin *Terminal, request api.TabSpawnRequest) 
 		return fail(err)
 	}
 	child.tabs = m
+	child.appBroker = origin.appBroker
 	title := request.Title
 	if title == "" {
 		title = filepath.Base(request.Command[0])

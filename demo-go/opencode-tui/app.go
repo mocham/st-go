@@ -25,6 +25,7 @@ type chatMessage struct {
 	Rich         string
 	Aux          string
 	Parts        map[int]string
+	Reasoning    map[int]string
 	PromptID     string
 	Pending      bool
 	Failed       bool
@@ -133,6 +134,7 @@ type app struct {
 	fileSelection             *fileSelection
 	fileSequence              uint64
 	fileCancel                context.CancelFunc
+	writer                    *writingBridge
 }
 
 func newApp(client *apiClient, session sessionInfo, messages []apiMessage, permissions []permissionRequest, output io.Writer, fd int, rich *richPreview) *app {
@@ -162,9 +164,12 @@ func convertMessages(messages []apiMessage) []chatMessage {
 			promptID = message.ID
 			converted = append(converted, chatMessage{ID: message.ID, Role: "user", Text: message.Text, Rich: message.Text, Acknowledged: true, Files: message.Files})
 		case "assistant":
-			item := chatMessage{ID: message.ID, Role: "assistant", PromptID: promptID, Parts: make(map[int]string), ChangedFiles: message.Snapshot.Files}
+			item := chatMessage{ID: message.ID, Role: "assistant", PromptID: promptID, Parts: make(map[int]string), Reasoning: make(map[int]string), ChangedFiles: message.Snapshot.Files}
 			for ordinal, content := range message.Content {
 				switch content.Type {
+				case "reasoning":
+					item.Reasoning[ordinal] = content.Text
+					item.Order = append(item.Order, responsePart{ordinal: ordinal, reasoning: true})
 				case "text":
 					item.Parts[ordinal] = content.Text
 					item.Order = append(item.Order, responsePart{ordinal: ordinal})
@@ -502,6 +507,20 @@ func (application *app) applyEvent(event apiEvent) {
 				application.requestSync()
 			}
 		}
+	case "session.reasoning.started", "session.reasoning.delta", "session.reasoning.ended":
+		message := application.ensureAssistant(data.AssistantMessageID)
+		if message.Reasoning == nil {
+			message.Reasoning = make(map[int]string)
+		}
+		message.addReasoningPart(data.Ordinal)
+		if event.Type == "session.reasoning.delta" {
+			message.Reasoning[data.Ordinal] += data.Delta
+		}
+		if event.Type == "session.reasoning.ended" {
+			message.Reasoning[data.Ordinal] = data.Text
+		}
+		application.busy = true
+		application.rebuildAssistant(message)
 	case "session.text.started":
 		message := application.ensureAssistant(data.AssistantMessageID)
 		message.addTextPart(data.Ordinal)
@@ -785,6 +804,12 @@ func (application *app) interrupt() {
 }
 
 func (application *app) handleInput(event inputEvent) {
+	if event.bus != "" {
+		if application.writer != nil {
+			application.writer.receive(event.bus)
+		}
+		return
+	}
 	if event.err != "" {
 		application.status = event.err
 		application.dirty = true
@@ -996,6 +1021,9 @@ func (application *app) run() error {
 		application.status = "Terminal is too small for the rich pane; press F2 after resizing"
 	}
 	defer application.preview.close()
+	if application.writer != nil {
+		defer application.writer.close()
+	}
 	application.queuePreview()
 	application.startEventStream()
 	application.requestCatalog()
@@ -1026,6 +1054,9 @@ func (application *app) run() error {
 			}
 		}
 		now := time.Now()
+		if application.writer != nil {
+			application.writer.tick(now)
+		}
 		application.tickPicker(now)
 		application.tickConnection(now)
 		if !application.catalogRefresh.IsZero() && !now.Before(application.catalogRefresh) && !application.catalogLoading {

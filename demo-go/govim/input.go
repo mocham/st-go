@@ -13,6 +13,7 @@ type mouseEvent struct {
 	release      bool
 }
 type keyEvent struct {
+	Bus       string
 	Key       string
 	Paste     string
 	Mouse     *mouseEvent
@@ -41,7 +42,9 @@ func (p *inputParser) feed(data []byte, now time.Time, emit func(keyEvent)) {
 			p.pending = p.pending[1:]
 			if b == 0x18 || b == 0x1a || b == 7 || p.dcsEscape && b == '\\' {
 				if b == '\\' && !p.discardDCS {
-					if event := parsePreviewEvent(string(p.dcs)); event != nil {
+					if strings.HasPrefix(string(p.dcs), "app-bus ") {
+						emit(keyEvent{Bus: string(p.dcs)})
+					} else if event := parsePreviewEvent(string(p.dcs)); event != nil {
 						emit(keyEvent{Preview: event})
 					}
 				}

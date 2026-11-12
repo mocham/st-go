@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"st-go/tui/writing"
 	"strings"
 )
 
@@ -18,6 +19,8 @@ type options struct {
 	noPreview    bool
 	web          bool
 	directory    string
+	aiProject    string
+	aiChannel    string
 }
 
 func parseOptions(args []string) (options, error) {
@@ -29,6 +32,8 @@ func parseOptions(args []string) (options, error) {
 	flags.IntVar(&result.previewWidth, "preview-width", 58, "rich response pane width percent")
 	flags.BoolVar(&result.noPreview, "no-preview", false, "disable the st-go rich response pane")
 	flags.BoolVar(&result.web, "web", false, "render rich responses as browser-native HTML in st-web")
+	flags.StringVar(&result.aiProject, "ai-project", "", "local govim project (defaults to local working directory)")
+	flags.StringVar(&result.aiChannel, "ai-channel", "", "terminal writing channel (defaults to project identity)")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: opencode-tui --server URL [options] [DIRECTORY]")
 		fmt.Fprintln(flags.Output(), "\nMinimal OpenCode V2 TUI with an st-go Markdown/LaTeX response pane.")
@@ -128,6 +133,30 @@ func run(args []string) int {
 	application := newApp(client, *snapshot.session, snapshot.messages, snapshot.permissions, os.Stdout, int(os.Stdin.Fd()), rich)
 	application.historyCursor, application.busy = snapshot.messageCursor, snapshot.busy
 	application.replaceSessionActivity(snapshot.active)
+	if token := os.Getenv("ST_GO_APPBUS_TOKEN"); token != "" {
+		project := configuration.aiProject
+		if project == "" {
+			project, _ = os.Getwd()
+			if info, statErr := os.Stat(configuration.directory); statErr == nil && info.IsDir() {
+				project = configuration.directory
+			}
+			project = writing.Root(project)
+		} else {
+			project, err = filepath.Abs(project)
+			if err == nil {
+				project, err = filepath.EvalSymlinks(project)
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "opencode-tui:", err)
+				return 1
+			}
+		}
+		application.writer, err = newWritingBridge(application, token, project, configuration.aiChannel)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "opencode-tui:", err)
+			return 1
+		}
+	}
 	if err := application.run(); err != nil {
 		fmt.Fprintln(os.Stderr, "opencode-tui:", err)
 		return 1

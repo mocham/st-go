@@ -29,6 +29,7 @@ func serveTerminalSessions(service api.SessionService, cfg *config.Config, ratio
 	if len(command) != 0 {
 		initial.Command = command
 	}
+	broker := newAppBroker()
 	factory := func(host api.Host, request api.TabSpawnRequest, spawn api.SessionSpawn) (func(), error) {
 		local := *cfg
 		local.GeometryToken, local.NativeAudioToken = newGeometryToken(), newGeometryToken()
@@ -48,6 +49,7 @@ func serveTerminalSessions(service api.SessionService, cfg *config.Config, ratio
 		if local.TabSpawnToken != "" {
 			t.tabs = &serviceTabs{spawnRequest: spawn}
 		}
+		t.appBroker = broker
 		title := request.Title
 		if title == "" {
 			title = filepath.Base(request.Command[0])

@@ -108,7 +108,7 @@ func TestSystemBarKeyboardNewTerminalAndPointerFocus(t *testing.T) {
 		}
 		child.FocusWidget()
 	})
-	feed(56, 11, 11|128, 56|128, 15, 15|128, 28, 28|128) // Alt+0, Tab, Enter
+	feed(56, 11, 11|128, 56|128, 15, 15|128, 15, 15|128, 28, 28|128) // Alt+0, Tab past screenshot/recording, Enter
 	b := d.systemBar
 	if child == nil {
 		t.Fatal("Enter did not activate the new-terminal button")

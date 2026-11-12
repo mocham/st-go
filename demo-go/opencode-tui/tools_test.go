@@ -17,6 +17,22 @@ func toolEvent(t *testing.T, application *app, kind string, fields map[string]an
 	application.applyEvent(apiEvent{Type: kind, Data: data})
 }
 
+func TestReasoningStreamsAndRestoresInOrder(t *testing.T) {
+	application, _ := promptTestApp(t, []apiMessage{{ID: "msg_p", Type: "user", Text: "Write"}}, true)
+	toolEvent(t, application, "session.reasoning.started", map[string]any{"ordinal": 0})
+	toolEvent(t, application, "session.reasoning.delta", map[string]any{"ordinal": 0, "delta": "Exposed thought"})
+	toolEvent(t, application, "session.reasoning.ended", map[string]any{"ordinal": 0, "text": "Exposed thought."})
+	toolEvent(t, application, "session.text.delta", map[string]any{"ordinal": 1, "delta": "Final paragraph."})
+	response := application.selectedResponse()
+	if strings.Count(response, "Exposed thought.") != 1 || strings.Index(response, "Exposed thought.") > strings.Index(response, "Final paragraph.") {
+		t.Fatalf("incorrect live reasoning: %s", response)
+	}
+	saved := convertMessages([]apiMessage{{ID: "msg_p", Type: "user", Text: "Write"}, {ID: "msg_a", Type: "assistant", Content: []messageContent{{Type: "reasoning", Text: "Exposed thought."}, {Type: "text", Text: "Final paragraph."}}}})
+	if saved[1].Rich != application.messages[1].Rich {
+		t.Fatalf("history differs: %q / %q", saved[1].Rich, application.messages[1].Rich)
+	}
+}
+
 func TestToolsStreamCommandsFilesAndSavedOutputInMessageOrder(t *testing.T) {
 	application, _ := promptTestApp(t, []apiMessage{{ID: "msg_p", Type: "user", Text: "Do work"}}, true)
 	toolEvent(t, application, "session.text.delta", map[string]any{"ordinal": 0, "delta": "Before"})

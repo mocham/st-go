@@ -24,7 +24,7 @@ const (
 	cellWidth  = 21
 	cellHeight = 35
 	baseline   = 28
-	alphabet   = " %?-0123456789:ABDEKPRSTU"
+	alphabet   = " !%?-0123456789:ABCDEKOPRSTUV"
 )
 
 func main() {

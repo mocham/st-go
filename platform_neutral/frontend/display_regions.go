@@ -70,6 +70,7 @@ type regionSurface struct {
 	viewWidth             int
 	seekPosition          *int
 	seekPage              *int
+	seekPageY             int
 	zoom, pan             int // zoom percent of fit-width; zero means 100
 	imageMode             imageScaleMode
 	sourceWidth           int
@@ -409,6 +410,7 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 		}
 		surface.scrollY, surface.targetY = 0, 0
 		surface.seekPosition, surface.seekPage = nil, nil
+		surface.seekPageY = 0
 		surface.pan, surface.sourceWidth, surface.sourceHeight = 0, 0, 0
 		surface.dragging = false
 		surface.zoom = 100
@@ -428,6 +430,7 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 		surface.scrollY, surface.targetY = 0, 0
 		surface.seekPosition = nil
 		surface.seekPage = nil
+		surface.seekPageY = 0
 	}
 	surface.request = &request
 	surface.html = api.HTMLView{}
@@ -438,6 +441,7 @@ func (t *Terminal) openRegion(id term.RegionID, request term.RegionImage) error 
 	if initialPage {
 		page := request.Options.Page + 1
 		surface.seekPage = &page
+		surface.seekPageY = 0
 	}
 	t.queueRegionImage()
 	if len(surface.bitmap.pixels) == 0 {
@@ -489,6 +493,7 @@ func (t *Terminal) clearRegion(id term.RegionID) error {
 	surface.viewerPrevious = nil
 	surface.seekPosition = nil
 	surface.seekPage = nil
+	surface.seekPageY = 0
 	surface.loading, surface.scrollFailed = false, false
 	surface.dirty = true
 	t.requestRegionPaint()
@@ -799,9 +804,10 @@ func (t *Terminal) acceptRegionImage(job regionJob, bitmap regionBitmap, err err
 		}
 		if surface.seekPage != nil && len(bitmap.pageTops) > 1 {
 			page := clampInt(*surface.seekPage, 1, len(bitmap.pageTops)-1)
-			surface.scrollY = float64(bitmap.pageTops[page-1])
+			surface.scrollY = float64(bitmap.pageTops[page-1]) + float64(bitmap.pageTops[page]-bitmap.pageTops[page-1])*float64(surface.seekPageY)/1e6
 			surface.targetY = surface.scrollY
 			surface.seekPage = nil
+			surface.seekPageY = 0
 		}
 		surface.scrollY = max(0, min(surface.scrollY, maximum))
 		surface.targetY = max(0, min(surface.targetY, maximum))
@@ -1147,7 +1153,7 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 		}
 		t.zoomRegionImage(surface, event.Value)
 		return nil
-	case "page", "pages", "view", "zoom", "pan":
+	case "page", "pages", "page-position", "view", "zoom", "pan":
 		if !surface.scrollable() {
 			return fmt.Errorf("navigation requires a continuous document or image viewer")
 		}
@@ -1188,11 +1194,16 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 			if !t.reportRegionScrollEdge(id, surface, event.Value) {
 				t.scrollRegionPixels(float64(event.Value) * float64(t.secondaryPixels().Dy()) / 1e6)
 			}
-		case "page", "pages":
+		case "page", "pages", "page-position":
 			if !surface.request.Continuous {
 				return fmt.Errorf("page navigation requires a continuous PDF")
 			}
 			page := event.Value
+			fraction := 0
+			if event.Kind == "page-position" {
+				page = event.Page
+				fraction = clampInt(event.Value, 0, 1000000)
+			}
 			if event.Kind == "pages" {
 				page += surface.currentPage()
 			}
@@ -1202,10 +1213,11 @@ func (t *Terminal) navigateRegion(id term.RegionID, event term.RegionNavigation)
 			}
 			if surface.loading || len(surface.bitmap.pageTops) < 2 {
 				surface.seekPage = &page
+				surface.seekPageY = fraction
 				surface.seekPosition = nil
 			} else {
 				page = min(page, len(surface.bitmap.pageTops)-1)
-				surface.scrollY = min(float64(surface.bitmap.pageTops[page-1]), t.regionScrollMaximum())
+				surface.scrollY = min(float64(surface.bitmap.pageTops[page-1])+float64(surface.bitmap.pageTops[page]-surface.bitmap.pageTops[page-1])*float64(fraction)/1e6, t.regionScrollMaximum())
 				surface.targetY = surface.scrollY
 				surface.dirty = true
 				t.queueRegionScroll()

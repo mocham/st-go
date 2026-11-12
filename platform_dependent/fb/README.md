@@ -60,6 +60,7 @@ brightness controls. It also offers:
 
 - **Terminal-plus:** open a focused shell tab when tabs are enabled.
 - **Camera:** select two opposite corners and save a crop to `/tmp/screenshot.png`.
+- **REC / STOP:** start or stop screen recording to `/tmp/record.mp4`.
 - **S:** toggle shared clipboard synchronization; `?` means storage is unavailable.
 
 Volume buttons adjust hardware playback volume; clicking the output selector
@@ -70,6 +71,14 @@ Brightness controls use login1 through `dbus-send` when available.
 Tabs share the bottom band with the bar, or sit above it on narrow screens.
 Clipboard/PRIMARY is process-local unless synchronization is enabled. Desktop
 window placement/collapse requests are unsupported.
+
+Recording requires `ffmpeg` on `PATH` with the `libx264` encoder. It captures the
+full composed screen, including previews, system bar, caret, and pointer, as a
+30 FPS H.264 MP4 without audio. **SAVE** indicates finalization; **REC!** indicates
+an encoder/save error (details in the st-go diagnostic log). Clicking REC again
+starts a new recording, replacing the previous file only after a successful save.
+Normal exit also finalizes an active recording. While another VT or the native
+video player owns the display, the recording holds the last st-fb frame.
 
 ## VT ownership and shutdown
 

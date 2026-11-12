@@ -95,6 +95,14 @@ func (d *Driver) screenshotImageLocked(bounds image.Rectangle) *image.RGBA {
 		return nil
 	}
 	shot := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	d.copyScreenshotLocked(shot, bounds)
+	return shot
+}
+
+// Reuse the destination for screen recording instead of allocating each frame.
+// Caller holds d.mu; bounds is clipped to the screen and matches shot's size.
+func (d *Driver) copyScreenshotLocked(shot *image.RGBA, bounds image.Rectangle) {
+	l := d.screen.layout
 	copyScreenshotLayer(shot, bounds, image.Rect(0, 0, l.width, l.height), d.pixels, l.width)
 	for _, surface := range d.surfaces {
 		if !surface.hidden && surface.kind != api.BarWidget {
@@ -111,7 +119,6 @@ func (d *Driver) screenshotImageLocked(bounds image.Rectangle) *image.RGBA {
 			copyScreenshotLayer(shot, bounds, surface.bounds, surface.pixels, surface.bounds.Dx())
 		}
 	}
-	return shot
 }
 
 func copyScreenshotLayer(destination *image.RGBA, crop, layer image.Rectangle, pixels []uint32, stride int) {

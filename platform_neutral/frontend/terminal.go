@@ -43,6 +43,7 @@ type Terminal struct {
 	buttons                           uint
 	session                           *ptySession
 	tabs                              terminalTabManager
+	appBroker                         *appBroker
 	sessionCleanup                    func(error)
 	cols, rows, windowCols            int
 	cw, ch, baseline, borderpx        int
@@ -170,8 +171,10 @@ func NewTerminalWidget(cfg *config.Config, widget api.Widget, ratio float64) (*T
 }
 
 func newTerminalState(cfg *config.Config, ratio float64, title string) *Terminal {
+	cfg.AppBusToken = newGeometryToken()
 	return &Terminal{
-		cfg: cfg, cols: int(cfg.Cols), rows: int(cfg.Rows), ratio: ratio,
+		appBroker: newAppBroker(),
+		cfg:       cfg, cols: int(cfg.Cols), rows: int(cfg.Rows), ratio: ratio,
 		cw: max(1, int(float64(cfg.GlyphWidth)*ratio)), ch: max(1, int(float64(cfg.GlyphHeight)*ratio)),
 		baseline: int(float64(cfg.GlyphBaseline) * ratio), borderpx: cfg.Borderpx,
 		title: title, iconTitle: title,

@@ -41,6 +41,8 @@ func run(args []string) (code int) {
 	flags.DurationVar(&options.Interval, "sync-interval", options.Interval, "fsync changed journals at this interval, even during continuous typing")
 	flags.IntVar(&options.Bytes, "sync-bytes", options.Bytes, "fsync after this many additional journal bytes")
 	var commands commandsFlag
+	aiProject := flags.String("ai-project", "", "AI history project root (default: nearest project marker)")
+	aiChannel := flags.String("ai-channel", "", "terminal AI broadcast channel (default: project identity)")
 	flags.Var(&commands, "c", "execute an Ex command on startup (repeatable)")
 	flags.Usage = func() {
 		fmt.Fprint(os.Stderr, "Usage: govim [options] [+LINE] [FILE ...]\n\nNative Go modal editor. Fixed preferences from TEST-ASSETS/vimrc0; no Vimscript.\nAll text changes are journaled before applying; :preserve forces fsync.\n\n")
@@ -84,6 +86,7 @@ func run(args []string) (code int) {
 		return listRecovery(options)
 	}
 	e := newEditor(options)
+	e.aiProject, e.aiChannel = *aiProject, *aiChannel
 	e.arguments = append([]string(nil), paths...)
 	var restore func()
 	defer func() {
@@ -367,6 +370,14 @@ PREVIEW: LaTeX/Markdown opens st-go's retained right panel automatically.
 Save to refresh; %cursor wins, otherwise follow the cursor saved with :w.
 :wnomove[!] refreshes without jumping. Wheel scrolls the preview locally.
 :Preview [LINE] / :PreviewScroll COUNT navigate manually. --no-preview disables.
+
+AI writing (govim + opencode-tui in tabs of one st):
+:AINext [instruction] creates a durable UUID paragraph placeholder.
+:AIEdit [UUID] adapts a prediction; :AIRefine instruction requests a revision.
+:AIIns [UUID] inserts as one undo operation; absent cursor marker opens a picker.
+:AIView / :AIReasoning / :AIRetry / :AICancel / :AIDismiss [UUID]
+:AIList lists proposals; :AIBack returns to source; :AIConnect shows the channel.
+History and immutable snapshots live in the project's .govim/ directory.
 :toggle seeks the disk preview to the cursor; :toggle! draws unsaved buffers
 and seeks there instead. Neither writes files; both override %cursor.
 Normal Shift-Tab toggles the same panel between preview and source TOC.

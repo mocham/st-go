@@ -3,8 +3,9 @@ package api
 // HTMLDocument is immutable after publication. It is presentation content, not
 // a terminal emulator or a script executing in the host page.
 type HTMLDocument struct {
-	HTML string `json:"html"`
-	CSS  string `json:"css,omitempty"`
+	HTML   string `json:"html"`
+	CSS    string `json:"css,omitempty"`
+	Anchor string `json:"anchor,omitempty"` // scroll to this element after publication
 }
 
 // HTMLView retains document/navigation separately so resizing and tab switches
