@@ -45,6 +45,9 @@ type pickerResult struct {
 func (application *app) slashCommand(text string) bool {
 	command, query, _ := strings.Cut(text, " ")
 	switch command {
+	case "/export":
+		application.exportSession(application.session.ID, strings.TrimSpace(query))
+		return true
 	case "/sessions", "/models", "/variants":
 		application.openPicker(strings.TrimPrefix(command, "/"), strings.TrimSpace(query))
 		return true
@@ -370,6 +373,9 @@ func (application *app) tickPicker(now time.Time) {
 }
 
 func (application *app) activeInput() *readline.Line {
+	if application.exportDialog != nil {
+		return application.exportDialog.input
+	}
 	if application.deleteConfirmation != nil {
 		return application.deleteConfirmation.input
 	}

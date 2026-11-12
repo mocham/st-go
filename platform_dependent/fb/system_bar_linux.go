@@ -77,6 +77,11 @@ type systemBar struct {
 	newTerminalTab        func()
 	newTerminalLeft       int
 	newTerminalRight      int
+	focusWindow           api.WindowFocus
+	previousFocus         api.Widget
+	focused               bool
+	focusedControl        systemBarControl
+	focusBounds           image.Rectangle
 }
 
 func (d *Driver) BindNewTerminalTab(handler func()) {
@@ -108,13 +113,18 @@ func (d *Driver) AttachWidgets(container api.WidgetContainer) {
 	if err != nil {
 		return
 	}
-	widget.Bind(api.Callbacks{PointerPress: func(button byte, _ uint16, x, y int) {
-		if button == 1 {
-			d.systemBarClick(x, y)
-		}
-	}})
+	widget.Bind(api.Callbacks{
+		KeyPress: d.systemBarKeyPress,
+		Focus:    d.systemBarFocus,
+		PointerPress: func(button byte, _ uint16, x, y int) {
+			if button == 1 {
+				d.systemBarClick(x, y)
+			}
+		},
+	})
 	d.mu.Lock()
 	b.widget = widget
+	b.focusWindow, _ = container.(api.WindowFocus)
 	d.mu.Unlock()
 	widget.Upload(pixels, bounds.Dx(), 0, 0, bounds.Dx(), bounds.Dy())
 }
@@ -259,12 +269,7 @@ func (d *Driver) refreshSystemBar(now time.Time) {
 		b.newTerminalLeft = b.textLeft + newTerminalLeft*systemBarFontCellWidth
 		b.newTerminalRight = b.textLeft + newTerminalRight*systemBarFontCellWidth
 	}
-	b.pixels = make([]uint32, b.bounds.Dx()*b.bounds.Dy())
-	for y := b.bounds.Min.Y; y < b.bounds.Max.Y; y++ {
-		for x := b.bounds.Min.X; x < b.bounds.Max.X; x++ {
-			b.pixels[(y-b.bounds.Min.Y)*b.bounds.Dx()+x-b.bounds.Min.X], _ = b.pixel(x, y)
-		}
-	}
+	b.rasterize()
 	// If the battery disappears or its percentage shrinks, restore the uncovered
 	// area from retained application pixels. Inactive VTs retain damage without
 	// presenting; acquire composes the most recently cached bar on return.
@@ -440,6 +445,9 @@ func powerSupplyValue(path string) string {
 func (b *systemBar) pixel(x, y int) (uint32, bool) {
 	if b == nil || !image.Pt(x, y).In(b.bounds) {
 		return 0, false
+	}
+	if point := image.Pt(x, y); point.In(b.focusBounds) && !point.In(b.focusBounds.Inset(2)) {
+		return systemBarForeground, true
 	}
 	x, y = x-b.textLeft, y-b.bounds.Min.Y-systemBarPadding
 	if x >= 0 && y >= 0 && y < systemBarFontCellHeight {

@@ -166,6 +166,15 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 }
 
 func (d *Driver) Bind(c api.Callbacks) {
+	keyPress := c.KeyPress
+	c.KeyPress = func(key uint, modifiers uint16) {
+		if key == '0' && modifiers == altMask && d.focusSystemBar() {
+			return
+		}
+		if keyPress != nil {
+			keyPress(key, modifiers)
+		}
+	}
 	press, release := c.PointerPress, c.PointerRelease
 	c.PointerPress = func(button byte, modifiers uint16, x, y int) {
 		if d.screenshotPress(button, image.Pt(x, y)) {

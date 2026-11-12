@@ -113,6 +113,15 @@ func (w *Window) NewWidget(options api.WidgetOptions) (api.Widget, error) {
 	return h, nil
 }
 
+func (w *Window) FocusedWidget() api.Widget {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.focused == nil || w.focused.closed || !w.focused.visible {
+		return nil
+	}
+	return w.focused
+}
+
 func (w *Window) visible() []*Host {
 	w.mu.Lock()
 	defer w.mu.Unlock()

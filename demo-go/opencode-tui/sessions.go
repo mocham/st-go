@@ -16,7 +16,7 @@ type deleteConfirmation struct {
 }
 
 func (application *app) deleteSession(id string) {
-	if id == "" || application.deleting[id] || application.deleted[id] || application.deleteConfirmation != nil {
+	if id == "" || application.deleting[id] || application.deleted[id] || application.deleteConfirmation != nil || application.exportDialog != nil {
 		return
 	}
 	var target sessionInfo
@@ -36,7 +36,7 @@ func (application *app) deleteSession(id string) {
 	line := readline.New("Confirm: ", len("Confirm: "), 128)
 	line.DisableIME = true
 	application.deleteConfirmation = &deleteConfirmation{session: target, input: line}
-	application.sidebarHits, application.deleteHits = nil, nil
+	application.sidebarHits, application.deleteHits, application.exportHits = nil, nil, nil
 	application.dirty = true
 }
 
@@ -160,7 +160,10 @@ func (application *app) removeSession(id string) {
 	if confirmation := application.deleteConfirmation; confirmation != nil && application.deleted[confirmation.session.ID] {
 		application.closeDeleteConfirmation()
 	}
-	application.sidebarHits, application.deleteHits = nil, nil
+	if dialog := application.exportDialog; dialog != nil && application.deleted[dialog.session.ID] {
+		application.closeExportDialog()
+	}
+	application.sidebarHits, application.deleteHits, application.exportHits = nil, nil, nil
 	application.catalogSequence++ // An in-flight page must not resurrect a deletion.
 	application.catalogLoading = false
 	application.catalogRefresh = time.Now()

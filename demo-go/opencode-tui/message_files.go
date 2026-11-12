@@ -257,7 +257,7 @@ func (application *app) toggleFiles() {
 	}
 	application.filesMode = !application.filesMode
 	application.sidebarFocus = ""
-	application.sidebarHits, application.deleteHits = nil, nil
+	application.sidebarHits, application.deleteHits, application.exportHits = nil, nil, nil
 	application.queuePreview()
 	application.dirty = true
 }

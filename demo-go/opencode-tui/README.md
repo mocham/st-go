@@ -98,6 +98,30 @@ use arrows to select, Enter to apply, and Esc to cancel. Ctrl-R reloads.
 Model/variant selections persist on the server. Bracketed paste is supported;
 multiline pasted text is normalized to the single-line composer.
 
+## Export to GoLS
+
+Click **Export** on a session, or enter **`/export`** for the current session.
+Edit the proposed filepath and press Enter to save; Esc/Ctrl-C cancels. The
+default is `<workdir>/<first three words of the session title>.sqlite3`, keeping
+spaces between words. The composer and selected preview are preserved.
+
+The archive is written on the machine running `opencode-tui`. Relative paths
+are resolved against the session workdir; `~/` expands to the local home directory.
+For a remote workdir, enter an existing local directory. Existing files are never
+replaced; choose another filename to export again. `/export /path/to/file.sqlite3`
+prefills that path and still opens the filepath prompt.
+
+Exports include the full saved history, beyond the sidebar's loaded prompts,
+up to the latest recorded message when export starts. GoLS shows an overview
+and one Markdown document per prompt/response turn, preserving math, tables,
+inline tool summaries, and saved text output. Complete API message records,
+including embedded attachments and additional fields, are retained in the
+`session_messages` table. Referenced source files are not fetched into the archive.
+
+```sh
+./BINARIES/st -e ./BINARIES/gols '/project/First three words.sqlite3'
+```
+
 ## Responsiveness and limits
 
 HTTP requests and SSE events run independently of terminal rendering. Reconnect

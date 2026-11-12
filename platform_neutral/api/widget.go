@@ -39,6 +39,11 @@ type WidgetContainer interface {
 	NewWidget(WidgetOptions) (Widget, error)
 }
 
+// WindowFocus lets temporary keyboard controls remember where to return focus.
+type WindowFocus interface {
+	FocusedWidget() Widget
+}
+
 // PositionedPainter separates source addressing from window placement. Legacy
 // Upload addresses the source and destination with the same coordinates.
 type PositionedPainter interface {

@@ -156,6 +156,7 @@ func (application *app) installSession(snapshot sessionSnapshot) {
 	application.messages = nil
 	application.sidebarHits = nil
 	application.deleteHits = nil
+	application.exportHits = nil
 	application.promptLimit = 10
 	application.historyCursor = snapshot.messageCursor
 	application.details, application.usage = sessionDetails{}, nil
@@ -331,6 +332,10 @@ func (application *app) sidebarRows(width int) []displayRow {
 		header := sessionHeader(session, active, max(1, headerWidth))
 		if inner >= 12 {
 			header[0].deleteID = session.ID
+			if len(header) == 1 {
+				header = append(header, displayRow{sessionID: session.ID})
+			}
+			header[1].exportID = session.ID
 		}
 		content := header
 		if active {

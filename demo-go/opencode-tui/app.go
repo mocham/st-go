@@ -55,6 +55,7 @@ type operationResult struct {
 	attachToken      uint64
 	details          *sessionDetails
 	file             *fileResult
+	export           *exportResult
 	activityRevision uint64
 }
 
@@ -121,6 +122,9 @@ type app struct {
 	deleted                  map[string]bool
 	deleteHits               map[int]string
 	deleteConfirmation       *deleteConfirmation
+	exportHits               map[int]string
+	exportDialog             *sessionExportDialog
+	exportSequence           uint64
 	sessionActivity          map[string]bool
 	activityRevision         uint64
 
@@ -581,6 +585,10 @@ func (application *app) removePermission(requestID string) {
 }
 
 func (application *app) applyOperation(result operationResult) {
+	if result.export != nil {
+		application.applyExport(result)
+		return
+	}
 	if result.err == nil && result.active != nil && result.activityRevision == application.activityRevision {
 		application.replaceSessionActivity(result.active)
 	}
@@ -783,7 +791,7 @@ func (application *app) handleInput(event inputEvent) {
 		return
 	}
 	if event.region != nil {
-		application.sidebarHits = nil
+		application.sidebarHits, application.deleteHits, application.exportHits = nil, nil, nil
 		application.rows, application.cols = event.region.mainRows, event.region.mainColumns
 		if err := application.preview.setReady(event.region); err != nil {
 			application.status = err.Error()
@@ -793,6 +801,10 @@ func (application *app) handleInput(event inputEvent) {
 	}
 	if application.deleteConfirmation != nil {
 		application.handleDeleteInput(event)
+		return
+	}
+	if application.exportDialog != nil {
+		application.handleExportInput(event)
 		return
 	}
 	if event.mouse != nil {
@@ -950,7 +962,7 @@ func makeRaw(fd int) (*unix.Termios, error) {
 }
 
 func (application *app) terminalSize() {
-	application.sidebarHits = nil
+	application.sidebarHits, application.deleteHits, application.exportHits = nil, nil, nil
 	if size, err := unix.IoctlGetWinsize(application.fd, unix.TIOCGWINSZ); err == nil {
 		application.rows = max(5, min(500, int(size.Row)))
 		application.cols = max(8, min(1000, int(size.Col)))
@@ -968,6 +980,7 @@ func (application *app) run() error {
 	defer application.input.Close()
 	defer application.closePicker()
 	defer application.closeDeleteConfirmation()
+	defer application.closeExportDialog()
 	defer application.cancelAttach()
 	defer application.cancelFile()
 	application.terminalSize()

@@ -33,6 +33,15 @@ Keyboard input uses the Linux console keymap, including common modifiers,
 navigation keys, Unicode, and basic dead-key/Compose input. Restart after changing
 the console keymap. Full XKB/IME behavior is not implemented.
 
+With tabs enabled, **Alt+N** (number keys 1–9) selects the N-th PTY/tab, starting
+with Alt+1 for the first. If N exceeds the open tab count, one new shell tab is
+appended and focused, subject to the eight-tab limit.
+
+**Alt+0** focuses the system bar and highlights its selected button. **Tab** cycles
+through visible buttons, **Shift+Tab** cycles backward, and **Enter** presses the
+selected button. **Escape** returns to the previous terminal; Alt+1…Alt+9 selects
+or opens a terminal tab as above.
+
 ### Touchpads
 
 Supported gestures: one-finger motion, tap/click/drag, and two-finger scrolling.

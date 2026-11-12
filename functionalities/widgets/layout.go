@@ -124,7 +124,7 @@ func (h *Host) FocusWidget() {
 	w := h.window
 	w.paintMu.Lock()
 	w.mu.Lock()
-	if h.closed || !h.visible || h.options.Kind != api.TerminalWidget || w.focused == h {
+	if h.closed || !h.visible || w.focused == h {
 		w.mu.Unlock()
 		w.paintMu.Unlock()
 		return

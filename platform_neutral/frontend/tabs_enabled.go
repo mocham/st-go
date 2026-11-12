@@ -341,6 +341,20 @@ func (m *terminalTabs) selectTab(index int) {
 }
 
 func (m *terminalTabs) keyPress(key uint, mods uint16) bool {
+	if mods == Mod1Mask && key >= '1' && key <= '9' {
+		if identity, ok := m.container.(api.BackendIdentity); ok && identity.BackendName() == "fb" {
+			index := int(key - '1')
+			if index >= len(m.entries) {
+				m.newTerminalTab()
+			} else if m.bar != nil {
+				m.selectTab(index)
+			} else {
+				// Keep the single-PTY layout unchanged until the tab bar exists.
+				m.entries[index].widget.FocusWidget()
+			}
+			return true
+		}
+	}
 	if m.bar == nil || mods&5 != 5 || mods&8 != 0 {
 		return false
 	} // Ctrl+Shift, never Alt

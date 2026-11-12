@@ -23,6 +23,7 @@ func pickerTestApp(t *testing.T, handler http.HandlerFunc, session sessionInfo) 
 	t.Cleanup(func() {
 		application.closePicker()
 		application.closeDeleteConfirmation()
+		application.closeExportDialog()
 		application.cancel()
 		application.input.Close()
 		server.Close()

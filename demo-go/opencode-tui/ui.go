@@ -33,6 +33,7 @@ type displayRow struct {
 	action    string
 	spans     []textSpan
 	deleteID  string
+	exportID  string
 	fileID    string
 }
 
@@ -144,6 +145,15 @@ func (application *app) header() string {
 }
 
 func (application *app) statusLine() (string, string) {
+	if dialog := application.exportDialog; dialog != nil {
+		if dialog.err != "" {
+			return " " + dialog.err, warningStyle
+		}
+		if dialog.submitting {
+			return " Exporting full session history… · Esc cancels ", statusStyle
+		}
+		return " Enter saves the GoLS archive · Esc cancels ", statusStyle
+	}
 	if confirmation := application.deleteConfirmation; confirmation != nil {
 		if confirmation.err != "" {
 			return " " + confirmation.err, warningStyle
@@ -192,6 +202,9 @@ func (application *app) statusLine() (string, string) {
 }
 
 func (application *app) helpLine() string {
+	if application.exportDialog != nil {
+		return "Edit filepath · Enter exports · Esc/Ctrl-C cancel · Ctrl-Q quit"
+	}
 	if application.deleteConfirmation != nil {
 		return "Enter confirms only DELETE · Esc/Ctrl-C cancel · Ctrl-Q quit"
 	}
@@ -208,7 +221,7 @@ func (application *app) helpLine() string {
 	if application.preview == nil || !application.preview.enabled {
 		previewKey = "text response"
 	}
-	return "Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /sessions /models /variants · Ctrl-Q quit · " + previewKey
+	return "Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /sessions /models /variants /export · Ctrl-Q quit · " + previewKey
 }
 
 func writeFull(writer io.Writer, data []byte) error {
@@ -241,6 +254,7 @@ func (application *app) drawPanes(output *strings.Builder) {
 	application.paintedLayout = layout
 	application.sidebarHits = make(map[int]sidebarHit)
 	application.deleteHits = make(map[int]string)
+	application.exportHits = make(map[int]string)
 	if layout.titleRow != 0 {
 		title := "SESSIONS · Tab message files"
 		if application.filesMode {
@@ -295,6 +309,10 @@ func (application *app) drawPanes(output *strings.Builder) {
 			drawCells(output, layout.prompts.width-8, y, 8, warningStyle, label)
 			application.deleteHits[y] = row.deleteID
 		}
+		if row.exportID != "" {
+			drawCells(output, layout.prompts.width-8, y, 8, sessionNameStyle, "[Export]")
+			application.exportHits[y] = row.exportID
+		}
 		switch {
 		case row.fileID != "":
 			application.sidebarHits[y] = sidebarHit{"file", row.fileID}
@@ -325,6 +343,8 @@ func (application *app) draw() error {
 	header := application.header()
 	if application.deleteConfirmation != nil {
 		visible = application.deleteConfirmation.rows(application.cols)
+	} else if application.exportDialog != nil {
+		visible = application.exportDialog.rows(application.cols)
 	} else if application.picker != nil {
 		visible = append([]displayRow{{text: " /" + application.picker.kind + " · " + application.session.Title, style: headerStyle}}, application.picker.rows(max(0, bodyHeight-1))...)
 	}
@@ -344,11 +364,12 @@ func (application *app) draw() error {
 			drawAt(&output, row, resetStyle, "", application.cols)
 		}
 	}
-	if application.picker == nil && application.deleteConfirmation == nil {
+	if application.picker == nil && application.deleteConfirmation == nil && application.exportDialog == nil {
 		application.drawPanes(&output)
 	} else {
 		application.sidebarHits = nil
 		application.deleteHits = nil
+		application.exportHits = nil
 	}
 	status, style := application.statusLine()
 	drawAt(&output, application.rows-2, style, padCells(status, application.cols), application.cols)
