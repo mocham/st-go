@@ -107,6 +107,7 @@ type app struct {
 	attachSequence           uint64
 	attachTarget             string
 	attachCancel             context.CancelFunc
+	subscribeOnAttach        string
 	paintedLayout            paneLayout
 	paintedRows, paintedCols int
 	sessionEpoch             uint64
@@ -718,6 +719,12 @@ func (application *app) submitPrompt() {
 	if text == "" {
 		return
 	}
+	command, _, _ := strings.Cut(text, " ")
+	if application.attachTarget != "" && command != "/subscribe" && command != "/Subscribe" {
+		application.status = "Wait for the selected session to open before sending"
+		application.dirty = true
+		return // Keep the draft rather than sending it to the previous session.
+	}
 	if application.session.ID == "" && !strings.HasPrefix(text, "/") {
 		application.status = "Create or select a session first"
 		application.dirty = true
@@ -842,7 +849,10 @@ func (application *app) handleInput(event inputEvent) {
 			application.running = false
 		case "\x03", "<Esc>":
 			application.cancelAttach()
+			application.status = "Session selection cancelled"
 			application.queuePreview()
+		default:
+			application.handlePromptInput(event)
 		}
 		return
 	}
@@ -877,10 +887,7 @@ func (application *app) handleInput(event inputEvent) {
 		return
 	}
 	if event.paste != "" {
-		if err := application.input.Insert(event.paste); err != nil {
-			application.status = err.Error()
-		}
-		application.dirty = true
+		application.handlePromptInput(event)
 		return
 	}
 	switch event.key {
@@ -947,6 +954,17 @@ func (application *app) handleInput(event inputEvent) {
 			application.status = "Rich preview enabled"
 		} else {
 			application.status = "Rich preview hidden"
+		}
+		application.dirty = true
+		return
+	}
+	application.handlePromptInput(event)
+}
+
+func (application *app) handlePromptInput(event inputEvent) {
+	if event.paste != "" {
+		if err := application.input.Insert(event.paste); err != nil {
+			application.status = err.Error()
 		}
 		application.dirty = true
 		return

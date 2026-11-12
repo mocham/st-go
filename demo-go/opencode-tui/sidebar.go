@@ -97,6 +97,7 @@ func (application *app) cancelAttach() {
 	}
 	application.attachSequence++
 	application.attachTarget = ""
+	application.subscribeOnAttach = ""
 	application.dirty = true
 }
 
@@ -139,7 +140,13 @@ func (application *app) applyAttach(result operationResult) {
 		application.queuePreview()
 		return
 	}
+	channel := application.subscribeOnAttach
 	application.installSession(result.sessionSnapshot)
+	if channel != "" {
+		if err := application.subscribeWriting(channel); err != nil {
+			application.status = err.Error()
+		}
+	}
 }
 
 func (application *app) installSession(snapshot sessionSnapshot) {

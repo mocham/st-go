@@ -27,12 +27,16 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 	}
 	var mu sync.Mutex
 	messageID, prediction := "", ""
-	prompts, forks := 0, 0
+	prompts, forks, created := 0, 0, 0
 	completed := false
 	model := map[string]string{"id": "model-a", "providerID": "test"}
 	events := make(chan map[string]any, 32)
 	session := func(id string) map[string]any {
-		return map[string]any{"id": id, "title": "Existing session", "model": model, "location": map[string]string{"directory": root}}
+		title := "Existing session"
+		if id == "ses_new" {
+			title = "New session"
+		}
+		return map[string]any{"id": id, "title": title, "model": model, "location": map[string]string{"directory": root}}
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/event" {
@@ -56,13 +60,16 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/info":
 			io.WriteString(w, `{"version":"2.test"}`)
-		case "GET /api/session/ses_parent":
-			json.NewEncoder(w).Encode(map[string]any{"data": session("ses_parent")})
+		case "POST /api/session":
+			created++
+			json.NewEncoder(w).Encode(map[string]any{"data": session("ses_new")})
+		case "GET /api/session/ses_parent", "GET /api/session/ses_new":
+			json.NewEncoder(w).Encode(map[string]any{"data": session(strings.TrimPrefix(r.URL.Path, "/api/session/"))})
 		case "POST /api/session/ses_parent/fork":
 			forks++
 			http.Error(w, "must use the subscribed existing session", 400)
 		case "GET /api/session":
-			json.NewEncoder(w).Encode(map[string]any{"data": []any{session("ses_parent")}})
+			json.NewEncoder(w).Encode(map[string]any{"data": []any{session("ses_new"), session("ses_parent")}})
 		case "GET /api/session/active":
 			if messageID != "" && !completed {
 				io.WriteString(w, `{"data":{"ses_parent":{}}}`)
@@ -107,6 +114,9 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 			emit("session.reasoning.delta", map[string]any{"assistantMessageID": "answer", "ordinal": 0, "delta": "Visible provider reasoning."})
 			emit("session.text.delta", map[string]any{"assistantMessageID": "answer", "ordinal": 1, "delta": "Generating the next paragraph..."})
 			io.WriteString(w, `{"data":{"id":"queued"}}`)
+		case "POST /api/session/ses_new/prompt":
+			t.Error("writing prompt sent to startup session instead of clicked session")
+			http.Error(w, "wrong session", 400)
 		case "GET /api/session/ses_parent/message":
 			var messages []any
 			if messageID != "" {
@@ -184,8 +194,8 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 			return strings.Join(lines, "\n")
 		}, stop
 	}
-	providerCommand := []string{binaries["opencode-tui"], "--server", server.URL, "--session", "ses_parent", "--no-preview", root}
-	provider, providerScreen, stopProvider := start(providerCommand)
+	providerCommand := []string{binaries["opencode-tui"], "--server", server.URL, "--no-preview"}
+	provider, providerScreen, stopProvider := start(append(providerCommand, root))
 	editor, editorScreen, _ := start([]string{binaries["govim"], "--no-preview", document})
 	await := func(label string, predicate func() bool) {
 		t.Helper()
@@ -199,7 +209,7 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 		t.Fatalf("%s\neditor=%s\nprovider=%s", label, editorScreen(), providerScreen())
 	}
 	await("editor ready", func() bool { return strings.Contains(editorScreen(), "Opening paragraph.") })
-	await("provider ready", func() bool { return strings.Contains(providerScreen(), "Existing session") })
+	await("provider ready", func() bool { return strings.Contains(providerScreen(), "New session") })
 	fmt.Fprint(editor, ":Subscribe paper\r")
 	await("waiting for explicit subscription", func() bool { return strings.Contains(editorScreen(), "waiting for /Subscribe paper") })
 	fmt.Fprint(editor, ":AINext\r")
@@ -207,8 +217,23 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 	if strings.Contains(editorScreen(), "govim-ai:") {
 		t.Fatal("unconnected request inserted a placeholder")
 	}
-	fmt.Fprint(provider, "/subscribe paper\r")
+	fmt.Fprint(provider, "\x1b[6~") // Reveal the existing session below the startup session.
+	await("existing sidebar session", func() bool { return strings.Contains(providerScreen(), "Existing session") })
+	selectedRow := 0
+	for index, line := range strings.Split(providerScreen(), "\n") {
+		if strings.Contains(line, "Existing session") {
+			selectedRow = index + 1
+			break
+		}
+	}
+	if selectedRow == 0 {
+		t.Fatal("existing session header disappeared")
+	}
+	// Send both in the same read: /Subscribe must wait for the clicked session
+	// to load instead of being discarded or binding to the startup session.
+	fmt.Fprintf(provider, "\x1b[<0;3;%dM\x1b[<0;3;%dm/Subscribe paper\r", selectedRow, selectedRow)
 	await("channel connected", func() bool { return strings.Contains(editorScreen(), "AI [paper] connected") })
+	await("subscription bound to sidebar selection", func() bool { return strings.Contains(providerScreen(), "Subscribed session: ses_parent") })
 	if _, err := os.Stat(filepath.Join(root, ".govim", "ai.sqlite3")); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +264,7 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 		return model["variant"] == "deep"
 	})
 	stopProvider() // Simulate a client crash; the ordinary server session survives.
-	provider, providerScreen, _ = start(providerCommand)
+	provider, providerScreen, _ = start(append(providerCommand, "--session", "ses_parent", root))
 	await("reopened existing session", func() bool { return strings.Contains(providerScreen(), "Existing session") })
 	fmt.Fprint(provider, "/subscribe paper\r")
 	await("resubscribed existing session", func() bool { return strings.Contains(providerScreen(), "paper.md") })
@@ -261,9 +286,9 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 		t.Fatalf("nonprediction inserted: %s", data)
 	}
 	mu.Lock()
-	count, forkCount := prompts, forks
+	count, forkCount, createCount := prompts, forks, created
 	mu.Unlock()
-	if count != 1 || forkCount != 0 {
-		t.Fatalf("generation submitted %d times; forked %d sessions", count, forkCount)
+	if count != 1 || forkCount != 0 || createCount != 1 {
+		t.Fatalf("generation submitted %d times; forked %d sessions; created %d sessions (only startup should create one)", count, forkCount, createCount)
 	}
 }

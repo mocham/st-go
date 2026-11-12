@@ -48,6 +48,91 @@ func TestSubscribeBindsCurrentExistingSessionAndRebinds(t *testing.T) {
 	application.writer.close()
 }
 
+func TestSubscribeAfterSidebarClickWaitsForSelectedSession(t *testing.T) {
+	for _, outcome := range []string{"attached", "failed", "cancelled", "reselected"} {
+		t.Run(outcome, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("ST_GO_APPBUS_TOKEN", appbus.ID())
+			application := pickerTestApp(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "GET /api/session/ses_existing":
+					if outcome == "failed" {
+						http.Error(w, "session unavailable", http.StatusServiceUnavailable)
+						return
+					}
+					io.WriteString(w, `{"data":{"id":"ses_existing","title":"Existing"}}`)
+				case "GET /api/session/ses_existing/message", "GET /api/session/ses_existing/permission", "GET /api/session/ses_existing/inbox":
+					io.WriteString(w, `{"data":[]}`)
+				case "GET /api/session/active":
+					io.WriteString(w, `{"data":{}}`)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}, sessionInfo{ID: "ses_new", Title: "New"})
+			application.sessions = append(application.sessions, sessionInfo{ID: "ses_existing", Title: "Existing"})
+			sidebarClick(t, application, "session", "ses_existing")
+			var parser inputParser
+			parser.feed([]byte("Keep this draft\r"), time.Now(), application.handleInput)
+			if application.input.Text() != promptPrefix+"Keep this draft" || len(application.messages) != 0 {
+				t.Fatal("input during attachment was discarded or sent to the previous session")
+			}
+			application.input.Reset(promptPrefix, len([]rune(promptPrefix)))
+			// A click and the command can arrive in one PTY read, before the
+			// asynchronous snapshot has installed the selected session.
+			parser.feed([]byte("/Subscribe paper\r"), time.Now(), application.handleInput)
+			if application.writer != nil || !strings.Contains(application.status, "ses_existing") {
+				t.Fatalf("subscription did not wait for clicked session: %s", application.status)
+			}
+			switch outcome {
+			case "cancelled":
+				application.handleInput(inputEvent{key: "<Esc>"})
+			case "reselected":
+				sidebarClick(t, application, "session", "ses_new")
+			}
+			awaitOperation(t, application, "attach")
+			if outcome != "attached" {
+				if application.writer != nil || application.session.ID != "ses_new" {
+					t.Fatal("failed/cancelled selection subscribed to another session")
+				}
+				return
+			}
+			if application.writer == nil || application.writer.session != "ses_existing" || application.session.ID != "ses_existing" || application.input.Text() != promptPrefix {
+				t.Fatal("subscription bound to startup session or lost command text")
+			}
+			defer application.writer.close()
+			awaitOperation(t, application, "sync")
+		})
+	}
+}
+
+func TestWritingUpdatesPreserveSidebarSelection(t *testing.T) {
+	application, _ := promptTestApp(t, nil, false)
+	bridge, err := newWritingBridge(application, appbus.ID(), t.TempDir(), "paper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.close()
+	application.writer = bridge
+	// Model a result arriving after the user has clicked another session.
+	application.attachTarget = "ses_existing"
+	bridge.tasks["done"] = &writingTask{started: true, finished: true, cancel: func() {}}
+	bridge.updates <- writing.Message{RequestID: "done", Type: "result", Session: bridge.session}
+	bridge.tick(time.Now())
+	if application.attachTarget != "ses_existing" {
+		t.Fatal("background writing result cancelled the clicked session")
+	}
+	// Browsing an already opened session must also remain stable.
+	application.cancelAttach()
+	application.session.ID = "ses_existing"
+	bridge.tasks["other"] = &writingTask{started: true, finished: true, cancel: func() {}}
+	bridge.updates <- writing.Message{RequestID: "other", Type: "result", Session: bridge.session}
+	bridge.tick(time.Now())
+	if application.attachTarget != "" || application.session.ID != "ses_existing" || bridge.session != "ses_test" {
+		t.Fatal("background writing result overrode selection or subscription")
+	}
+}
+
 func TestWritingCancellationDoesNotInterruptAnotherNormalPrompt(t *testing.T) {
 	for _, scenario := range []string{"queued", "current", "completed", "another"} {
 		t.Run(scenario, func(t *testing.T) {

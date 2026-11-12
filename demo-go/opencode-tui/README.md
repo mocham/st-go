@@ -44,6 +44,10 @@ context remains in the normal session history.
 After a client crash, reopen the same existing session and `/subscribe paper`
 again to recover pending work. Select another session and repeat `/subscribe`
 to change the binding once active writing requests have settled.
+After a sidebar click, `/Subscribe` waits for that selected session to finish
+loading and confirms its ID. Cancelling or changing the selection cancels the
+queued subscription. Background writing updates preserve your selected session;
+click the subscribed-session row in the writing activity panel to return to it.
 
 ## Rich responses
 

@@ -25,7 +25,6 @@ type writingTask struct {
 	cancel   context.CancelFunc
 	latest   writing.Message
 	finished bool
-	opened   bool
 }
 type writingBridge struct {
 	app              *app
@@ -49,7 +48,15 @@ func (application *app) subscribeWriting(channel string) error {
 	if !appbus.ValidChannel(channel) {
 		return fmt.Errorf("usage: /Subscribe <Channel> (1–96 letters, digits, . _ : -)")
 	}
-	if application.session.ID == "" || application.attachTarget != "" {
+	if application.attachTarget != "" {
+		// A sidebar click selects a session before its snapshot arrives. Bind
+		// only after that exact attachment succeeds; cancelAttach clears this
+		// intent on failure, cancellation, or a subsequent sidebar selection.
+		application.subscribeOnAttach = channel
+		application.status = "Waiting to subscribe [" + channel + "] to " + application.attachTarget
+		return nil
+	}
+	if application.session.ID == "" {
 		return fmt.Errorf("select a session before /Subscribe %s", channel)
 	}
 	project, err := writing.Workdir()
@@ -59,7 +66,7 @@ func (application *app) subscribeWriting(channel string) error {
 	if b := application.writer; b != nil {
 		if b.project == project && b.bus.Channel == channel && b.session == application.session.ID {
 			b.hello("")
-			application.status = b.connection + " · " + project
+			application.status = "Subscribed [" + channel + "] to " + b.session
 			return nil
 		}
 		for _, task := range b.tasks {
@@ -82,6 +89,7 @@ func (application *app) subscribeWriting(channel string) error {
 	application.writer = bridge
 	bridge.updateConnection(time.Now())
 	bridge.hello("")
+	application.status = "Subscribed [" + channel + "] to " + bridge.session
 	application.scroll, application.sidebarFocus = 0, ""
 	return nil
 }
@@ -226,14 +234,8 @@ func (b *writingBridge) tick(now time.Time) {
 				b.app.status += " · " + update.Error
 			}
 			b.app.dirty = true
-			if update.Session != "" && !task.opened {
-				task.opened = true
-				b.app.filesMode = false
-				if b.app.session.ID != update.Session {
-					b.app.closePicker()
-					b.app.attachSession(update.Session)
-				}
-			}
+			// Keep the author's selected session. Activity rows open the bound
+			// session explicitly; background results must not undo a sidebar click.
 			if update.Session == b.app.session.ID {
 				b.app.requestSync()
 			}

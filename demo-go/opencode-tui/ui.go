@@ -161,6 +161,9 @@ func (application *app) statusLine() (string, string) {
 		return " Type DELETE to confirm session deletion · Esc cancels ", warningStyle
 	}
 	if application.attachTarget != "" {
+		if application.subscribeOnAttach != "" {
+			return " Opening " + application.attachTarget + " · /Subscribe " + application.subscribeOnAttach + " queued · Esc cancels ", statusStyle
+		}
 		return " Opening session… · Esc cancels ", statusStyle
 	}
 	if len(application.permissions) > 0 {

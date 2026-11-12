@@ -29,7 +29,11 @@ govim:         :Subscribe paper
 
 `/Subscribe` is also accepted. The channel is explicit and case-sensitive; use
 the same name in both applications. `/subscribe` binds the **currently selected
-session**. The project is each application's canonical local working directory at
+session**. If a sidebar selection is still loading, the command waits for that
+selection to succeed and confirms the bound session ID. Cancelling or changing
+the selection cancels the queued subscription. Background writing updates keep
+your selected session; click the subscribed-session activity row to return to it.
+The project is each application's canonical local working directory at
 subscription time, without searching parent directories. Govim creates
 `$PWD/.govim/ai.sqlite3` automatically if missing and loads existing history.
 The optional positional opencode-tui directory remains a server-side path.
@@ -37,7 +41,8 @@ The optional positional opencode-tui directory remains a server-side path.
 Both interfaces show connection status. Missing responders, different working
 directories, and unsupported terminals produce visible diagnostics. Govim requires
 a connected responder before creating a placeholder. Use a separate channel for
-each responder. Repeating the subscription command shows its connection/workdir.
+each responder. Repeating `/subscribe` confirms the bound session; the writing
+activity panel shows its connection and workdir.
 
 ## Writing loop
 
