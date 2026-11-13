@@ -53,6 +53,11 @@ func TestNativeDecodeAudioVideoAndSeekWithoutExternalTools(t *testing.T) {
 			t.Fatal(err)
 		}
 		if kind == 0 {
+			tail, err := d.audio(48000, 1, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			samples += len(tail) / 4
 			break
 		}
 		if kind == 1 {
@@ -70,7 +75,7 @@ func TestNativeDecodeAudioVideoAndSeekWithoutExternalTools(t *testing.T) {
 			}
 		} else {
 			audioFrames++
-			pcm, err := d.audio(48000)
+			pcm, err := d.audio(48000, 1, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -230,37 +235,160 @@ func TestPlayerPauseSeekResizeReplayAndClose(t *testing.T) {
 	awaitPlayer(t, p, func(s api.VideoStatus) bool { return s.State == "playing" && s.PositionMS < 900 })
 }
 
-func TestNativeAudioDurationFollowsPlaybackSpeed(t *testing.T) {
+// A fixed 440 Hz fixture catches pitch shifts even if the output duration is
+// correct. Inspect the actual decoded/time-stretched PCM, without a sound card.
+func toneFrequency(t *testing.T, pcm []byte) float64 {
+	t.Helper()
+	frames := len(pcm) / 4
+	if frames < 2000 {
+		t.Fatalf("insufficient audio: %d frames", frames)
+	}
+	start, end := frames/10, frames*9/10
+	previous := int16(binary.LittleEndian.Uint16(pcm[(start-1)*4:]))
+	var first, last, energy float64
+	crossings := 0
+	for i := start; i < end; i++ {
+		sample := int16(binary.LittleEndian.Uint16(pcm[i*4:]))
+		energy += float64(sample) * float64(sample)
+		if previous <= 0 && sample > 0 {
+			crossing := float64(i-1) - float64(previous)/float64(int(sample)-int(previous))
+			if crossings == 0 {
+				first = crossing
+			}
+			last = crossing
+			crossings++
+		}
+		previous = sample
+	}
+	if crossings < 10 || energy/float64(end-start) < 10000 {
+		t.Fatal("missing audible test tone")
+	}
+	return float64(crossings-1) * 48000 / (last - first)
+}
+
+func decodedTempoAudio(t *testing.T, d decoder, speedAt func(time.Duration) float64) []byte {
+	t.Helper()
+	var samples []byte
+	speed := 1.0
+	for {
+		kind, pts, err := d.next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind != 0 && kind != 2 {
+			continue
+		}
+		if kind == 2 {
+			speed = speedAt(pts)
+		}
+		pcm, err := d.audio(48000, speed, kind == 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		samples = append(samples, pcm...)
+		if kind == 0 {
+			return samples
+		}
+	}
+}
+
+func TestNativeAudioPreservesPitchAtEveryPlaybackSpeed(t *testing.T) {
 	path := testMovie(t)
-	for _, speed := range []float64{0.5, 2} {
+	for _, speed := range []float64{0.25, 0.5, 1, 1.1, 2, 4} {
 		t.Run(fmt.Sprint(speed), func(t *testing.T) {
 			d, err := openNative(context.Background(), path)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer d.close()
-			samples := 0
-			for {
-				kind, _, err := d.next()
-				if err != nil {
-					t.Fatal(err)
-				}
-				if kind == 0 {
-					break
-				}
-				if kind != 2 {
-					continue
-				}
-				pcm, err := d.audio(int(48000 / speed))
-				if err != nil {
-					t.Fatal(err)
-				}
-				samples += len(pcm) / 4
-			}
-			seconds := float64(samples) / 48000
-			if math.Abs(seconds-1.6/speed) > 0.05 {
+			pcm := decodedTempoAudio(t, d, func(time.Duration) float64 { return speed })
+			seconds := float64(len(pcm)/4) / 48000
+			if math.Abs(seconds-1.6/speed) > 0.12 {
 				t.Fatalf("audio duration %.3f at speed %.2f", seconds, speed)
 			}
+			if hz := toneFrequency(t, pcm); math.Abs(hz-440) > 3 {
+				t.Fatalf("pitch shifted to %.2f Hz at %.2fx", hz, speed)
+			}
+			// Draining again must not repeat the tail or feed a stale frame.
+			tail, err := d.audio(48000, speed, true)
+			if err != nil || len(tail) != 0 {
+				t.Fatalf("second drain: %d bytes, %v", len(tail), err)
+			}
 		})
+	}
+}
+
+func TestNativeAudioTempoChangesAndSeekReset(t *testing.T) {
+	path := testMovie(t)
+	d, err := openNative(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.close()
+	pcm := decodedTempoAudio(t, d, func(pts time.Duration) float64 {
+		switch {
+		case pts < 400*time.Millisecond:
+			return 0.5
+		case pts < 800*time.Millisecond:
+			return 1
+		case pts < 1200*time.Millisecond:
+			return 2
+		default:
+			return 4
+		}
+	})
+	if hz := toneFrequency(t, pcm); math.Abs(hz-440) > 3 {
+		t.Fatalf("pitch shifted during speed changes: %.2f Hz", hz)
+	}
+	if seconds := float64(len(pcm)/4) / 48000; math.Abs(seconds-1.5) > 0.15 {
+		t.Fatalf("lost audio across speed changes: %.3fs", seconds)
+	}
+	// Normal adjacent samples of this low-frequency tone differ only slightly.
+	// Recreating filters/discarding their history can introduce abrupt jumps.
+	for i := len(pcm) / 40 * 4; i < len(pcm)*9/10-4; i += 4 {
+		a := int16(binary.LittleEndian.Uint16(pcm[i:]))
+		b := int16(binary.LittleEndian.Uint16(pcm[i+4:]))
+		if math.Abs(float64(a)-float64(b)) > 1500 {
+			t.Fatalf("discontinuity at output frame %d", i/4)
+		}
+	}
+	if err := d.seek(0); err != nil {
+		t.Fatal(err)
+	}
+	tail, err := d.audio(48000, 1, true)
+	if err != nil || len(tail) != 0 {
+		t.Fatalf("seek retained old audio: %d bytes, %v", len(tail), err)
+	}
+	pcm = decodedTempoAudio(t, d, func(time.Duration) float64 { return 1 })
+	if hz := toneFrequency(t, pcm); math.Abs(hz-440) > 3 {
+		t.Fatalf("bad pitch after seek: %.2f Hz", hz)
+	}
+	if seconds := float64(len(pcm)/4) / 48000; math.Abs(seconds-1.6) > 0.05 {
+		t.Fatalf("bad duration after seek: %.3fs", seconds)
+	}
+}
+
+func TestNativeAudioResetDiscardsFilterTail(t *testing.T) {
+	path := testMovie(t)
+	d, err := openNative(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.close()
+	for i := 0; i < 30; i++ {
+		kind, _, err := d.next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kind == 2 {
+			if _, err := d.audio(48000, 0.25, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	d.resetAudio()
+	tail, err := d.audio(48000, 0.25, true)
+	if err != nil || len(tail) != 0 {
+		t.Fatalf("reset retained old audio: %d bytes, %v", len(tail), err)
 	}
 }

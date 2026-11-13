@@ -11,5 +11,8 @@ int st_video_info(st_video *v, int *width, int *height, int *audio, int64_t *dur
 int st_video_next(st_video *v, int64_t *pts);
 int st_video_seek(st_video *v, int64_t pts);
 int st_video_pixels(st_video *v, uint8_t *pixels, int width, int height, int stride);
-int st_video_audio(st_video *v, int rate, uint8_t **data, int *bytes);
+/* Feed the current decoded audio frame, or flush delayed samples at EOF.
+   Output is borrowed packed stereo S16 at the fixed hardware sample rate. */
+int st_video_audio(st_video *v, int rate, double speed, int flush, uint8_t **data, int *bytes);
+void st_video_audio_reset(st_video *v);
 #endif

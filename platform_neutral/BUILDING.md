@@ -47,11 +47,13 @@ and Poppler PDF rendering.
 
 `st-fb` also embeds a restricted FFmpeg 8.1.3 build and pinned x264 source for
 H.264/MP4 screen recording and [`gov`](../demo-go/gov/README.md) playback.
-Make downloads checksum-verified sources into `third_party/` and links six
-archives: avformat, avcodec, avutil, swscale, swresample, and x264. MP4/MOV demuxing,
+Make downloads checksum-verified sources into `third_party/` and links seven
+archives: avformat, avfilter, avcodec, avutil, swscale, swresample, and x264. MP4/MOV demuxing,
 H.264/HEVC/MPEG-4 video decoding, and AAC/MP3 audio decoding are enabled by the
-tracked `third_party_wrapper/ffmpeg-configure.sh` build profile. External library
-autodetection, networking, devices, filters, and other
+tracked `third_party_wrapper/ffmpeg-configure.sh` build profile. The audio-only
+filter subset (`abuffer`, `atempo`, `abuffersink`) provides pitch-preserving speed
+changes; two atempo stages cover 0.25×–4×. External library
+autodetection, networking, devices, other filters, and other
 encoders are disabled. The Go bridge selects this implementation with
 `ffmpeg_static`; `st-fb-min` continues to invoke external `ffmpeg` at runtime.
 

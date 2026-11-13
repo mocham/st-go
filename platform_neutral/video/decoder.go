@@ -16,7 +16,10 @@ type decoder interface {
 	next() (kind int, pts time.Duration, err error)
 	seek(time.Duration) error
 	pixels(width, height int) ([]uint32, error)
-	audio(rate int) ([]byte, error)
+	// Audio outputs stereo S16 at rate, time-stretched by speed. Flush drains
+	// delayed samples at EOF instead of feeding the current decoded frame.
+	audio(rate int, speed float64, flush bool) ([]byte, error)
+	resetAudio()
 	close()
 }
 

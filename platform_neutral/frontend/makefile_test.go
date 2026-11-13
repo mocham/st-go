@@ -52,6 +52,7 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 		"third_party/webp/webp_anim.o", "third_party/pdf_bridge.o", "third_party/image_decode.o",
 		"third_party/x264/lib/libx264.a",
 		"third_party/ffmpeg/lib/libavformat.a", "third_party/ffmpeg/lib/libavcodec.a",
+		"third_party/ffmpeg/lib/libavfilter.a",
 		"third_party/ffmpeg/lib/libswscale.a", "third_party/ffmpeg/lib/libavutil.a",
 		"third_party/ffmpeg/lib/libswresample.a", "third_party/video_ffmpeg.o",
 		"third_party/recording_ffmpeg.o", "third_party/ffmpeg/include/st_go_ffmpeg_static.h",

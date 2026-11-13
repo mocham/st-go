@@ -4,7 +4,7 @@ package video
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../third_party/ffmpeg/include -I${SRCDIR}/../../third_party_wrapper
-#cgo LDFLAGS: ${SRCDIR}/../../third_party/video_ffmpeg.o ${SRCDIR}/../../third_party/ffmpeg/lib/libavformat.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavcodec.a ${SRCDIR}/../../third_party/ffmpeg/lib/libswscale.a ${SRCDIR}/../../third_party/ffmpeg/lib/libswresample.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavutil.a ${SRCDIR}/../../third_party/x264/lib/libx264.a -lm -lpthread
+#cgo LDFLAGS: ${SRCDIR}/../../third_party/video_ffmpeg.o ${SRCDIR}/../../third_party/ffmpeg/lib/libavformat.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavfilter.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavcodec.a ${SRCDIR}/../../third_party/ffmpeg/lib/libswscale.a ${SRCDIR}/../../third_party/ffmpeg/lib/libswresample.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavutil.a ${SRCDIR}/../../third_party/x264/lib/libx264.a -lm -lpthread
 #include <stdlib.h>
 #include <libavutil/error.h>
 #include <st_go_ffmpeg_static.h>
@@ -82,10 +82,15 @@ func (d *nativeDecoder) pixels(w, h int) ([]uint32, error) {
 	err := nativeError(C.st_video_pixels(d.handle, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.int(w), C.int(h), C.int(w*4)))
 	return p, err
 }
-func (d *nativeDecoder) audio(rate int) ([]byte, error) {
+func (d *nativeDecoder) resetAudio() { C.st_video_audio_reset(d.handle) }
+func (d *nativeDecoder) audio(rate int, speed float64, flush bool) ([]byte, error) {
 	var data *C.uint8_t
 	var size C.int
-	if err := nativeError(C.st_video_audio(d.handle, C.int(rate), &data, &size)); err != nil {
+	var drain C.int
+	if flush {
+		drain = 1
+	}
+	if err := nativeError(C.st_video_audio(d.handle, C.int(rate), C.double(speed), drain, &data, &size)); err != nil {
 		return nil, err
 	}
 	// Worker consumes this borrowed native buffer before the next decoder call.

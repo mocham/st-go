@@ -36,7 +36,9 @@ the system-bar volume remains the hardware volume. If ALSA is unavailable, video
 continues and the status line reports the audio error. Resizing fits the video
 into the available area, preserving aspect ratio with black borders.
 The current speed appears in the top status line. Audio follows the selected
-speed through resampling, which also changes pitch. The clickable progress bar
+speed with pitch-preserving time stretching (FFmpeg `atempo`), keeping voices
+and music at their original pitch. Speed changes update the filters in place;
+the audio device keeps its normal sample rate. The clickable progress bar
 sits above the bottom controls and is hidden in terminals smaller than four
 rows or four columns.
 
@@ -44,7 +46,7 @@ rows or four columns.
 
 - Local MP4/MOV containers; H.264, HEVC, and MPEG-4 video; AAC and MP3 audio.
 - Software decoding, with a source/output pixel budget of 4096 × 2160.
-- `gov` is CGO-free. FFmpeg, x264, and audio resampling are linked into `st-fb`;
+- `gov` is CGO-free. FFmpeg, x264, and audio processing are linked into `st-fb`;
   neither `ffmpeg`, `ffprobe`, nor `mpv` is needed for playback.
 - No DRM passthrough is needed: decoded frames use an ordinary retained terminal
   surface. Presentation follows the framebuffer backend's software clock.
@@ -60,5 +62,6 @@ go test -race -tags ffmpeg_static ./platform_neutral/video
 ```
 
 Native tests generate short MP4 fixtures with a system FFmpeg, then clear `PATH`
-while testing decoding, audio conversion, pause/seek/replay, and terminal-surface
+while testing decoding, pitch and duration at 0.25×–4×, live speed changes,
+audio draining, pause/seek/replay, and terminal-surface
 lifecycle. Device playback is exercised by running `gov` on the foreground VT.

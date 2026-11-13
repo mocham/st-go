@@ -1,11 +1,17 @@
 #include "video_ffmpeg.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <stdatomic.h>
+#include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersrc.h>
+#include <libavfilter/buffersink.h>
 #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
@@ -20,6 +26,13 @@ struct st_video {
     AVFrame *frame, *picture;
     struct SwsContext *scale;
     SwrContext *resample;
+    AVFilterGraph *audio_graph;
+    AVFilterContext *audio_source, *audio_sink, *tempo[2];
+    AVFrame *audio_input, *audio_output;
+    AVChannelLayout audio_layout;
+    int audio_rate, audio_format, audio_eof;
+    int64_t audio_samples;
+    double audio_speed;
     uint8_t *pcm;
     unsigned pcm_size;
     int64_t origin, next_pts[2];
@@ -55,14 +68,26 @@ st_video *st_video_alloc(void) {
     return v;
 }
 void st_video_cancel(st_video *v) { atomic_store(&v->cancelled, 1); }
+void st_video_audio_reset(st_video *v) {
+    swr_free(&v->resample);
+    avfilter_graph_free(&v->audio_graph);
+    v->audio_source = v->audio_sink = v->tempo[0] = v->tempo[1] = NULL;
+    if (v->audio_input) av_frame_unref(v->audio_input);
+    if (v->audio_output) av_frame_unref(v->audio_output);
+    av_channel_layout_uninit(&v->audio_layout);
+    v->audio_samples = v->audio_eof = 0;
+    v->audio_speed = 0;
+}
 void st_video_free(st_video *v) {
     if (!v) return;
     sws_freeContext(v->scale);
-    swr_free(&v->resample);
+    st_video_audio_reset(v);
     av_free(v->pcm);
     av_packet_free(&v->packet);
     av_frame_free(&v->frame);
     av_frame_free(&v->picture);
+    av_frame_free(&v->audio_input);
+    av_frame_free(&v->audio_output);
     for (int i = 0; i < 2; i++) avcodec_free_context(&v->codec[i]);
     avformat_close_input(&v->format);
     if (v->io) av_freep(&v->io->buffer);
@@ -116,7 +141,9 @@ int st_video_open(st_video *v, const char *path) {
     v->packet = av_packet_alloc();
     v->frame = av_frame_alloc();
     v->picture = av_frame_alloc();
-    return v->packet && v->frame && v->picture ? 0 : AVERROR(ENOMEM);
+    v->audio_input = av_frame_alloc();
+    v->audio_output = av_frame_alloc();
+    return v->packet && v->frame && v->picture && v->audio_input && v->audio_output ? 0 : AVERROR(ENOMEM);
 }
 int st_video_info(st_video *v, int *w, int *h, int *audio, int64_t *duration) {
     *w = v->codec[0]->width;
@@ -180,7 +207,7 @@ int st_video_seek(st_video *v, int64_t pts) {
         if (v->codec[k]) avcodec_flush_buffers(v->codec[k]);
         v->next_pts[k] = pts;
     }
-    swr_free(&v->resample);
+    st_video_audio_reset(v);
     av_frame_unref(v->picture);
     v->active = -1;
     v->eof = v->flushing = 0;
@@ -202,24 +229,127 @@ int st_video_pixels(st_video *v, uint8_t *pixels, int width, int height, int str
     int strides[4] = {stride, 0, 0, 0};
     return sws_scale(v->scale, (const uint8_t *const *)f->data, f->linesize, 0, f->height, dst, strides);
 }
-int st_video_audio(st_video *v, int rate, uint8_t **data, int *bytes) {
+static int configure_audio(st_video *v, int rate, double speed) {
     AVFrame *f = v->frame;
-    if (!v->resample || v->rate != rate) {
-        swr_free(&v->resample);
+    if (!v->resample || v->rate != rate || v->audio_rate != f->sample_rate ||
+        v->audio_format != f->format || av_channel_layout_compare(&v->audio_layout, &f->ch_layout)) {
+        st_video_audio_reset(v);
         AVChannelLayout stereo = AV_CHANNEL_LAYOUT_STEREO;
         int err = swr_alloc_set_opts2(&v->resample, &stereo, AV_SAMPLE_FMT_S16, rate,
                                      &f->ch_layout, f->format, f->sample_rate, 0, NULL);
         if (err < 0) return err;
         if ((err = swr_init(v->resample)) < 0) return err;
+        if ((err = av_channel_layout_copy(&v->audio_layout, &f->ch_layout)) < 0) return err;
         v->rate = rate;
+        v->audio_rate = f->sample_rate;
+        v->audio_format = f->format;
     }
-    int samples = swr_get_out_samples(v->resample, f->nb_samples);
+
+    if (!v->audio_graph) {
+        const AVFilter *source = avfilter_get_by_name("abuffer");
+        const AVFilter *sink = avfilter_get_by_name("abuffersink");
+        const AVFilter *tempo = avfilter_get_by_name("atempo");
+        if (!source || !sink || !tempo) return AVERROR_FILTER_NOT_FOUND;
+        v->audio_graph = avfilter_graph_alloc();
+        if (!v->audio_graph) return AVERROR(ENOMEM);
+        v->audio_graph->nb_threads = 1;
+        char args[128];
+        snprintf(args, sizeof(args), "time_base=1/%d:sample_rate=%d:sample_fmt=s16:channel_layout=stereo", rate, rate);
+        int err = avfilter_graph_create_filter(&v->audio_source, source, "input", args, NULL, v->audio_graph);
+        if (err < 0) return err;
+        if ((err = avfilter_graph_create_filter(&v->tempo[0], tempo, "tempo0", NULL, NULL, v->audio_graph)) < 0 ||
+            (err = avfilter_graph_create_filter(&v->tempo[1], tempo, "tempo1", NULL, NULL, v->audio_graph)) < 0 ||
+            (err = avfilter_graph_create_filter(&v->audio_sink, sink, "output", NULL, NULL, v->audio_graph)) < 0 ||
+            (err = avfilter_link(v->audio_source, 0, v->tempo[0], 0)) < 0 ||
+            (err = avfilter_link(v->tempo[0], 0, v->tempo[1], 0)) < 0 ||
+            (err = avfilter_link(v->tempo[1], 0, v->audio_sink, 0)) < 0 ||
+            (err = avfilter_graph_config(v->audio_graph, NULL)) < 0)
+            return err;
+    }
+    if (v->audio_speed != speed) {
+        /* Two WSOLA stages cover 0.25x..4x while keeping each stage within
+           0.5x..2x. Runtime commands retain overlap/history across rate changes. */
+        char factor[32];
+        snprintf(factor, sizeof(factor), "%.17g", sqrt(speed));
+        for (int i = 0; i < 2; i++) {
+            int err = avfilter_process_command(v->tempo[i], "tempo", factor, NULL, 0, 0);
+            if (err < 0) return err;
+        }
+        v->audio_speed = speed;
+    }
+    return 0;
+}
+
+/* One bounded PCM batch per decoded frame/EOF, not an accumulating queue. */
+static int collect_audio(st_video *v, int *bytes) {
+    for (;;) {
+        if (interrupted(v)) return AVERROR_EXIT;
+        int err = av_buffersink_get_frame(v->audio_sink, v->audio_output);
+        if (err == AVERROR(EAGAIN) || err == AVERROR_EOF) return 0;
+        if (err < 0) return err;
+        AVFrame *f = v->audio_output;
+        if (f->format != AV_SAMPLE_FMT_S16 || f->ch_layout.nb_channels != 2 ||
+            f->sample_rate != v->rate || f->nb_samples < 0 || f->nb_samples > 262144 - *bytes / 4) {
+            av_frame_unref(f);
+            return AVERROR(EINVAL);
+        }
+        int size = f->nb_samples * 4;
+        if (size) {
+            void *buffer = av_fast_realloc(v->pcm, &v->pcm_size, *bytes + size);
+            if (!buffer) { av_frame_unref(f); return AVERROR(ENOMEM); }
+            v->pcm = buffer;
+            memcpy(v->pcm + *bytes, f->data[0], size);
+            *bytes += size;
+        }
+        av_frame_unref(f);
+    }
+}
+
+static int feed_audio(st_video *v, const AVFrame *decoded, int *bytes) {
+    int samples = swr_get_out_samples(v->resample, decoded ? decoded->nb_samples : 0);
     if (samples < 0) return samples;
     if (samples > 262144) return AVERROR(EINVAL);
-    av_fast_malloc(&v->pcm, &v->pcm_size, (size_t)samples * 4);
-    if (!v->pcm) return AVERROR(ENOMEM);
-    int n = swr_convert(v->resample, &v->pcm, samples, (const uint8_t **)f->extended_data, f->nb_samples);
-    if (n < 0) return n;
-    *data = v->pcm; *bytes = n * 4;
+    if (!samples) return 0;
+    AVFrame *f = v->audio_input;
+    av_frame_unref(f);
+    f->format = AV_SAMPLE_FMT_S16;
+    f->sample_rate = v->rate;
+    av_channel_layout_default(&f->ch_layout, 2);
+    f->nb_samples = samples;
+    int err = av_frame_get_buffer(f, 0);
+    if (err < 0) return err;
+    int n = swr_convert(v->resample, f->data, samples,
+                        decoded ? (const uint8_t **)decoded->extended_data : NULL,
+                        decoded ? decoded->nb_samples : 0);
+    if (n <= 0) return n;
+    f->nb_samples = n;
+    f->pts = v->audio_samples;
+    f->duration = n;
+    v->audio_samples += n;
+    if ((err = av_buffersrc_add_frame(v->audio_source, f)) < 0) return err;
+    if ((err = collect_audio(v, bytes)) < 0) return err;
+    return n;
+}
+
+int st_video_audio(st_video *v, int rate, double speed, int flush, uint8_t **data, int *bytes) {
+    *data = NULL; *bytes = 0;
+    if (interrupted(v)) return AVERROR_EXIT;
+    if (rate <= 0 || rate > 384000 || !isfinite(speed) || speed < 0.25 || speed > 4)
+        return AVERROR(EINVAL);
+    if (flush) {
+        if (!v->audio_graph || v->audio_eof) return 0;
+        int err;
+        while ((err = feed_audio(v, NULL, bytes)) > 0) {}
+        if (err < 0) return err;
+        if ((err = av_buffersrc_close(v->audio_source, v->audio_samples, 0)) < 0) return err;
+        v->audio_eof = 1;
+        if ((err = collect_audio(v, bytes)) < 0) return err;
+    } else {
+        if (v->audio_eof) return AVERROR_EOF;
+        int err = configure_audio(v, rate, speed);
+        if (err < 0) return err;
+        if ((err = feed_audio(v, v->frame, bytes)) < 0) return err;
+    }
+    *data = v->pcm;
     return 0;
 }

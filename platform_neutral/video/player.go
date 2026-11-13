@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -94,9 +93,34 @@ func (p *Player) run(ctx context.Context, path string) error {
 			pcm = nil
 		}
 		audioTried = false
+		d.resetAudio()
 	}
 	defer dropAudio()
 	warn := func(err error) { p.mu.Lock(); p.status.Warning = err.Error(); p.mu.Unlock() }
+	writeAudio := func(speed float64, flush bool) error {
+		samples, err := d.audio(pcm.Rate(), speed, flush)
+		if err != nil {
+			return err
+		}
+		scalePCM(samples, volume)
+		// Filter draining can yield a larger tail. Submit short, cancellable
+		// writes so it is played completely without extending device timeouts.
+		chunkBytes := max(1, pcm.Rate()/20) * 4
+		for len(samples) > 0 {
+			n := min(len(samples), chunkBytes)
+			writeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+			err = pcm.Write(writeCtx, samples[:n])
+			cancel()
+			if err != nil {
+				warn(err)
+				dropAudio()
+				audioTried = true
+				break
+			}
+			samples = samples[n:]
+		}
+		return nil
+	}
 	render := func() error {
 		p.mu.Lock()
 		w, h := p.width, p.height
@@ -156,9 +180,8 @@ func (p *Player) run(ctx context.Context, path string) error {
 			}
 			clock.reset(now, anchor)
 			clock.speed = r.Speed
-			// Discard hardware-buffered samples at the old rate. Subsequent
-			// samples are resampled to the new duration before PCM playback.
-			dropAudio()
+			// The next audio frame updates atempo in place. Keep the device
+			// and filter history alive to avoid gaps on each speed keypress.
 		case "mute":
 			muted = r.Muted
 			dropAudio()
@@ -228,8 +251,13 @@ func (p *Player) run(ctx context.Context, path string) error {
 				}
 				position = max(position, info.duration)
 				if pcm != nil {
-					pcm.Close(true)
-					pcm = nil
+					if err := writeAudio(clock.speed, true); err != nil {
+						return err
+					}
+					if pcm != nil {
+						pcm.Close(true)
+						pcm = nil
+					}
 				}
 				continue
 			}
@@ -290,20 +318,8 @@ func (p *Player) run(ctx context.Context, path string) error {
 				}
 			}
 			if pcm != nil {
-				// Playing fewer/more resampled samples at the hardware rate
-				// changes audio duration and pitch together with video speed.
-				samples, err := d.audio(int(math.Round(float64(pcm.Rate()) / clock.speed)))
-				if err != nil {
+				if err := writeAudio(clock.speed, false); err != nil {
 					return err
-				}
-				scalePCM(samples, volume)
-				writeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
-				err = pcm.Write(writeCtx, samples)
-				cancel()
-				if err != nil {
-					warn(err)
-					pcm.Close(false)
-					pcm = nil
 				}
 			}
 		}
