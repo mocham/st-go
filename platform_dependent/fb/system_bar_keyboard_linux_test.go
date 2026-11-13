@@ -5,6 +5,7 @@ package fb
 import (
 	"image"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -32,65 +33,69 @@ func systemBarKeyboard(t *testing.T, d *Driver) (api.Widget, func(...byte)) {
 }
 
 func TestSystemBarKeyboardFocusNavigationAndActivation(t *testing.T) {
-	d := memoryDriver(t, 1600, 100)
-	volume, mode, reads := 99, 0, 0
-	d.systemBar = &systemBar{
-		powerSupplyPath: t.TempDir(),
-		volumeLevel:     volume,
-		setAudioVolume:  func(next int) bool { volume = next; return true },
-		audioOutput:     func() (int, bool) { reads++; return mode, true },
-		setAudioOutput:  func(next int) bool { mode = next; return true },
-	}
-	root, feed := systemBarKeyboard(t, d)
-	var keys []uint
-	var text string
-	root.Bind(api.Callbacks{KeyPress: func(key uint, _ uint16) { keys = append(keys, key) }, Text: func(s string) { text += s }})
-	before := slices.Clone(d.pixels)
-	b := d.systemBar
-	feed(56, 11, 11|128, 56|128) // Alt+0
-	if b.focusWindow.FocusedWidget().ID() != b.widget.ID() || !b.focused || b.focusBounds.Empty() {
-		t.Fatal("Alt+0 did not focus and highlight the system bar")
-	}
-	if got := pixelAt(d, b.focusBounds.Min.X, b.focusBounds.Min.Y); got != systemBarForeground&0xffffff {
-		t.Fatalf("focus outline was not presented: %#x", got)
-	}
-	oldWidth, oldReads := b.bounds.Dx(), reads
-	feed(15, 15|128) // Tab: volume down -> volume up
-	if reads != oldReads {
-		t.Fatal("keyboard navigation polled the mixer")
-	}
-	feed(28, 28|128) // Enter: 99 -> 100, changing the bar width
-	if volume != 100 || b.bounds.Dx() <= oldWidth || b.focusedControl != systemBarVolumeUp {
-		t.Fatal("Enter lost its selected control across a layout change", volume, b.focusedControl)
-	}
-	feed(42, 15, 15|128, 42|128, 28, 28|128) // Shift+Tab, Enter: volume down
-	if volume != 96 {
-		t.Fatal("backward navigation did not activate volume down", volume)
-	}
-	feed(42, 15, 15|128, 42|128, 28, 28|128) // wrap backward to output selector
-	if mode != 1 {
-		t.Fatal("keyboard navigation did not wrap to the output selector")
-	}
-	feed(15, 15|128, 28, 28|128) // wrap forward to volume down
-	if volume != 92 {
-		t.Fatal("keyboard navigation did not wrap to the first control", volume)
-	}
-	feed(30, 30|128, 127, 255) // ASCII and Unicode must stay out of the PTY.
-	if len(keys) != 0 || text != "" || !slices.Equal(before, d.pixels) {
-		t.Fatal("system bar input or highlighting leaked into the terminal", keys, text)
-	}
-	// Losing native focus (VT switch) hides the outline but retains the return
-	// target, and acquiring it again restores the selected control.
-	d.callbacks.Lock()
-	d.callbacks.Focus(false)
-	if !b.focusBounds.Empty() {
-		t.Error("inactive VT retained its focus outline")
-	}
-	d.callbacks.Focus(true)
-	d.callbacks.Unlock()
-	feed(1, 1|128, 15, 15|128, 28, 28|128) // Escape, then ordinary PTY Tab/Enter
-	if b.focused || !b.focusBounds.Empty() || b.previousFocus != nil || b.focusWindow.FocusedWidget().ID() != root.ID() || !slices.Equal(keys, []uint{0xff09, 0xff0d}) {
-		t.Fatal("Escape did not restore terminal keyboard input", keys)
+	for _, width := range []int{1280, 1600} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			d := memoryDriver(t, width, 100)
+			volume, mode, reads := 99, 0, 0
+			d.systemBar = &systemBar{
+				powerSupplyPath: t.TempDir(),
+				volumeLevel:     volume,
+				setAudioVolume:  func(next int) bool { volume = next; return true },
+				audioOutput:     func() (int, bool) { reads++; return mode, true },
+				setAudioOutput:  func(next int) bool { mode = next; return true },
+			}
+			root, feed := systemBarKeyboard(t, d)
+			var keys []uint
+			var text string
+			root.Bind(api.Callbacks{KeyPress: func(key uint, _ uint16) { keys = append(keys, key) }, Text: func(s string) { text += s }})
+			before := slices.Clone(d.pixels)
+			b := d.systemBar
+			feed(56, 11, 11|128, 56|128) // Alt+0
+			if b.focusWindow.FocusedWidget().ID() != b.widget.ID() || !b.focused || b.focusBounds.Empty() {
+				t.Fatal("Alt+0 did not focus and highlight the system bar")
+			}
+			if got := pixelAt(d, b.focusBounds.Min.X, b.focusBounds.Min.Y); got != systemBarForeground&0xffffff {
+				t.Fatalf("focus outline was not presented: %#x", got)
+			}
+			oldWidth, oldReads := b.bounds.Dx(), reads
+			feed(15, 15|128) // Tab: volume down -> volume up
+			if reads != oldReads {
+				t.Fatal("keyboard navigation polled the mixer")
+			}
+			feed(28, 28|128) // Enter: 99 -> 100, changing the bar width
+			if volume != 100 || b.bounds.Dx() <= oldWidth || b.focusedControl != systemBarVolumeUp {
+				t.Fatal("Enter lost its selected control across a layout change", volume, b.focusedControl)
+			}
+			feed(42, 15, 15|128, 42|128, 28, 28|128) // Shift+Tab, Enter: volume down
+			if volume != 96 {
+				t.Fatal("backward navigation did not activate volume down", volume)
+			}
+			feed(42, 15, 15|128, 42|128, 28, 28|128) // wrap backward to output selector
+			if mode != 1 {
+				t.Fatal("keyboard navigation did not wrap to the output selector")
+			}
+			feed(15, 15|128, 28, 28|128) // wrap forward to volume down
+			if volume != 92 {
+				t.Fatal("keyboard navigation did not wrap to the first control", volume)
+			}
+			feed(30, 30|128, 127, 255) // ASCII and Unicode must stay out of the PTY.
+			if len(keys) != 0 || text != "" || !slices.Equal(before, d.pixels) {
+				t.Fatal("system bar input or highlighting leaked into the terminal", keys, text)
+			}
+			// Losing native focus (VT switch) hides the outline but retains the return
+			// target, and acquiring it again restores the selected control.
+			d.callbacks.Lock()
+			d.callbacks.Focus(false)
+			if !b.focusBounds.Empty() {
+				t.Error("inactive VT retained its focus outline")
+			}
+			d.callbacks.Focus(true)
+			d.callbacks.Unlock()
+			feed(1, 1|128, 15, 15|128, 28, 28|128) // Escape, then ordinary PTY Tab/Enter
+			if b.focused || !b.focusBounds.Empty() || b.previousFocus != nil || b.focusWindow.FocusedWidget().ID() != root.ID() || !slices.Equal(keys, []uint{0xff09, 0xff0d}) {
+				t.Fatal("Escape did not restore terminal keyboard input", keys)
+			}
+		})
 	}
 }
 

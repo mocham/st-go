@@ -7,7 +7,10 @@ import (
 	"compress/zlib"
 	"encoding/base64"
 	"fmt"
+	"image"
 	"io"
+
+	"golang.org/x/image/draw"
 )
 
 // Keep the generated text atlas in source control so headless/pure-Go builds
@@ -20,6 +23,49 @@ var systemBarGlyphs = loadSystemBarGlyphs()
 // rather than relying on a font's private-use glyph coverage. They therefore
 // remain available on every framebuffer image and cannot degrade to '?'.
 var systemBarIcons = loadSystemBarIcons()
+
+type systemBarStyle struct {
+	cellWidth, cellHeight int
+	padding, focusWidth   int
+	glyphs                [256][]uint32
+}
+
+// Build the scaled atlas once per bar, using the same visible-resolution factor
+// as terminal text. Refreshes and focus changes only copy the cached glyphs.
+func newSystemBarStyle(scale float64) *systemBarStyle {
+	scaled := func(size int) int { return max(1, int(float64(size)*scale)) }
+	s := &systemBarStyle{
+		cellWidth: scaled(systemBarFontCellWidth), cellHeight: scaled(systemBarFontCellHeight),
+		padding: scaled(systemBarPadding), focusWidth: scaled(2),
+	}
+	copy(s.glyphs[:], systemBarGlyphs[:])
+	for ch, glyph := range systemBarIcons {
+		s.glyphs[ch] = glyph
+	}
+	if s.cellWidth != systemBarFontCellWidth || s.cellHeight != systemBarFontCellHeight {
+		for ch, glyph := range s.glyphs {
+			if glyph != nil {
+				s.glyphs[ch] = scaleSystemBarGlyph(glyph, s.cellWidth, s.cellHeight)
+			}
+		}
+	}
+	return s
+}
+
+func scaleSystemBarGlyph(glyph []uint32, width, height int) []uint32 {
+	src := image.NewRGBA(image.Rect(0, 0, systemBarFontCellWidth, systemBarFontCellHeight))
+	for i, pixel := range glyph {
+		src.Pix[4*i], src.Pix[4*i+1], src.Pix[4*i+2], src.Pix[4*i+3] = byte(pixel>>16), byte(pixel>>8), byte(pixel), 255
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	// Filter both text and icons to retain antialiased strokes at the smaller size.
+	draw.BiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
+	pixels := make([]uint32, width*height)
+	for i := range pixels {
+		pixels[i] = 0xff000000 | uint32(dst.Pix[4*i])<<16 | uint32(dst.Pix[4*i+1])<<8 | uint32(dst.Pix[4*i+2])
+	}
+	return pixels
+}
 
 func loadSystemBarIcons() map[byte][]uint32 {
 	icons := make(map[byte][]uint32, len(systemBarIconBitmapBase64))

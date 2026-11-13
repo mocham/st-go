@@ -34,13 +34,13 @@ FT_A        = $(FT_DIR)/libfreetype.a
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
-BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv gov govim opencode-tui
+BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv gov govim opencode-tui gxw
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
-DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gov demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gov demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat demo/gxw $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
 MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
 CFG         = functionalities/config/config.json
@@ -496,6 +496,17 @@ $(OUTPUT_DIR)/goiv: $(GOIV_GO_SRC)
 
 $(OUTPUT_DIR)/gov: $(GOV_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/gov build -trimpath -o $(abspath $@) .
+
+# Standalone X11 WM: native Go FreeType rasterization and X protocol.
+$(OUTPUT_DIR)/gxw: $(wildcard demo/gxw/*.go demo/gxw/go.*) | $(OUTPUT_DIR)
+	CGO_ENABLED=0 go -C demo/gxw build -trimpath -o $(abspath $@) .
+
+.PHONY: test-gxw test-gxw-x11
+test-gxw: gxw
+	CGO_ENABLED=0 GOWORK=off go -C demo/gxw test ./...
+
+test-gxw-x11: gxw
+	GXW_TEST_X11=1 CGO_ENABLED=0 GOWORK=off go -C demo/gxw test -run TestX11 -count=1 -v ./...
 
 # Native Go TUI editor, with terminal clipboard protocol and recovery journal.
 $(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC)

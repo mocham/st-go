@@ -9,4 +9,6 @@ import (
 //go:embed Monaco_Linux.ttf
 var embeddedFont []byte
 
-func main() { frontend.Main(openBackend, embeddedFont) }
+var backendStartup frontend.StartupOptions
+
+func main() { frontend.MainWithOptions(openBackend, embeddedFont, backendStartup) }

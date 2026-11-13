@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -44,27 +45,44 @@ func TestSessionLifecycleHelper(t *testing.T) {
 	if os.Getenv("ST_TEST_LIFECYCLE_BAD_SPAWN") == "1" {
 		command = []string{"/nonexistent/st-go-test-program"}
 	}
-	os.Args = append([]string{os.Args[0], "-e"}, command...)
+	args := []string{os.Args[0]}
+	if ratio := os.Getenv("ST_TEST_LIFECYCLE_RATIO"); ratio != "" {
+		args = append(args, "-ratio", ratio)
+	}
+	os.Args = append(append(args, "-e"), command...)
 	font, err := os.ReadFile("Monaco_Linux.ttf")
 	if err != nil {
 		t.Fatal(err)
 	}
-	Main(func(api.WindowOptions) (api.Host, error) {
+	options := StartupOptions{}
+	if scale := os.Getenv("ST_TEST_LIFECYCLE_SCALE"); scale != "" {
+		options.FontScale = func() (float64, error) { return strconv.ParseFloat(scale, 64) }
+	}
+	MainWithOptions(func(api.WindowOptions) (api.Host, error) {
 		return &lifecycleHost{done: make(chan struct{}), marker: marker}, nil
-	}, font)
+	}, font, options)
 	os.Exit(0)
 }
 
 func TestSessionExitAndSpawnFailureRestoreHost(t *testing.T) {
-	for _, badSpawn := range []bool{false, true} {
-		t.Run(map[bool]string{false: "child-exit", true: "spawn-failure"}[badSpawn], func(t *testing.T) {
+	for _, test := range []struct {
+		name, scale, ratio, size string
+		badSpawn                 bool
+	}{
+		{name: "child-exit", size: "10 30\n"},
+		{name: "spawn-failure", badSpawn: true},
+		{name: "scaled-display", scale: "0.8", size: "12 40\n"},
+		{name: "scaled-display-ratio", scale: "0.8", ratio: "1.25", size: "10 30\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			dir := t.TempDir()
 			marker := filepath.Join(dir, "restored")
 			size := filepath.Join(dir, "size")
 			backend := filepath.Join(dir, "backend")
 			cmd := exec.Command(os.Args[0], "-test.run=^TestSessionLifecycleHelper$")
 			cmd.Env = append(os.Environ(), "ST_TEST_LIFECYCLE_MARKER="+marker, "ST_TEST_LIFECYCLE_SIZE="+size, "ST_TEST_LIFECYCLE_BACKEND="+backend, "ST_GO_BACKEND=x11")
-			if badSpawn {
+			cmd.Env = append(cmd.Env, "ST_TEST_LIFECYCLE_SCALE="+test.scale, "ST_TEST_LIFECYCLE_RATIO="+test.ratio)
+			if test.badSpawn {
 				cmd.Env = append(cmd.Env, "ST_TEST_LIFECYCLE_BAD_SPAWN=1")
 			}
 			var output bytes.Buffer
@@ -77,7 +95,7 @@ func TestSessionExitAndSpawnFailureRestoreHost(t *testing.T) {
 			go func() { done <- cmd.Wait() }()
 			select {
 			case err := <-done:
-				if !badSpawn && err != nil {
+				if !test.badSpawn && err != nil {
 					t.Fatalf("helper: %v\n%s", err, output.String())
 				}
 			case <-time.After(6 * time.Second):
@@ -89,9 +107,9 @@ func TestSessionExitAndSpawnFailureRestoreHost(t *testing.T) {
 			if err != nil || string(data) != "restored" {
 				t.Fatalf("host restoration skipped: %v\n%s", err, output.String())
 			}
-			if !badSpawn {
+			if !test.badSpawn {
 				data, err := os.ReadFile(size)
-				if err != nil || string(data) != "10 30\n" {
+				if err != nil || string(data) != test.size {
 					t.Fatalf("child's initial size=%q, %v", data, err)
 				}
 				data, err = os.ReadFile(backend)

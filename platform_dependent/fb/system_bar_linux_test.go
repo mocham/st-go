@@ -263,15 +263,16 @@ func TestSystemBarCompositesAboveApplicationsWithoutChangingStoredPixels(t *test
 	now := time.Date(2026, 11, 10, 12, 34, 56, 0, time.Local)
 	d.refreshSystemBar(now)
 	b := d.systemBar
-	if b.bounds.Max != image.Pt(w, h) || b.bounds.Min.Y != h-2*systemBarPadding-systemBarFontCellHeight || b.bounds.Min.X <= 0 {
+	style := b.style
+	if b.bounds.Max != image.Pt(w, h) || b.bounds.Min.Y != h-2*style.padding-style.cellHeight || b.bounds.Min.X <= 0 {
 		t.Fatal("bar is not bounded to the bottom-right corner", b.bounds)
 	}
 	// The first character uses the anti-aliased Monaco cell, not the old
 	// block-scaled bitmap alphabet, with padding outside its font metrics.
-	for y := range systemBarFontCellHeight {
-		for x := range systemBarFontCellWidth {
-			want := systemBarGlyphs['2'][y*systemBarFontCellWidth+x] & 0xffffff
-			if pixelAt(d, b.textLeft+x, b.bounds.Min.Y+systemBarPadding+y) != want {
+	for y := range style.cellHeight {
+		for x := range style.cellWidth {
+			want := style.glyphs['2'][y*style.cellWidth+x] & 0xffffff
+			if pixelAt(d, b.textLeft+x, b.bounds.Min.Y+style.padding+y) != want {
 				t.Fatal("first digit did not use the Monaco atlas")
 			}
 		}
@@ -316,6 +317,76 @@ func TestSystemBarCompositesAboveApplicationsWithoutChangingStoredPixels(t *test
 	d.refreshSystemBar(now.Add(systemBarInterval))
 	if pixelAt(d, x-1, 0) != 0xbbaa99 {
 		t.Fatal("bar refresh bridged unrelated clean pixels")
+	}
+}
+
+func TestSystemBarResolutionLayoutAndHitTargets(t *testing.T) {
+	for _, tc := range []struct {
+		width, height, cellWidth, cellHeight, padding int
+	}{
+		{1024, 768, 16, 28, 6},
+		{1280, 800, 16, 28, 6},
+		{1281, 800, 21, 35, 8},
+		{1280, 801, 21, 35, 8},
+		{1920, 1080, 21, 35, 8},
+	} {
+		t.Run(fmt.Sprintf("%dx%d", tc.width, tc.height), func(t *testing.T) {
+			d := memoryDriver(t, tc.width, tc.height)
+			volume, brightness := 33, 20
+			d.systemBar = &systemBar{
+				powerSupplyPath: t.TempDir(), volumeLevel: volume,
+				setAudioVolume:   func(next int) bool { volume = next; return true },
+				brightness:       func() (int, int, bool) { return brightness, 100, true },
+				changeBrightness: func(delta int) (int, bool) { brightness += delta; return brightness, true },
+			}
+			now := time.Now()
+			d.refreshSystemBar(now)
+			b := d.systemBar
+			if b.bounds.Dy() != tc.cellHeight+2*tc.padding || b.bounds.Max != image.Pt(tc.width, tc.height) {
+				t.Fatal("incorrect bar height or anchoring", b.bounds)
+			}
+			if b.bounds.Dx() != len(b.text)*tc.cellWidth+2*tc.padding || b.textLeft-b.bounds.Min.X != tc.padding {
+				t.Fatal("incorrect bar width or padding", b.bounds, b.textLeft)
+			}
+			for ch, glyph := range b.style.glyphs {
+				if glyph == nil {
+					continue
+				}
+				if len(glyph) != tc.cellWidth*tc.cellHeight {
+					t.Fatalf("incorrect text/icon size for %#x", ch)
+				}
+				ink := false
+				for _, pixel := range glyph {
+					if pixel>>24 != 255 {
+						t.Fatal("scaled glyph is not opaque")
+					}
+					ink = ink || pixel != systemBarBackground
+				}
+				if ink != (ch != ' ') {
+					t.Fatalf("scaling lost glyph ink or painted a space: %#x", ch)
+				}
+			}
+			for _, button := range b.buttons() {
+				if button.control != systemBarVolumeUp && button.control != systemBarBrightnessUp {
+					continue
+				}
+				if button.bounds.Dx() != tc.cellWidth || button.bounds.Dy() != tc.cellHeight || button.bounds.Min.Y-b.bounds.Min.Y != tc.padding {
+					t.Fatal("keyboard target does not match the scaled icon", button.bounds)
+				}
+				point := button.bounds.Max.Sub(b.bounds.Min).Sub(image.Pt(1, 1))
+				d.systemBarClick(point.X, point.Y)
+				// The adjacent space must not retain the old, wider hit target.
+				d.systemBarClick(point.X+1, point.Y)
+			}
+			if volume != 36 || brightness != 25 {
+				t.Fatal("scaled icon edge/gap triggered incorrect actions", volume, brightness)
+			}
+			style := b.style
+			d.refreshSystemBar(now.Add(systemBarInterval))
+			if b.style != style {
+				t.Fatal("status refresh rebuilt the scaled atlas")
+			}
+		})
 	}
 }
 

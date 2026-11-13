@@ -21,15 +21,25 @@ import (
 // Version is reported by the -v flag. Tools such as fastfetch parse it.
 const Version = "0.9.2"
 
+type StartupOptions struct {
+	// FontScale queries the display after flags are parsed, before font loading
+	// and grid construction. Device-independent diagnostics skip this probe.
+	FontScale func() (float64, error)
+}
+
 // Main wires the native backend without making the shared host depend on it.
 func Main(open api.OpenHost, font []byte) {
+	MainWithOptions(open, font, StartupOptions{})
+}
+
+func MainWithOptions(open api.OpenHost, font []byte, options StartupOptions) {
 	openWindow = open
 	embeddedFont = font
 	defer closeFonts()
-	main()
+	main(options)
 }
 
-func main() {
+func main(options StartupOptions) {
 	vimMode, vimOptions, vimFile, err := parseVimInvocation(os.Args[1:])
 	if err != nil {
 		log.Fatal(err)
@@ -185,6 +195,13 @@ func main() {
 
 	if ratio <= 0 {
 		log.Fatalf("invalid --ratio value: %v", ratio)
+	}
+	if glyphOut == "" && options.FontScale != nil {
+		scale, err := options.FontScale()
+		if err != nil {
+			log.Fatalf("display scale: %v", err)
+		}
+		ratio *= scale
 	}
 
 	// the render size drives both the font rasterizer's pixel size and the cell

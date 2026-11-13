@@ -49,6 +49,7 @@ type systemBar struct {
 	nextPoll              time.Time
 	cachedStatus          string
 	text                  string
+	style                 *systemBarStyle
 	bounds                image.Rectangle
 	textLeft              int
 	pixels                []uint32
@@ -252,17 +253,21 @@ func (d *Driver) refreshSystemBar(now time.Time) bool {
 	if recordingLabel != d.recordingLabelLocked() {
 		b.nextRefresh = time.Time{}
 	}
+	l := d.screen.layout
+	if b.style == nil {
+		b.style = newSystemBarStyle(resolutionFontScale(uint32(l.width), uint32(l.height)))
+	}
 	if b.text == text {
 		d.mu.Unlock()
 		return false
 	}
 	old := b.bounds
 	b.text = text
-	width := 2*systemBarPadding + len(text)*systemBarFontCellWidth
-	l := d.screen.layout
-	b.bounds = image.Rect(max(0, l.width-width), max(0, l.height-2*systemBarPadding-systemBarFontCellHeight), l.width, l.height)
+	cw, ch, padding := b.style.cellWidth, b.style.cellHeight, b.style.padding
+	width := 2*padding + len(text)*cw
+	b.bounds = image.Rect(max(0, l.width-width), max(0, l.height-2*padding-ch), l.width, l.height)
 	// Keep the right edge (including audio output) visible on a narrow display.
-	b.textLeft = l.width - width + systemBarPadding
+	b.textLeft = l.width - width + padding
 	b.audioLeft = -1
 	b.volumeDownLeft = -1
 	b.volumeUpLeft = -1
@@ -274,27 +279,27 @@ func (d *Driver) refreshSystemBar(now time.Time) bool {
 	b.clipboardRight = -1
 	b.newTerminalLeft, b.newTerminalRight = -1, -1
 	if audioLeft >= 0 {
-		b.audioLeft = b.textLeft + audioLeft*systemBarFontCellWidth
+		b.audioLeft = b.textLeft + audioLeft*cw
 	}
 	if volumeDownLeft >= 0 {
-		b.volumeDownLeft = b.textLeft + volumeDownLeft*systemBarFontCellWidth
-		b.volumeUpLeft = b.textLeft + volumeUpLeft*systemBarFontCellWidth
+		b.volumeDownLeft = b.textLeft + volumeDownLeft*cw
+		b.volumeUpLeft = b.textLeft + volumeUpLeft*cw
 	}
 	if brightnessDownLeft >= 0 {
-		b.brightnessDownLeft = b.textLeft + brightnessDownLeft*systemBarFontCellWidth
-		b.brightnessUpLeft = b.textLeft + brightnessUpLeft*systemBarFontCellWidth
+		b.brightnessDownLeft = b.textLeft + brightnessDownLeft*cw
+		b.brightnessUpLeft = b.textLeft + brightnessUpLeft*cw
 	}
-	b.screenshotLeft = b.textLeft + screenshotLeft*systemBarFontCellWidth
-	b.screenshotRight = b.textLeft + screenshotRight*systemBarFontCellWidth
-	b.recordingLeft = b.textLeft + recordingLeft*systemBarFontCellWidth
-	b.recordingRight = b.textLeft + recordingRight*systemBarFontCellWidth
+	b.screenshotLeft = b.textLeft + screenshotLeft*cw
+	b.screenshotRight = b.textLeft + screenshotRight*cw
+	b.recordingLeft = b.textLeft + recordingLeft*cw
+	b.recordingRight = b.textLeft + recordingRight*cw
 	if clipboardLeft >= 0 {
-		b.clipboardLeft = b.textLeft + clipboardLeft*systemBarFontCellWidth
-		b.clipboardRight = b.textLeft + clipboardRight*systemBarFontCellWidth
+		b.clipboardLeft = b.textLeft + clipboardLeft*cw
+		b.clipboardRight = b.textLeft + clipboardRight*cw
 	}
 	if newTerminalLeft >= 0 {
-		b.newTerminalLeft = b.textLeft + newTerminalLeft*systemBarFontCellWidth
-		b.newTerminalRight = b.textLeft + newTerminalRight*systemBarFontCellWidth
+		b.newTerminalLeft = b.textLeft + newTerminalLeft*cw
+		b.newTerminalRight = b.textLeft + newTerminalRight*cw
 	}
 	b.rasterize()
 	// If the battery disappears or its percentage shrinks, restore the uncovered
@@ -355,8 +360,9 @@ func (d *Driver) systemBarClick(x, y int) {
 		d.refreshSystemBar(time.Now())
 		return
 	}
-	down := b.volumeDownLeft >= 0 && point.X >= b.volumeDownLeft && point.X < b.volumeDownLeft+systemBarFontCellWidth
-	up := b.volumeUpLeft >= 0 && point.X >= b.volumeUpLeft && point.X < b.volumeUpLeft+systemBarFontCellWidth
+	cw := b.style.cellWidth
+	down := b.volumeDownLeft >= 0 && point.X >= b.volumeDownLeft && point.X < b.volumeDownLeft+cw
+	up := b.volumeUpLeft >= 0 && point.X >= b.volumeUpLeft && point.X < b.volumeUpLeft+cw
 	if b.setAudioVolume != nil && (down || up) {
 		next := b.volumeLevel
 		if down {
@@ -371,8 +377,8 @@ func (d *Driver) systemBarClick(x, y int) {
 		setVolume(next)
 		return
 	}
-	brightnessDown := b.brightnessDownLeft >= 0 && point.X >= b.brightnessDownLeft && point.X < b.brightnessDownLeft+systemBarFontCellWidth
-	brightnessUp := b.brightnessUpLeft >= 0 && point.X >= b.brightnessUpLeft && point.X < b.brightnessUpLeft+systemBarFontCellWidth
+	brightnessDown := b.brightnessDownLeft >= 0 && point.X >= b.brightnessDownLeft && point.X < b.brightnessDownLeft+cw
+	brightnessUp := b.brightnessUpLeft >= 0 && point.X >= b.brightnessUpLeft && point.X < b.brightnessUpLeft+cw
 	if b.changeBrightness != nil && b.brightnessValid && (brightnessDown || brightnessUp) {
 		delta := systemBarBrightnessUpStep
 		if brightnessDown {
@@ -480,19 +486,16 @@ func (b *systemBar) pixel(x, y int) (uint32, bool) {
 	if b == nil || !image.Pt(x, y).In(b.bounds) {
 		return 0, false
 	}
-	if point := image.Pt(x, y); point.In(b.focusBounds) && !point.In(b.focusBounds.Inset(2)) {
+	style := b.style
+	if point := image.Pt(x, y); point.In(b.focusBounds) && !point.In(b.focusBounds.Inset(style.focusWidth)) {
 		return systemBarForeground, true
 	}
-	x, y = x-b.textLeft, y-b.bounds.Min.Y-systemBarPadding
-	if x >= 0 && y >= 0 && y < systemBarFontCellHeight {
-		at, col := x/systemBarFontCellWidth, x%systemBarFontCellWidth
+	x, y = x-b.textLeft, y-b.bounds.Min.Y-style.padding
+	if x >= 0 && y >= 0 && y < style.cellHeight {
+		at, col := x/style.cellWidth, x%style.cellWidth
 		if at < len(b.text) {
-			ch := b.text[at]
-			if ch < 128 && systemBarGlyphs[ch] != nil {
-				return systemBarGlyphs[ch][y*systemBarFontCellWidth+col], true
-			}
-			if glyph := systemBarIcons[ch]; glyph != nil {
-				return glyph[y*systemBarFontCellWidth+col], true
+			if glyph := style.glyphs[b.text[at]]; glyph != nil {
+				return glyph[y*style.cellWidth+col], true
 			}
 		}
 	}

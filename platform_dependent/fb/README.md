@@ -28,6 +28,13 @@ Avoid another display owner such as GPM on the same framebuffer.
 
 ## Rendering and input
 
+At startup, screens with visible width **≤1280** and height **≤800** use **80%**
+of the configured terminal font size. The font rasterizer, cell width/height and
+baseline scale together, including terminal tabs. The factor multiplies `-ratio`;
+for example, `-ratio 1.25` restores the configured size on these screens. Larger
+screens use the configured size with the usual `-ratio` multiplier. Detection
+uses the selected `-fb` device's visible resolution, rather than its virtual buffer.
+
 Terminal content, previews, caret, system bar, and pointer are retained separately.
 An independent presenter coalesces damage on a **60 Hz software clock** and copies
 only changed rows from a completed RAM buffer to scanout. Input and PTY processing
@@ -54,6 +61,11 @@ Legacy absolute axes and protocol-B multitouch slots are supported. Palm rejecti
 inertia, pinch/rotate, and multi-finger shortcuts are not implemented.
 
 ## System bar
+
+On screens with visible width **≤1280** and height **≤800**, the system bar also
+uses **80%** sizing for its text, icons, padding, and focus highlights. Mouse and
+keyboard targets follow the scaled layout. Its size follows screen resolution;
+`-ratio` adjusts terminal text separately. Scaled glyphs are cached at startup.
 
 The bottom-right bar shows time, battery, audio output/volume, and available
 brightness controls. It also offers:

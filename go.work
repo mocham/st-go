@@ -2,6 +2,7 @@ go 1.26.0
 
 use (
 	.
+	./demo/gxw
 	./demo-go
 	./demo-go/file-browser
 	./demo-go/goiv

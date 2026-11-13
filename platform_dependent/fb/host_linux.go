@@ -29,6 +29,11 @@ type Options struct {
 
 func RegisterFlags(fs *flag.FlagSet) api.OpenHost {
 	o := Options{}
+	o.RegisterFlags(fs)
+	return func(window api.WindowOptions) (api.Host, error) { return New(window, o) }
+}
+
+func (o *Options) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&o.Device, "fb", "/dev/fb0", "Linux framebuffer device")
 	fs.StringVar(&o.TTY, "tty", "/dev/tty", "active Linux virtual console (not a PTY)")
 	fs.StringVar(&o.Mouse, "mouse", "auto", "evdev mouse/touchpad paths (comma separated), auto, or none")
@@ -49,7 +54,6 @@ func RegisterFlags(fs *flag.FlagSet) api.OpenHost {
 		os.Exit(0)
 		return nil
 	})
-	return func(window api.WindowOptions) (api.Host, error) { return New(window, o) }
 }
 
 type Driver struct {

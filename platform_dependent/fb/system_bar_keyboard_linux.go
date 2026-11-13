@@ -31,25 +31,29 @@ type systemBarButton struct {
 // cannot move keyboard focus to a different action during a refresh.
 func (b *systemBar) buttons() []systemBarButton {
 	var buttons []systemBarButton
+	if b.style == nil {
+		return buttons
+	}
+	cw, ch, padding := b.style.cellWidth, b.style.cellHeight, b.style.padding
 	add := func(control systemBarControl, left, right int) {
 		if left < 0 {
 			return
 		}
-		r := image.Rect(left, b.bounds.Min.Y+systemBarPadding, right, b.bounds.Min.Y+systemBarPadding+systemBarFontCellHeight).Intersect(b.bounds)
+		r := image.Rect(left, b.bounds.Min.Y+padding, right, b.bounds.Min.Y+padding+ch).Intersect(b.bounds)
 		if !r.Empty() {
 			buttons = append(buttons, systemBarButton{control, r})
 		}
 	}
 	add(systemBarClipboard, b.clipboardLeft, b.clipboardRight)
-	add(systemBarVolumeDown, b.volumeDownLeft, b.volumeDownLeft+systemBarFontCellWidth)
-	add(systemBarVolumeUp, b.volumeUpLeft, b.volumeUpLeft+systemBarFontCellWidth)
-	add(systemBarBrightnessDown, b.brightnessDownLeft, b.brightnessDownLeft+systemBarFontCellWidth)
-	add(systemBarBrightnessUp, b.brightnessUpLeft, b.brightnessUpLeft+systemBarFontCellWidth)
+	add(systemBarVolumeDown, b.volumeDownLeft, b.volumeDownLeft+cw)
+	add(systemBarVolumeUp, b.volumeUpLeft, b.volumeUpLeft+cw)
+	add(systemBarBrightnessDown, b.brightnessDownLeft, b.brightnessDownLeft+cw)
+	add(systemBarBrightnessUp, b.brightnessUpLeft, b.brightnessUpLeft+cw)
 	add(systemBarScreenshot, b.screenshotLeft, b.screenshotRight)
 	add(systemBarRecording, b.recordingLeft, b.recordingRight)
 	add(systemBarNewTerminal, b.newTerminalLeft, b.newTerminalRight)
 	if b.audioLeft >= 0 {
-		add(systemBarAudioOutput, b.audioLeft+2*systemBarFontCellWidth, b.audioLeft+3*systemBarFontCellWidth)
+		add(systemBarAudioOutput, b.audioLeft+2*cw, b.audioLeft+3*cw)
 	}
 	return buttons
 }
@@ -69,7 +73,7 @@ func (b *systemBar) rasterize() {
 	if buttons := b.buttons(); b.focused && len(buttons) > 0 {
 		button := buttons[b.selectedButton(buttons)]
 		b.focusedControl = button.control
-		b.focusBounds = button.bounds.Inset(-2).Intersect(b.bounds)
+		b.focusBounds = button.bounds.Inset(-b.style.focusWidth).Intersect(b.bounds)
 	}
 	b.pixels = make([]uint32, b.bounds.Dx()*b.bounds.Dy())
 	for y := b.bounds.Min.Y; y < b.bounds.Max.Y; y++ {

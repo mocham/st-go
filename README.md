@@ -14,6 +14,7 @@ make st          # X11: BINARIES/st
 make st-fb       # Linux framebuffer/virtual console: BINARIES/st-fb
 make st-fb-min   # CGO-free framebuffer profile: BINARIES/st-fb-min
 make st-web      # CGO-free web server/client: BINARIES/st-web
+make gxw         # CGO-free fullscreen tabbed X11 session: BINARIES/gxw
 
 ./BINARIES/st
 ./BINARIES/st-fb -fb /dev/fb0 -tty /dev/tty -mouse auto
@@ -27,3 +28,4 @@ make st-web      # CGO-free web server/client: BINARIES/st-web
 - [Shared frontend, configuration, rendering, and limits](platform_neutral/frontend/README.md)
 - [Framebuffer](platform_dependent/fb/README.md), [X11](platform_dependent/x11/README.md), and [web](platform_dependent/web/README.md) backends
 - [Terminal protocols](platform_neutral/stterminal/README.md)
+- [gxw standalone tabbed X11 session](demo/gxw/README.md)
