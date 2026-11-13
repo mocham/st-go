@@ -40,7 +40,7 @@ FUNCTIONAL_MODULES = $(addprefix functionalities/,audio brightness config google
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
-DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gov demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat demo/gxw $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gov demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat demo-go/gxw $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
 MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
 CFG         = functionalities/config/config.json
@@ -452,7 +452,7 @@ $(OUTPUT_DIR)/st-web: $(GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -tags 'backend_web netgo osusergo $(TAB_GO_TAGS)' -o $@ .
 
 # Linux console fbdev/evdev host, with the existing full software media renderer.
-FB_STATUS_FONT = platform_dependent/fb/system_bar_font_generated.go
+FB_STATUS_FONT = functionalities/widgets/systembar/font_generated.go
 FONT_RASTER_SRC = $(filter-out %_test.go,$(wildcard platform_neutral/fontraster/*.go functionalities/limits/*.go))
 $(FB_STATUS_FONT): Monaco_Linux.ttf platform_dependent/fb/generate_system_bar_font.go $(FONT_RASTER_SRC) go.mod go.sum
 	CGO_ENABLED=0 GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go run platform_dependent/fb/generate_system_bar_font.go -font Monaco_Linux.ttf -output $@
@@ -498,15 +498,18 @@ $(OUTPUT_DIR)/gov: $(GOV_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/gov build -trimpath -o $(abspath $@) .
 
 # Standalone X11 WM: native Go FreeType rasterization and X protocol.
-$(OUTPUT_DIR)/gxw: $(wildcard demo/gxw/*.go demo/gxw/go.* functionalities/audio/*.go functionalities/brightness/*.go functionalities/widgets/systembar/*.go) $(MODULE_META) | $(OUTPUT_DIR)
-	CGO_ENABLED=0 go -C demo/gxw build -trimpath -o $(abspath $@) .
+demo-go/gxw/Monaco_Linux.ttf: Monaco_Linux.ttf
+	cp $< $@
+
+$(OUTPUT_DIR)/gxw: demo-go/gxw/Monaco_Linux.ttf $(FB_STATUS_FONT) $(wildcard demo-go/gxw/*.go demo-go/gxw/go.* functionalities/config/*.go functionalities/config/*.json functionalities/limits/*.go functionalities/audio/*.go functionalities/brightness/*.go functionalities/widgets/systembar/*.go) $(MODULE_META) | $(OUTPUT_DIR)
+	CGO_ENABLED=0 go -C demo-go/gxw build -trimpath -o $(abspath $@) .
 
 .PHONY: test-gxw test-gxw-x11
 test-gxw: gxw
-	CGO_ENABLED=0 GOWORK=off go -C demo/gxw test ./...
+	CGO_ENABLED=0 GOWORK=off go -C demo-go/gxw test ./...
 
 test-gxw-x11: gxw
-	GXW_TEST_X11=1 CGO_ENABLED=0 GOWORK=off go -C demo/gxw test -run TestX11 -count=1 -v ./...
+	GXW_TEST_X11=1 CGO_ENABLED=0 GOWORK=off sh demo-go/gxw/test-x11.sh go -C demo-go/gxw test -run TestX11 -count=1 -v ./...
 
 # Native Go TUI editor, with terminal clipboard protocol and recovery journal.
 $(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC)

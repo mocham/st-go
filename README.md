@@ -28,4 +28,4 @@ make gxw         # CGO-free fullscreen tabbed X11 session: BINARIES/gxw
 - [Shared frontend, configuration, rendering, and limits](platform_neutral/frontend/README.md)
 - [Framebuffer](platform_dependent/fb/README.md), [X11](platform_dependent/x11/README.md), and [web](platform_dependent/web/README.md) backends
 - [Terminal protocols](platform_neutral/stterminal/README.md)
-- [gxw standalone tabbed X11 session](demo/gxw/README.md)
+- [gxw standalone tabbed X11 session](demo-go/gxw/README.md)

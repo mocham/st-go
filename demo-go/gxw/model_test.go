@@ -44,7 +44,14 @@ func TestDialogPolicyAndGeometry(t *testing.T) {
 func TestOverflowTabsKeepActiveVisible(t *testing.T) {
 	for _, width := range []int{80, 200, 640, 1920} {
 		for active := 0; active < 37; active++ {
-			start, end, _ := tabRange(37, active, width, 32)
+			widths := make([]int, 37)
+			for i := range widths {
+				widths[i] = 128
+				if i%3 == 0 {
+					widths[i] = 32
+				}
+			}
+			start, end, _ := tabRange(widths, active, width, 32)
 			if start > active || end <= active || start < 0 || end > 37 {
 				t.Fatalf("width %d active %d: %d..%d", width, active, start, end)
 			}

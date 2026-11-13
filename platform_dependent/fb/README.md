@@ -49,10 +49,23 @@ With tabs enabled, **Alt+N** (number keys 1–9) selects the N-th PTY/tab, start
 with Alt+1 for the first. If N exceeds the open tab count, one new shell tab is
 appended and focused, subject to the eight-tab limit.
 
+Each tab label has a **−** shrink button. It becomes a small numbered window
+icon, leaving more space for other tabs while its PTY/service continues running.
+Click the icon to restore the title and select it. Shrinking the active tab
+selects another expanded tab when available; if all tabs are compact, the current
+terminal stays visible. Keyboard/wheel selection can inspect compact tabs without
+expanding them. This also works in `st-fb-min` with tabs enabled.
+
 **Alt+0** focuses the system bar and highlights its selected button. **Tab** cycles
 through visible buttons, **Shift+Tab** cycles backward, and **Enter** presses the
 selected button. **Escape** returns to the previous terminal; Alt+1…Alt+9 selects
 or opens a terminal tab as above.
+
+Hardware **Volume Up/Down** and **Brightness Up/Down** keys work globally, using
+the same bindings and steps as gxw: volume **+3/−4** percentage points and
+brightness **+5/−4** raw units. Both `st-fb` and `st-fb-min` support these keys,
+including repeat, with Caps Lock/Num Lock ignored and no other modifiers held.
+They update the bar immediately and also work when an icon is clipped or hidden.
 
 ### Touchpads
 

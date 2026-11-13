@@ -226,6 +226,26 @@ func (w *wm) activate(id xproto.Window) {
 	w.layout()
 }
 
+func (w *wm) shrinkTab(id xproto.Window) {
+	id = family(id, w.clients)
+	c := w.clients[id]
+	if c == nil {
+		return
+	}
+	c.compact = true
+	if w.active == id {
+		index := slices.Index(w.tabs, id)
+		for offset := 1; offset < len(w.tabs); offset++ {
+			next := w.tabs[(index+offset)%len(w.tabs)]
+			if !w.clients[next].compact {
+				w.activate(next)
+				return
+			}
+		}
+	}
+	w.drawBars()
+}
+
 func (w *wm) focus(id xproto.Window) {
 	c := w.clients[id]
 	if c != nil && !c.mapped {

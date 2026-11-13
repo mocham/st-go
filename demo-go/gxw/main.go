@@ -17,6 +17,7 @@ import (
 
 type options struct {
 	display, terminal, fontPath, screenshotPath string
+	configPath                                  string
 	fontSize                                    float64
 	noAutostart                                 bool
 	vt                                          int
@@ -43,9 +44,10 @@ func main() {
 	flag.StringVar(&o.display, "display", "", "local X display to start (default: next available)")
 	flag.IntVar(&o.vt, "vt", 0, "Linux virtual terminal (default: current text console)")
 	flag.StringVar(&o.terminal, "terminal", "", "terminal command, interpreted by /bin/sh")
-	flag.StringVar(&o.fontPath, "font", "", "TrueType font file (defaults to embedded Go Mono)")
+	flag.StringVar(&o.configPath, "config", "", "st JSON config (default: <exe-dir>/st.json, then config.json, else embedded)")
+	flag.StringVar(&o.fontPath, "font", "", "TrueType/TTC font file (overrides the st config font)")
 	flag.StringVar(&o.screenshotPath, "screenshot", "/tmp/gxw-screenshot.png", "screenshot output path")
-	flag.Float64Var(&o.fontSize, "font-size", 16, "bar font size in pixels (10..40)")
+	flag.Float64Var(&o.fontSize, "font-size", 16, "base tab font size in pixels (10..40; doubled above 1200x800)")
 	flag.BoolVar(&o.noAutostart, "no-autostart", false, "do not launch an initial terminal")
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: gxw [options] [-- initial-command args...]\nRun directly from a Linux text console. Starts xinit without user session scripts.")

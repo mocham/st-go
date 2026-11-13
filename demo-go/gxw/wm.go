@@ -12,6 +12,7 @@ import (
 	"github.com/jezek/xgb/randr"
 	"github.com/jezek/xgb/xproto"
 	"golang.org/x/image/font"
+	"st-go/widgets/systembar"
 )
 
 // All WM state and all X requests belong to run's goroutine. The event reader
@@ -26,6 +27,8 @@ type wm struct {
 	selection                        xproto.Atom
 	owned                            bool
 	width, height, barHeight         int
+	scale                            int
+	fonts                            *fontSource
 	face                             font.Face
 	pixels                           pixelFormat
 	clients                          map[xproto.Window]*client
@@ -35,7 +38,8 @@ type wm struct {
 	keys                             map[xproto.Keycode]uint32
 	ignoredMods                      uint16
 	hits                             map[xproto.Window][]hit
-	icons                            map[byte]*image.Alpha
+	systemStyle                      *systembar.Style
+	systemScale                      float64
 	status                           systemStatus
 	jobs                             chan string
 	message                          string
@@ -63,11 +67,13 @@ func newWM(o options) (*wm, error) {
 	if err != nil {
 		return nil, err
 	}
-	w.face, err = newFont(o.fontPath, int(o.fontSize))
+	w.fonts, err = configuredFonts(o)
 	if err != nil {
 		return nil, err
 	}
-	w.barHeight = w.face.Metrics().Height.Ceil() + 12
+	if err := w.updateScale(); err != nil {
+		return nil, err
+	}
 	for _, name := range atomNames {
 		if _, err = w.intern(name); err != nil {
 			return nil, err
@@ -117,7 +123,7 @@ func newWM(o options) (*wm, error) {
 	if w.tabbar, err = w.newWindow(0, 0, w.width, w.barHeight, "gxw tabs"); err != nil {
 		return nil, err
 	}
-	if w.systembar, err = w.newWindow(0, w.height-w.barHeight, w.width, w.barHeight, "gxw system bar"); err != nil {
+	if w.systembar, err = w.newWindow(0, w.height-w.systemStyle.Height(), w.width, w.systemStyle.Height(), "gxw system bar"); err != nil {
 		return nil, err
 	}
 	w.gc, err = xproto.NewGcontextId(conn)
@@ -171,8 +177,9 @@ func (w *wm) newWindow(x, y, width, height int, name string) (xproto.Window, err
 }
 
 func (w *wm) workarea() image.Rectangle {
-	h := min(w.barHeight, max(1, (w.height-1)/2))
-	return image.Rect(0, h, w.width, max(h+1, w.height-h))
+	top := min(w.barHeight, max(0, (w.height-1)/2))
+	bottom := min(w.systemStyle.Height(), max(0, w.height-top-1))
+	return image.Rect(0, top, w.width, w.height-bottom)
 }
 
 func (w *wm) updateWorkarea() {
@@ -325,8 +332,41 @@ func (w *wm) resize(width, height int) {
 		return
 	}
 	w.width, w.height = width, height
+	if err := w.updateScale(); err != nil {
+		log.Printf("resize font: %v", err)
+	}
 	w.updateWorkarea()
 	w.layout()
+}
+
+func resolutionScale(width, height int) int {
+	if width > 1200 || height > 800 {
+		return 2
+	}
+	return 1
+}
+
+func (w *wm) updateScale() error {
+	systemScale := systembar.ResolutionScale(w.width, w.height)
+	if w.systemStyle == nil || systemScale != w.systemScale {
+		w.systemStyle = systembar.NewStyle(systemScale)
+		w.systemScale = systemScale
+	}
+	scale := resolutionScale(w.width, w.height)
+	if scale == w.scale {
+		return nil
+	}
+	face, err := w.fonts.face(int(w.options.fontSize * float64(scale)))
+	if err != nil {
+		return err
+	}
+	previous := w.face
+	w.face, w.scale = face, scale
+	w.barHeight = face.Metrics().Height.Ceil()
+	if previous != nil {
+		previous.Close()
+	}
+	return nil
 }
 
 func (w *wm) notice(message string) {

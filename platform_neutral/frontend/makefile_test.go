@@ -61,7 +61,7 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 		"third_party_wrapper/image_decode.c", "third_party_wrapper/webp_anim.c",
 		"third_party_wrapper/recording_ffmpeg.c", "third_party_wrapper/recording_ffmpeg.h",
 		"third_party_wrapper/video_ffmpeg.c", "third_party_wrapper/video_ffmpeg.h", "third_party_wrapper/ffmpeg-configure.sh",
-		"platform_dependent/fb/generate_system_bar_font.go", "platform_dependent/fb/system_bar_font_generated.go",
+		"platform_dependent/fb/generate_system_bar_font.go", "functionalities/widgets/systembar/font_generated.go",
 		"third_party_wrapper/pdf_bridge.cpp", "pdf_bridge.h", "go.mod", "go.sum", "Monaco_Linux.ttf", "st", "file-browser") {
 		write(path, nil, old)
 	}
@@ -93,7 +93,7 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 	question("st-web", 1)
 	question("st-fb", 1)
 	question("file-browser", 1)
-	const statusFont = "platform_dependent/fb/system_bar_font_generated.go"
+	const statusFont = "functionalities/widgets/systembar/font_generated.go"
 	question(statusFont, 0)
 	// The framebuffer's Monaco atlas must rebuild when the bundled font changes,
 	// without rebuilding unrelated native archives or requiring runtime cgo.

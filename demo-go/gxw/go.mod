@@ -1,4 +1,4 @@
-module st-go/demo/gxw
+module st-go/demo-go/gxw
 
 go 1.26.0
 
@@ -8,17 +8,21 @@ require (
 	golang.org/x/image v0.40.0
 	st-go/audio v0.0.0
 	st-go/brightness v0.0.0
+	st-go/config v0.0.0
+	st-go/limits v0.0.0
 	st-go/widgets v0.0.0
 )
 
 require (
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )
 
 replace (
 	st-go/audio => ../../functionalities/audio
 	st-go/brightness => ../../functionalities/brightness
+	st-go/config => ../../functionalities/config
 	st-go/limits => ../../functionalities/limits
 	st-go/platform_neutral/api => ../../platform_neutral/api
 	st-go/widgets => ../../functionalities/widgets

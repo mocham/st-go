@@ -12,6 +12,7 @@ type client struct {
 	dialog, explicitDialog, modal    bool
 	urgent, input, takeFocus         bool
 	deleteWindow, fullscreen, mapped bool
+	compact                          bool
 	unmaps                           []uint16 // Sequences of our own UnmapWindow requests.
 	original, bounds                 image.Rectangle
 	border                           uint16
@@ -70,12 +71,33 @@ type hit struct {
 	window xproto.Window
 }
 
-func tabRange(count, active, width, height int) (start, end int, arrows bool) {
-	capacity := max(1, width/max(120, height*4))
-	if count <= capacity {
-		return 0, count, false
+func tabRange(widths []int, active, width, arrowWidth int) (start, end int, arrows bool) {
+	if len(widths) == 0 || width <= 0 {
+		return
 	}
-	capacity = max(1, (width-2*height)/max(120, height*4))
-	start = max(0, active) / capacity * capacity
-	return start, min(count, start+capacity), true
+	total := 0
+	for _, size := range widths {
+		total += size
+	}
+	arrows = total > width && width > 2*arrowWidth
+	if arrows {
+		width -= 2 * arrowWidth
+	}
+	active = max(0, min(active, len(widths)-1))
+	used := 0
+	for _, size := range widths[:active+1] {
+		used += size
+	}
+	for start < active && used > width {
+		used -= widths[start]
+		start++
+	}
+	used = 0
+	for end = start; end < len(widths); end++ {
+		if end > start && used+widths[end] > width {
+			break
+		}
+		used += widths[end]
+	}
+	return
 }

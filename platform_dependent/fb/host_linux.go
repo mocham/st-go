@@ -177,6 +177,9 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 func (d *Driver) Bind(c api.Callbacks) {
 	keyPress := c.KeyPress
 	c.KeyPress = func(key uint, modifiers uint16) {
+		if d.systemBarMediaKey(key, modifiers) {
+			return
+		}
 		if key == '0' && modifiers == altMask && d.focusSystemBar() {
 			return
 		}

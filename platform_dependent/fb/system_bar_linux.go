@@ -31,7 +31,7 @@ const (
 
 const (
 	systemBarInterval           = systembar.PollInterval
-	systemBarPadding            = 8
+	systemBarPadding            = systembar.Padding
 	systemBarBackground         = systembar.Background
 	systemBarForeground         = systembar.Foreground
 	systemBarMaxInitialVolume   = 50
@@ -365,17 +365,12 @@ func (d *Driver) systemBarClick(x, y int) {
 	down := b.volumeDownLeft >= 0 && point.X >= b.volumeDownLeft && point.X < b.volumeDownLeft+cw
 	up := b.volumeUpLeft >= 0 && point.X >= b.volumeUpLeft && point.X < b.volumeUpLeft+cw
 	if b.setAudioVolume != nil && (down || up) {
-		next := b.volumeLevel
+		delta := systemBarVolumeUpStep
 		if down {
-			next = max(0, next-systemBarVolumeDownStep)
-		} else {
-			next = min(systemBarMaxVolume, next+systemBarVolumeUpStep)
+			delta = -systemBarVolumeDownStep
 		}
-		b.volumeLevel = next
-		b.nextRefresh = time.Time{}
-		setVolume := b.setAudioVolume
 		d.mu.Unlock()
-		setVolume(next)
+		d.changeSystemBarVolume(delta)
 		return
 	}
 	brightnessDown := b.brightnessDownLeft >= 0 && point.X >= b.brightnessDownLeft && point.X < b.brightnessDownLeft+cw
@@ -385,22 +380,8 @@ func (d *Driver) systemBarClick(x, y int) {
 		if brightnessDown {
 			delta = -systemBarBrightnessDownStep
 		}
-		next := max(0, min(b.brightnessMaximum, b.brightnessLevel+delta))
-		b.brightnessLevel = next
-		b.brightnessOptimistic = true
-		b.nextRefresh = time.Time{}
-		change := b.changeBrightness
 		d.mu.Unlock()
-		actual, ok := change(delta)
-		if ok && actual != next {
-			d.mu.Lock()
-			if !d.closed && d.systemBar == b {
-				b.brightnessLevel = actual
-				b.brightnessOptimistic = true
-				b.nextRefresh = time.Time{}
-			}
-			d.mu.Unlock()
-		}
+		d.changeSystemBarBrightness(delta)
 		return
 	}
 	clipboard := b.clipboardLeft >= 0 && point.X >= b.clipboardLeft && point.X < b.clipboardRight

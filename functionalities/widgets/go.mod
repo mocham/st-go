@@ -3,6 +3,7 @@ module st-go/widgets
 go 1.26.0
 
 require (
+	golang.org/x/image v0.40.0
 	st-go/limits v0.0.0
 	st-go/platform_neutral/api v0.0.0
 )

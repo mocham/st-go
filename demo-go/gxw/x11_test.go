@@ -16,10 +16,11 @@ import (
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
+	"st-go/widgets/systembar"
 )
 
 // This test always starts an isolated X server; it never takes over DISPLAY.
-func testDisplay(t *testing.T) string {
+func testDisplay(t *testing.T, geometry ...string) string {
 	t.Helper()
 	path, err := exec.LookPath("Xvfb")
 	if err != nil {
@@ -36,7 +37,11 @@ func testDisplay(t *testing.T) string {
 		t.Fatal(err)
 	}
 	defer log.Close()
-	cmd := exec.Command(path, "-displayfd", "3", "-screen", "0", "1024x768x24", "-nolisten", "tcp", "-noreset")
+	size := "1024x768x24"
+	if len(geometry) > 0 {
+		size = geometry[0]
+	}
+	cmd := exec.Command(path, "-displayfd", "3", "-screen", "0", size, "-nolisten", "tcp", "-noreset")
 	cmd.ExtraFiles = []*os.File{w}
 	cmd.Stdout, cmd.Stderr = log, log
 	if err := cmd.Start(); err != nil {
@@ -63,6 +68,149 @@ func testDisplay(t *testing.T) string {
 	}
 	t.Fatal("isolated X server failed to start")
 	return ""
+}
+
+func TestX11ScaledBarsConfigAndResize(t *testing.T) {
+	if os.Getenv("GXW_TEST_X11") != "1" {
+		t.Skip("run make test-gxw-x11")
+	}
+	display := testDisplay(t, "1920x1080x24")
+	dir := t.TempDir()
+	data, err := os.ReadFile("../../functionalities/latexpdf/pdf_assets/DroidSansFallbackFull.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cjk.ttf"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"font":"cjk.ttf"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w, err := newWM(options{display: display, fontSize: 16, configPath: configPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.close()
+	if w.scale != 2 || w.fonts.fonts[0].Index('世') == 0 {
+		t.Fatal("X screen/config did not select high-resolution CJK rendering")
+	}
+	h := &xHarness{t: t, conn: w.conn, root: w.root, atoms: w.atoms}
+	id := h.window("世界 日本語", 0, false, false)
+	w.manage(id, true)
+	check := func() {
+		t.Helper()
+		area := w.workarea()
+		for _, bar := range []xproto.Window{w.tabbar, w.systembar} {
+			height := w.barHeight
+			if bar == w.systembar {
+				height = w.systemStyle.Height()
+			}
+			g, err := xproto.GetGeometry(w.conn, xproto.Drawable(bar)).Reply()
+			if err != nil || int(g.Width) != w.width || int(g.Height) != height {
+				t.Fatalf("scaled bar geometry: %+v %v", g, err)
+			}
+			if len(w.hits[bar]) == 0 {
+				t.Fatal("scaled bar has no pointer targets")
+			}
+		}
+		g, err := xproto.GetGeometry(w.conn, xproto.Drawable(id)).Reply()
+		if err != nil || int(g.Y) != area.Min.Y || int(g.Height) != area.Dy() {
+			t.Fatalf("client did not follow scaled workarea: %+v %v", g, err)
+		}
+		// The system bar uses exactly the framebuffer's cached cells, regardless
+		// of the separately configured CJK tab font and its high-DPI multiplier.
+		s := w.systemStyle
+		pixels, err := xproto.GetImage(w.conn, xproto.ImageFormatZPixmap, xproto.Drawable(w.systembar), 0, 0, uint16(w.width), uint16(s.Height()), 0xffffffff).Reply()
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, err := w.pixels.decode(pixels.Data, w.width, s.Height())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for y := 0; y < s.CellHeight; y++ {
+			for x := 0; x < s.CellWidth; x++ {
+				got := img.RGBAAt(w.width-s.Padding-s.CellWidth+x, s.Padding+y)
+				if got != systemColor(s.Glyphs[systembar.NewTerminalIcon][y*s.CellWidth+x]) {
+					t.Fatal("system bar icon differs from framebuffer pixels")
+				}
+			}
+		}
+	}
+	check()
+	large := w.barHeight
+	// Exercise the same final-geometry event path used by RandR/root resizes.
+	w.event(xproto.ConfigureNotifyEvent{Window: w.root, Width: 1024, Height: 768})
+	if w.scale != 1 || w.barHeight >= large {
+		t.Fatal("screen shrink did not restore smaller bars")
+	}
+	check()
+	w.event(xproto.ConfigureNotifyEvent{Window: w.root, Width: 1920, Height: 1080})
+	if w.scale != 2 || w.barHeight != large {
+		t.Fatal("screen growth did not restore larger bars")
+	}
+	check()
+}
+
+func TestX11ShrinkPreservesClientsAndDialogs(t *testing.T) {
+	if os.Getenv("GXW_TEST_X11") != "1" {
+		t.Skip("run make test-gxw-x11")
+	}
+	w, err := newWM(options{display: testDisplay(t), fontSize: 16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.close()
+	h := &xHarness{t: t, conn: w.conn, root: w.root, atoms: w.atoms}
+	a := h.window("Editor", 0, false, false)
+	w.manage(a, true)
+	b := h.window("JupyterLab service", 0, false, false)
+	w.manage(b, true)
+	dialog := h.window("Service dialog", b, true, false)
+	w.manage(dialog, true)
+	find := func(id xproto.Window, action string) hit {
+		t.Helper()
+		for _, target := range w.hits[w.tabbar] {
+			if target.window == id && target.action == action {
+				return target
+			}
+		}
+		t.Fatalf("missing %s target for %x", action, id)
+		return hit{}
+	}
+	click := func(target hit) {
+		w.event(xproto.ButtonPressEvent{Event: w.tabbar, Detail: 1, EventX: int16(target.rect.Min.X + target.rect.Dx()/2), EventY: int16(target.rect.Dy() / 2)})
+	}
+	full := find(b, "tab").rect.Dx()
+	click(find(b, "shrink"))
+	if !w.clients[b].compact || w.active != a || h.mapped(b) || h.mapped(dialog) || len(w.clients) != 3 {
+		t.Fatal("shrink did not preserve/background the client family")
+	}
+	if icon := find(b, "tab"); icon.rect.Dx() >= full || icon.rect.Dx() > 2*w.barHeight {
+		t.Fatal("shrunk service did not become a small icon", icon.rect)
+	}
+	h.text(b, "_NET_WM_NAME", "Service still running")
+	w.event(xproto.PropertyNotifyEvent{Window: b, Atom: w.atoms["_NET_WM_NAME"]})
+	w.event(xproto.ConfigureNotifyEvent{Window: w.root, Width: 1920, Height: 1080})
+	if !w.clients[b].compact || w.clients[b].title != "Service still running" {
+		t.Fatal("title/resize lost the compact service")
+	}
+	click(find(b, "tab"))
+	if w.clients[b].compact || w.active != b || !h.mapped(b) || !h.mapped(dialog) || len(w.clients) != 3 {
+		t.Fatal("numbered icon did not restore the same client family")
+	}
+	click(find(b, "shrink"))
+	xproto.DestroyWindow(w.conn, a)
+	w.remove(a)
+	if len(w.tabs) != 1 || w.tabs[0] != b || !w.clients[b].compact {
+		t.Fatal("closing another tab lost compact state or ordering")
+	}
+	click(find(b, "tab"))
+	click(find(b, "shrink"))
+	if w.active != b || !h.mapped(b) {
+		t.Fatal("shrinking the last tab left no active application")
+	}
 }
 
 type xHarness struct {

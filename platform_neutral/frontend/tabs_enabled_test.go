@@ -375,6 +375,78 @@ func TestTabsShareBottomBandWithPassiveSystemBar(t *testing.T) {
 	})
 }
 
+func TestShrunkTabKeepsAttachedServiceAndRestoresNumberedIcon(t *testing.T) {
+	root, m, _ := tabTestTerminal(t)
+	marker := filepath.Join(t.TempDir(), "service-output")
+	spawnTestTab(t, root, api.TabSpawnRequest{
+		Command:   []string{"/bin/bash", "-c", `while IFS= read -r line; do printf 'service:%s\n' "$line"; printf '%s\n' "$line" >> "$1"; done`, "service", marker},
+		Directory: t.TempDir(), Title: "jupyterlab",
+	})
+	var child *Terminal
+	var pid int
+	tabWindow(t, m, func() {
+		child = m.entries[1].terminal
+		pid = child.session.child.Process.Pid
+		m.resize(500, 100)
+		hit := m.hits[1]
+		m.click(1, hit.shrinkLeft+1)
+		if !m.entries[1].compact || m.active != 0 || child.Widget().Visible() || child.closed() {
+			t.Error("shrinking did not background the existing service tab")
+		}
+		if m.hits[1].right-m.hits[1].left != 3*m.renderer.cw || m.hits[1].shrinkLeft != -1 {
+			t.Error("shrunk tab is not a compact numbered icon", m.hits)
+		}
+	})
+	child.mu.Lock()
+	child.termCore.WriteToTTY([]byte("still-running\n"), false)
+	child.mu.Unlock()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		data, _ := os.ReadFile(marker)
+		child.mu.Lock()
+		var screen strings.Builder
+		for y := 0; y < child.rows; y++ {
+			screen.WriteString(child.termCore.LineText(y))
+		}
+		child.mu.Unlock()
+		if string(data) == "still-running\n" && strings.Contains(screen.String(), "service:still-running") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("shrunk service stopped running or parsing PTY output", string(data), screen.String())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	child.writeTerminalOutput(child.termCore, []byte("\x1b]0;updated service\a"))
+	tabWindow(t, m, func() {
+		if !m.entries[1].compact || m.entries[1].title != "updated service" {
+			t.Error("title update lost compact state")
+		}
+		m.selectTab(1)
+		m.resize(30, 50)
+		if len(m.hits) != 1 || m.hits[0].index != 1 || !m.entries[1].compact {
+			t.Error("narrow layout or keyboard selection lost the compact tab", m.hits)
+		}
+		m.resize(500, 100)
+		m.click(1, m.hits[1].left+1)
+		if m.entries[1].compact || m.active != 1 || child.session.child.Process.Pid != pid || child.closed() || !child.Widget().Visible() {
+			t.Error("icon restore replaced or failed to activate the attached PTY")
+		}
+		m.shrinkTab(1)
+	})
+	root.closeSession()
+	tabWindow(t, m, func() {
+		if len(m.entries) != 1 || !m.entries[0].compact || m.hits[0].index != 0 || child.closed() {
+			t.Error("closing an earlier tab lost the service icon/numbering")
+		}
+		m.click(1, m.hits[0].left+1)
+		m.shrinkTab(0)
+		if !m.entries[0].compact || !child.Widget().Visible() {
+			t.Error("shrinking the last tab left no accessible active terminal")
+		}
+	})
+}
+
 func TestNewTerminalButtonKeepsTabsUsableBesideFullWidthSystemBar(t *testing.T) {
 	root, m, _ := tabTestTerminal(t)
 	t.Setenv("SHELL", "/bin/sh")

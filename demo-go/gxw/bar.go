@@ -9,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/jezek/xgb/xproto"
-	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 	"st-go/widgets/systembar"
@@ -29,34 +29,12 @@ func systemColor(pixel uint32) color.RGBA {
 	return color.RGBA{byte(pixel >> 16), byte(pixel >> 8), byte(pixel), byte(pixel >> 24)}
 }
 
-func (w *wm) icon(kind byte) *image.Alpha {
-	if kind == 0 {
-		return nil
-	}
-	if w.icons == nil {
-		w.icons = make(map[byte]*image.Alpha)
-	}
-	if mask := w.icons[kind]; mask != nil {
-		return mask
-	}
-	source := systembar.Icon(kind)
-	if source == nil {
-		return nil
-	}
-	height := max(1, w.barHeight-8)
-	width := max(1, height*systembar.IconWidth/systembar.IconHeight)
-	mask := image.NewAlpha(image.Rect(0, 0, width, height))
-	xdraw.BiLinear.Scale(mask, mask.Rect, source, source.Rect, draw.Src, nil)
-	w.icons[kind] = mask
-	return mask
-}
-
 func (w *wm) label(img *image.RGBA, r image.Rectangle, text string, fg color.RGBA) {
 	r = r.Intersect(img.Rect)
 	if r.Empty() {
 		return
 	}
-	maxWidth := max(0, r.Dx()-16)
+	maxWidth := r.Dx()
 	if font.MeasureString(w.face, text).Ceil() > maxWidth {
 		runes := []rune(text)
 		// Binary search keeps a long application title from stalling redraws.
@@ -73,7 +51,7 @@ func (w *wm) label(img *image.RGBA, r image.Rectangle, text string, fg color.RGB
 	}
 	m := w.face.Metrics()
 	y := r.Min.Y + (r.Dy()-m.Ascent.Ceil()-m.Descent.Ceil())/2 + m.Ascent.Ceil()
-	d := font.Drawer{Dst: img.SubImage(r).(*image.RGBA), Src: image.NewUniform(fg), Face: w.face, Dot: fixed.P(r.Min.X+8, y)}
+	d := font.Drawer{Dst: img.SubImage(r).(*image.RGBA), Src: image.NewUniform(fg), Face: w.face, Dot: fixed.P(r.Min.X, y)}
 	d.DrawString(text)
 }
 
@@ -87,7 +65,7 @@ func (w *wm) button(img *image.RGBA, id xproto.Window, r image.Rectangle, label,
 		bg = activeBG
 	}
 	draw.Draw(img, r, image.NewUniform(bg), image.Point{}, draw.Src)
-	draw.Draw(img, image.Rect(r.Max.X-1, r.Min.Y+5, r.Max.X, r.Max.Y-5), image.NewUniform(activeBG), image.Point{}, draw.Src)
+	draw.Draw(img, image.Rect(r.Max.X-w.scale, r.Min.Y, r.Max.X, r.Max.Y), image.NewUniform(activeBG), image.Point{}, draw.Src)
 	fg := barFG
 	if c := w.clients[window]; c != nil && c.urgent {
 		fg = urgentFG
@@ -96,6 +74,33 @@ func (w *wm) button(img *image.RGBA, id xproto.Window, r image.Rectangle, label,
 	if action != "" {
 		w.hits[id] = append(w.hits[id], hit{rect: r, action: action, window: window})
 	}
+}
+
+func (w *wm) compactTab(img *image.RGBA, r image.Rectangle, index int, id xproto.Window) {
+	w.button(img, w.tabbar, r, "", "tab", id, id == w.active)
+	icon := r.Inset(w.scale).Intersect(img.Rect)
+	if icon.Empty() {
+		return
+	}
+	fg := barFG
+	if w.clients[id].urgent {
+		fg = urgentFG
+	}
+	stroke := max(1, w.scale)
+	for _, edge := range []image.Rectangle{
+		image.Rect(icon.Min.X, icon.Min.Y, icon.Max.X, icon.Min.Y+stroke),
+		image.Rect(icon.Min.X, icon.Max.Y-stroke, icon.Max.X, icon.Max.Y),
+		image.Rect(icon.Min.X, icon.Min.Y, icon.Min.X+stroke, icon.Max.Y),
+		image.Rect(icon.Max.X-stroke, icon.Min.Y, icon.Max.X, icon.Max.Y),
+	} {
+		draw.Draw(img, edge, image.NewUniform(fg), image.Point{}, draw.Src)
+	}
+	text := strconv.Itoa(index + 1)
+	m := w.face.Metrics()
+	x := r.Min.X + (r.Dx()-font.MeasureString(w.face, text).Ceil())/2
+	y := r.Min.Y + (r.Dy()-m.Ascent.Ceil()-m.Descent.Ceil())/2 + m.Ascent.Ceil()
+	d := font.Drawer{Dst: img.SubImage(icon).(*image.RGBA), Src: image.NewUniform(fg), Face: w.face, Dot: fixed.P(x, y)}
+	d.DrawString(text)
 }
 
 func (w *wm) drawBars() {
@@ -110,7 +115,14 @@ func (w *wm) drawBars() {
 	if len(w.tabs) == 0 {
 		w.label(top, top.Rect, "gxw  |  Alt+Enter: terminal  |  Alt+Shift+Q: end session", barFG)
 	} else {
-		start, end, arrows := tabRange(len(w.tabs), slices.Index(w.tabs, w.active), w.width, w.barHeight)
+		widths := make([]int, len(w.tabs))
+		for i, id := range w.tabs {
+			widths[i] = max(120*w.scale, w.barHeight*4)
+			if w.clients[id].compact {
+				widths[i] = max(w.barHeight, font.MeasureString(w.face, strconv.Itoa(i+1)).Ceil()+2*w.scale)
+			}
+		}
+		start, end, arrows := tabRange(widths, slices.Index(w.tabs, w.active), w.width, w.barHeight)
 		x, right := 0, w.width
 		if arrows {
 			w.button(top, w.tabbar, image.Rect(0, 0, w.barHeight, top.Rect.Dy()), "<", "prev", 0, false)
@@ -118,13 +130,35 @@ func (w *wm) drawBars() {
 			x = w.barHeight
 			right -= w.barHeight
 		}
-		available := max(1, right-x)
+		extra, expanded := max(1, right-x), 0
 		for i := start; i < end; i++ {
-			left := x + (i-start)*available/(end-start)
-			r := x + (i-start+1)*available/(end-start)
+			extra -= widths[i]
+			if !w.clients[w.tabs[i]].compact {
+				expanded++
+			}
+		}
+		extra = max(0, extra)
+		for i := start; i < end; i++ {
 			id := w.tabs[i]
+			width := widths[i]
+			if !w.clients[id].compact && expanded > 0 {
+				share := extra / expanded
+				width += share
+				extra -= share
+				expanded--
+			}
+			r := image.Rect(x, 0, min(right, x+width), top.Rect.Dy())
+			x = r.Max.X
+			if w.clients[id].compact {
+				w.compactTab(top, r, i, id)
+				continue
+			}
 			name := fmt.Sprintf("%d  %s", i+1, w.clients[id].title)
-			w.button(top, w.tabbar, image.Rect(left, 0, r, top.Rect.Dy()), name, "tab", id, id == w.active)
+			control := min(w.barHeight, r.Dx()/3)
+			label := r
+			label.Max.X -= control
+			w.button(top, w.tabbar, label, name, "tab", id, id == w.active)
+			w.button(top, w.tabbar, image.Rect(label.Max.X, r.Min.Y, r.Max.X, r.Max.Y), "-", "shrink", id, id == w.active)
 		}
 	}
 	w.upload(w.tabbar, top)
@@ -132,29 +166,23 @@ func (w *wm) drawBars() {
 	draw.Draw(bottom, bottom.Rect, image.NewUniform(barBG), image.Point{}, draw.Src)
 	x := w.width
 	put := func(text, action string, icon byte) {
-		width := font.MeasureString(w.face, text).Ceil() + 18
-		mask := w.icon(icon)
-		if mask != nil {
-			width += mask.Rect.Dx()
+		glyphs := []rune(text)
+		if icon != 0 {
 			if text != "" {
-				width += 4
+				glyphs = append([]rune{rune(icon), ' '}, glyphs...)
+			} else {
+				glyphs = []rune{rune(icon)}
 			}
 		}
+		width := len(glyphs)*w.systemStyle.CellWidth + 2*w.systemStyle.Padding
 		if x-width < 0 {
 			return
 		}
 		r := image.Rect(x-width, 0, x, bottom.Rect.Dy())
 		x -= width
-		if mask == nil {
-			w.button(bottom, w.systembar, r, text, action, 0, false)
-		} else {
-			w.button(bottom, w.systembar, r, "", action, 0, false)
-			at := image.Pt(r.Min.X+8, r.Min.Y+(r.Dy()-mask.Rect.Dy())/2)
-			draw.DrawMask(bottom, mask.Rect.Add(at), image.NewUniform(barFG), image.Point{}, mask, image.Point{}, draw.Over)
-			if text != "" {
-				r.Min.X += mask.Rect.Dx() + 4
-				w.label(bottom, r, text, barFG)
-			}
+		w.systemLabel(bottom, r, glyphs)
+		if action != "" {
+			w.hits[w.systembar] = append(w.hits[w.systembar], hit{rect: r, action: action})
 		}
 	}
 	// Clock and terminal button have priority on small screens.
@@ -186,8 +214,29 @@ func (w *wm) drawBars() {
 	if time.Now().Before(w.messageUntil) {
 		text = w.message
 	}
-	w.label(bottom, image.Rect(0, 0, max(0, x-4), bottom.Rect.Dy()), text, barFG)
+	w.systemLabel(bottom, image.Rect(0, 0, max(0, x), bottom.Rect.Dy()), []rune(text))
 	w.upload(w.systembar, bottom)
+}
+
+func (w *wm) systemLabel(img *image.RGBA, r image.Rectangle, text []rune) {
+	r = r.Intersect(img.Rect)
+	s := w.systemStyle
+	x, y := r.Min.X+s.Padding, r.Min.Y+s.Padding
+	for _, ch := range text {
+		if x+s.CellWidth > r.Max.X-s.Padding {
+			break
+		}
+		if ch < 0 || ch >= 256 || s.Glyphs[ch] == nil {
+			ch = '?'
+		}
+		glyph := s.Glyphs[ch]
+		for row := 0; row < s.CellHeight && y+row < r.Max.Y; row++ {
+			for col := 0; col < s.CellWidth; col++ {
+				img.SetRGBA(x+col, y+row, systemColor(glyph[row*s.CellWidth+col]))
+			}
+		}
+		x += s.CellWidth
+	}
 }
 
 func (w *wm) barClick(e xproto.ButtonPressEvent) {
@@ -208,7 +257,12 @@ func (w *wm) barClick(e xproto.ButtonPressEvent) {
 		}
 		switch h.action {
 		case "tab":
+			if c := w.clients[h.window]; c != nil {
+				c.compact = false
+			}
 			w.activate(h.window)
+		case "shrink":
+			w.shrinkTab(h.window)
 		case "next":
 			w.cycle(1)
 		case "prev":

@@ -104,6 +104,13 @@ func (k *keyboard) key(code int, down bool, cb api.Callbacks, switchVT func(int)
 		return
 	}
 	mods := k.modifiers()
+	if key := systemMediaKey(code); key != 0 {
+		if k.altGr() {
+			mods |= 128 // X11 Mod5: media shortcuts require no held modifiers.
+		}
+		cb.KeyPress(key, mods)
+		return
+	}
 	if mods&(controlMask|altMask) == controlMask|altMask {
 		if code == 14 {
 			if !repeat {

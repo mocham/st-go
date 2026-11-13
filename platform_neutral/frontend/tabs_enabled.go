@@ -25,6 +25,7 @@ type terminalTab struct {
 	terminal *Terminal
 	widget   api.Widget
 	title    string
+	compact  bool
 }
 type tabResult struct {
 	tab api.WidgetID
@@ -33,6 +34,7 @@ type tabResult struct {
 type tabHit struct {
 	left, right int
 	index       int
+	shrinkLeft  int // -1 for compact icons or a label too narrow for the button
 }
 
 // All policy state is serialized by WidgetWindow's native event domain. PTY
@@ -61,7 +63,7 @@ func configureTerminalTabs(t *Terminal, allowed bool) {
 	if token == "" {
 		return
 	}
-	m := &terminalTabs{control: control, container: t.Widget(), entries: []terminalTab{{t, t.Widget(), t.title}}, results: make(map[string]tabResult),
+	m := &terminalTabs{control: control, container: t.Widget(), entries: []terminalTab{{terminal: t, widget: t.Widget(), title: t.title}}, results: make(map[string]tabResult),
 		renderer: Terminal{cw: t.cw, ch: t.ch, baseline: t.baseline}}
 	t.cfg.TabSpawnToken = token
 	t.tabs = m
@@ -254,7 +256,7 @@ func (m *terminalTabs) createTab(origin *Terminal, request api.TabSpawnRequest) 
 		child.Close()
 		return fail(err)
 	}
-	m.entries = append(m.entries, terminalTab{child, widget, title})
+	m.entries = append(m.entries, terminalTab{terminal: child, widget: widget, title: title})
 	if m.bar == nil {
 		m.bar = bar
 		bar.Bind(api.Callbacks{PointerPress: func(button byte, _ uint16, x, _ int) { m.click(button, x) }})
@@ -372,6 +374,23 @@ func (m *terminalTabs) keyPress(key uint, mods uint16) bool {
 	return true
 }
 
+func (m *terminalTabs) shrinkTab(index int) {
+	if index < 0 || index >= len(m.entries) || m.entries[index].terminal.closed() {
+		return
+	}
+	m.entries[index].compact = true
+	if index == m.active {
+		for offset := 1; offset < len(m.entries); offset++ {
+			next := (index + offset) % len(m.entries)
+			if !m.entries[next].compact && !m.entries[next].terminal.closed() {
+				m.selectTab(next)
+				return
+			}
+		}
+	}
+	m.paintBar()
+}
+
 func (m *terminalTabs) click(button byte, x int) {
 	if len(m.entries) == 0 {
 		return
@@ -392,7 +411,12 @@ func (m *terminalTabs) click(button byte, x int) {
 		}
 		switch button {
 		case 1:
-			m.selectTab(hit.index)
+			if hit.shrinkLeft >= 0 && x >= hit.shrinkLeft {
+				m.shrinkTab(hit.index)
+			} else {
+				m.entries[hit.index].compact = false
+				m.selectTab(hit.index)
+			}
 		case 2:
 			m.entries[hit.index].terminal.closeSession()
 		}

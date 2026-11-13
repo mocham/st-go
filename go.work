@@ -2,13 +2,13 @@ go 1.26.0
 
 use (
 	.
-	./demo/gxw
 	./demo-go
 	./demo-go/file-browser
 	./demo-go/goiv
 	./demo-go/gov
 	./demo-go/gols
 	./demo-go/govim
+	./demo-go/gxw
 	./demo-go/opencode-tui
 	./demo-go/zat
 	./demo-go/zat-djvu

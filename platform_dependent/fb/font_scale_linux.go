@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+	"st-go/widgets/systembar"
 )
 
 // FontScale reads the visible mode before the frontend loads fonts or computes
@@ -32,8 +33,5 @@ func (o *Options) FontScale() (float64, error) {
 }
 
 func resolutionFontScale(width, height uint32) float64 {
-	if width <= 1280 && height <= 800 {
-		return 0.8
-	}
-	return 1
+	return systembar.ResolutionScale(int(width), int(height))
 }
