@@ -246,7 +246,6 @@ func main(options StartupOptions) {
 	if _, ok := t.host.(api.NativeVideoHost); ok {
 		cfg.NativeVideoToken = newGeometryToken()
 	}
-	configureTerminalTabs(t, allowTabs && !noTabs)
 	t.loadInputConfig(cfg)
 	if vimMode {
 		t.lockTitle = true
@@ -265,6 +264,7 @@ func main(options StartupOptions) {
 		core.SetWorkingDirectory(childDir)
 	}
 	t.attachTerm(core)
+	configureTerminalTabs(t, allowTabs && !noTabs)
 	t.setupKeys()
 	t.mu.Lock()
 	// Console hosts have a physical size independent of the configured grid.

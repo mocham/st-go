@@ -1,5 +1,3 @@
-//go:build terminal_tabs
-
 package frontend
 
 import (
@@ -17,38 +15,64 @@ func (m *terminalTabs) paintSceneBar(scene api.SceneTarget) {
 	cell := max(1, m.renderer.cw)
 	m.hits = nil
 	row := api.SceneRow{Y: 0, Height: r.Dy(), FontSize: m.renderer.ch, Baseline: max(0, (r.Dy()-m.renderer.ch)/2) + m.renderer.baseline, Background: 0xff2d2b46}
+	available := r.Dx()
+	m.imeLeft, m.imeRight = -1, -1
+	if m.active < len(m.entries) {
+		if v := m.entries[m.active].terminal.inputMethod.view.Load(); v != nil {
+			width := min(available, 9*cell)
+			if v.text != "" {
+				width = max(width, available-min(3*cell, available/4))
+			}
+			available -= width
+			m.imeLeft, m.imeRight = available, min(r.Dx(), available+9*cell)
+			label := " IME OFF "
+			if v.enabled {
+				label = " IME ON  "
+			}
+			label += v.text
+			at := available
+			for _, ch := range label {
+				advance := max(0, term.CellWidth(ch)) * cell
+				if at+advance > r.Dx() {
+					break
+				}
+				appendSceneText(&row, api.TextRun{X: at, Text: string(ch), Advance: advance, Foreground: 0xffc4dfb5, Background: row.Background})
+				at += advance
+			}
+		}
+	}
 	widths := make([]int, len(m.entries))
 	needed := 0
 	for i, entry := range m.entries {
-		widths[i] = terminalTabWidthCells * cell
+		widths[i] = min(available, terminalTabWidthCells*cell)
 		if entry.compact {
-			widths[i] = 3 * cell
+			widths[i] = min(available, 3*cell)
 		}
 		if i <= m.active {
 			needed += widths[i]
 		}
 	}
 	start := 0
-	for start < m.active && needed > r.Dx() {
+	for start < m.active && needed > available {
 		needed -= widths[start]
 		start++
 	}
 	var fills []api.SceneFill
 	x := 0
-	for i := start; i < len(m.entries) && x < r.Dx(); i++ {
-		if x > 0 && x+widths[i] > r.Dx() {
+	for i := start; i < len(m.entries) && x < available; i++ {
+		if x > 0 && x+widths[i] > available {
 			break
 		}
 		bg, fg := uint32(0xff2d2b46), uint32(0xffc4dfb5)
 		if i == m.active {
 			bg, fg = 0xff414967, 0xffffffff
 		}
-		end := min(r.Dx(), x+widths[i])
+		end := min(available, x+widths[i])
 		labelEnd, shrinkLeft := end, -1
 		text := strconv.Itoa(i+1) + " " + m.entries[i].title
 		if m.entries[i].compact {
 			text = " " + strconv.Itoa(i+1)
-		} else if end-x >= 3*cell {
+		} else if end-x >= 3*cell && m.allowed && available >= 12*cell {
 			shrinkLeft = end - 2*cell
 			labelEnd = shrinkLeft
 		}

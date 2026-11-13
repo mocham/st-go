@@ -30,6 +30,13 @@ func (t *Terminal) runAction(action, arg string) bool {
 	return true
 }
 func (t *Terminal) pasteToTTY(s string) {
+	if t.deferIME(imeInput{text: s, paste: true}) {
+		return
+	}
+	if t.inputMethod.stream != nil {
+		t.imeCommit(t.inputMethod.stream.Flush())
+		t.paintIME()
+	}
 	if t.termCore.WinMode()&term.ModeBrcktPaste != 0 {
 		t.termCore.WriteToTTY([]byte("\x1b[200~"), false)
 	}

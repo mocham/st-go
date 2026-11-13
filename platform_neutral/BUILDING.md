@@ -35,7 +35,8 @@ export PATH="$PWD/BINARIES:$PATH"
 
 Make builds include terminal tabs. Use `make TABS=0 st st-min st-fb st-fb-min st-web` to omit
 them, or `-no-tabs` to disable them at runtime. Direct Go builds must explicitly
-select the `terminal_tabs` tag. X11 is the default backend; select only one of
+select the `terminal_tabs` tag. The native input-helper bar remains available
+when tab spawning is disabled. X11 is the default backend; select only one of
 `backend_web` and `backend_fb` for another backend.
 
 ## Standalone binaries

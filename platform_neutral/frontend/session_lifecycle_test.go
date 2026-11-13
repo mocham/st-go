@@ -2,7 +2,9 @@ package frontend
 
 import (
 	"bytes"
+	"errors"
 	"flag"
+	"image"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +36,9 @@ func (h *lifecycleHost) Close() {
 	h.once.Do(func() { os.WriteFile(h.marker, []byte("restored"), 0600); close(h.done) })
 }
 func (h *lifecycleHost) Run() { <-h.done }
+func (*lifecycleHost) NewSurface(image.Rectangle, uint32) (api.Surface, error) {
+	return nil, errors.New("lifecycle-only host has no surfaces")
+}
 
 func TestSessionLifecycleHelper(t *testing.T) {
 	marker := os.Getenv("ST_TEST_LIFECYCLE_MARKER")

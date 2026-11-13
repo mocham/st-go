@@ -187,6 +187,9 @@ func (w *wm) drawBars() {
 	}
 	// Clock and terminal button have priority on small screens.
 	put("", "terminal", systembar.NewTerminalIcon)
+	if w.xim != nil {
+		put(w.xim.captureLabel(), "ime", 0)
+	}
 	now := w.status.sampledAt
 	if now.IsZero() {
 		now = time.Now()
@@ -216,6 +219,9 @@ func (w *wm) drawBars() {
 	}
 	w.systemLabel(bottom, image.Rect(0, 0, max(0, x), bottom.Rect.Dy()), []rune(text))
 	w.upload(w.systembar, bottom)
+	if w.xim != nil {
+		w.xim.draw()
+	}
 }
 
 func (w *wm) systemLabel(img *image.RGBA, r image.Rectangle, text []rune) {
@@ -256,6 +262,10 @@ func (w *wm) barClick(e xproto.ButtonPressEvent) {
 			continue
 		}
 		switch h.action {
+		case "ime":
+			if w.xim != nil {
+				w.xim.toggle(!w.xim.enabled)
+			}
 		case "tab":
 			if c := w.clients[h.window]; c != nil {
 				c.compact = false

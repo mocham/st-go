@@ -56,6 +56,7 @@ func (t *Terminal) serviceEvents(now time.Time) time.Time {
 		return time.Time{}
 	}
 	t.flushRegionReplies() // replies must progress even for invisible PTYs
+	t.pollIME()
 	if t.visualHidden {
 		t.nextBlink = time.Time{}
 		interval := hiddenRefresh(now.Sub(t.hiddenSince))
@@ -185,6 +186,10 @@ func (t *Terminal) expose() {
 }
 
 func (t *Terminal) focus(focused bool) {
+	if !focused && t.inputMethod.stream != nil {
+		t.flushIME()
+		t.paintIME()
+	}
 	t.setWinMode(focused, term.ModeFocused)
 	if t.termCore.WinMode()&term.ModeFocus != 0 {
 		sequence := "\x1b[O"
@@ -198,6 +203,7 @@ func (t *Terminal) focus(focused bool) {
 
 // resize recomputes cols/rows and resizes the terminal.
 func (t *Terminal) resize(w, h int) {
+	defer t.paintIME()
 	newCols := (w - 2*t.borderpx) / t.cw
 	newRows := (h - 2*t.borderpx) / t.ch
 	if newCols < 1 {

@@ -171,7 +171,7 @@ func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMa
 		"WM_DELETE_WINDOW", "UTF8_STRING", "CLIPBOARD", "PRIMARY", "TARGETS",
 		"INCR", "TIMESTAMP", "ATOM", "STRING", "WM_STATE", "INTEGER", "WM_CLASS",
 		"_NET_WM_NAME", "_NET_WM_ICON_NAME", "_NET_WM_PID", "CARDINAL",
-		"WM_NORMAL_HINTS", "WM_SIZE_HINTS", "BAR_DATA"} {
+		"WM_NORMAL_HINTS", "WM_SIZE_HINTS", "BAR_DATA", "_ST_GO_DIRECT_INPUT"} {
 		t.intern(name)
 	}
 	managerName := "_ST_GO_CLIPBOARD_SYNC_MANAGER"
@@ -247,6 +247,9 @@ func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMa
 		t.atoms["WM_CLASS"], t.atoms["STRING"], 8,
 		uint32(len(instance)+1+len(className)+1),
 		append([]byte(instance+"\x00"), []byte(className+"\x00")...))
+	// Native terminals own their direct-to-PTY helper, even when it is off.
+	// A cooperating WM must replay its trigger grab instead of composing twice.
+	xproto.ChangeProperty(xc, xproto.PropModeReplace, wid, t.atoms["_ST_GO_DIRECT_INPUT"], t.atoms["CARDINAL"], 32, 1, uint32Bytes(1))
 	xc.Sync()
 
 	wmDelete := t.atoms["WM_DELETE_WINDOW"]

@@ -18,6 +18,7 @@ import (
 // All WM state and all X requests belong to run's goroutine. The event reader
 // only transports events; system polling/commands return immutable results.
 type wm struct {
+	xim                              *ximServer
 	options                          options
 	conn                             *xgb.Conn
 	screen                           *xproto.ScreenInfo
@@ -141,6 +142,9 @@ func newWM(o options) (*wm, error) {
 	if err := w.setupKeys(); err != nil {
 		return nil, err
 	}
+	if err := w.startXIM(); err != nil {
+		return nil, err
+	}
 	if randr.Init(conn) == nil {
 		randr.SelectInput(conn, w.root, randr.NotifyMaskScreenChange)
 	}
@@ -221,6 +225,12 @@ func (w *wm) run(ctx context.Context) error {
 	go systemWorker(ctx, w.jobs, updates)
 	for !w.quit {
 		select {
+		case <-w.xim.pasteDeadline:
+			w.xim.finishPaste()
+			w.xim.drainCapture()
+			w.notice("Input text is on the clipboard; application did not accept paste")
+		case <-w.xim.wake:
+			w.xim.poll()
 		case <-ctx.Done():
 			return nil
 		case message := <-w.screenshots:
@@ -252,6 +262,9 @@ func (w *wm) run(ctx context.Context) error {
 }
 
 func (w *wm) event(event xgb.Event) {
+	if w.xim != nil && w.xim.event(event) {
+		return
+	}
 	switch e := event.(type) {
 	case xproto.MapRequestEvent:
 		if c := w.clients[e.Window]; c != nil {
@@ -378,6 +391,9 @@ func (w *wm) notice(message string) {
 func (w *wm) close() {
 	if w.conn == nil {
 		return
+	}
+	if w.xim != nil {
+		w.xim.close()
 	}
 	if w.owned {
 		for _, id := range w.order {

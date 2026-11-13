@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"errors"
 	"image"
 	"os"
 	"slices"
@@ -36,6 +37,9 @@ func (*widgetTestHost) SetupKeys()                   {}
 func (*widgetTestHost) SetTitle(string)              {}
 func (*widgetTestHost) SetIconTitle(string)          {}
 func (h *widgetTestHost) Close()                     { h.closed.Store(true) }
+func (*widgetTestHost) NewSurface(image.Rectangle, uint32) (api.Surface, error) {
+	return nil, errors.New("raster-only test host has no surfaces")
+}
 
 func terminalWidgets(t *testing.T) (*widgetTestHost, *Terminal, *Terminal) {
 	t.Helper()

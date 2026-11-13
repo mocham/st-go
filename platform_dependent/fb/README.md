@@ -43,7 +43,8 @@ not guarantee tear-free output: fbdev provides no portable synchronized page fli
 
 Keyboard input uses the Linux console keymap, including common modifiers,
 navigation keys, Unicode, and basic dead-key/Compose input. Restart after changing
-the console keymap. Full XKB/IME behavior is not implemented.
+the console keymap. Full XKB behavior is not implemented. The frontend supplies
+an optional in-process Pinyin input method, without XIM.
 
 With tabs enabled, **Alt+N** (number keys 1–9) selects the N-th PTY/tab, starting
 with Alt+1 for the first. If N exceeds the open tab count, one new shell tab is
@@ -72,6 +73,15 @@ They update the bar immediately and also work when an icon is clipped or hidden.
 Supported gestures: one-finger motion, tap/click/drag, and two-finger scrolling.
 Legacy absolute axes and protocol-B multitouch slots are supported. Palm rejection,
 inertia, pinch/rotate, and multi-finger shortcuts are not implemented.
+
+## Input helper
+
+**IME OFF / IME ON** in the tab bar toggles the active terminal's built-in Google Pinyin input
+method. It starts **off**, in both full and minimal framebuffer builds. Enable
+it, then type `[[[` to compose, **1–5** to select, **−/+** to page, and **Escape**
+or `]]]` to finish. Pending brackets, preedit, and candidates appear in that
+same bar using the configured CJK fallback font, including with a single tab
+or tab spawning disabled.
 
 ## System bar
 

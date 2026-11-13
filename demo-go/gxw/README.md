@@ -85,6 +85,7 @@ Fallback advances and metrics are used for mixed-language titles and clipping.
 | Print Screen / camera icon | Save `/tmp/gxw-screenshot.png` |
 | Volume-down icon, percentage, volume-up icon | Lower volume, toggle mute, raise volume |
 | Brightness-down / brightness-up icons | Lower/raise brightness |
+| IME ON / IME OFF | Enable/disable gxw's Pinyin input method |
 
 Caps Lock and Num Lock do not interfere with shortcuts. Media volume and
 brightness keys are supported. `-screenshot /path/to/file.png` changes the
@@ -111,6 +112,44 @@ Brightness uses the shared `st-go/brightness` implementation extracted from
 hardware controls are omitted; failures appear in the bar. Hardware operations
 run outside the X event loop, and controls refresh immediately after an action.
 
+## Pinyin input and Chromium
+
+The built-in, pure-Go Google Pinyin input method starts **enabled**. It buffers
+only `[` and `[[` until the next key: a third `[` enters composition; another
+key releases the captured brackets in their original order. In composition,
+type lowercase Pinyin, choose candidates with **1–5**, page with **−/+**, and
+edit with Backspace. **Escape** or **`]]]`** ends composition and commits its
+text without the delimiters. Escape preserves unconverted letters. Candidates
+appear above the system bar using the configured font/CJK fallback.
+
+The first `[` activates an X-server keyboard grab and immediately changes the
+system-bar button to **IME [**, then **IME [[**, then **CJK**. Capture happens
+before application dispatch, independently of application XIM event forwarding.
+The grab survives bracket release; complete key sequences stay ordered until
+composition finishes. With the helper off, the trigger is replayed normally.
+
+gxw implements XIM in-process over XGB, including per-input-context delivery,
+UTF-8/COMPOUND_TEXT commits, and ordered event forwarding. No IME daemon, cgo,
+GTK library, or libX11 is linked into gxw. The bundled dictionary is Apache-2.0;
+retain its [license and attribution](../../functionalities/googlepinyin/assets/NOTICE).
+
+Launched applications inherit `XMODIFIERS=@im=gxw`, `GTK_IM_MODULE=xim`, and
+`QT_IM_MODULE=xim`. Chromium works through its **X11** input path:
+
+```sh
+./BINARIES/gxw -- chromium --ozone-platform=x11
+```
+
+Default Chromium and explicit `--gtk-version=3` are covered by live tests.
+Applications without a gxw text context still get WM-level bracket capture;
+Chinese commits use clipboard paste (replacing CLIPBOARD contents). This fallback
+is tested with Chromium's XIM disabled and requires an application that accepts
+Ctrl+V. Native Wayland windows are outside this X11 WM's input path.
+
+st advertises `_ST_GO_DIRECT_INPUT`, so gxw replays the trigger to its own
+direct-to-PTY helper. st/st-fb use their tab-bar IME buttons independently of
+gxw's toggle, without XIM.
+
 ## Window policy
 
 - An explicit `_NET_WM_WINDOW_TYPE_DIALOG` or a live `WM_TRANSIENT_FOR` parent
@@ -132,6 +171,7 @@ run outside the X event loop, and controls refresh immediately after an action.
 CGO_ENABLED=0 GOWORK=off go -C demo-go/gxw build -o ../../BINARIES/gxw .
 make test-gxw
 make test-gxw-x11   # Xvfb; xinit also enables the real session-launch test
+GXW_TEST_CHROMIUM=1 make test-gxw-x11  # default GTK, GTK3, and XIM disabled
 ```
 
 The X11 target automatically uses persistent tools in `TEST-ASSETS/x11/bin`
@@ -143,4 +183,8 @@ Tests cover dialog classification, constrained geometry, overflow tabs, native
 Go font rendering, TrueColor byte orders, graphical-session rejection,
 argument/authentication setup, real xinit startup/shutdown, and live X11
 window/focus/input lifecycles. The X11 tests always use isolated test servers.
+The XIM interoperability test compiles a small Xlib/XTest client (C compiler and
+libX11/libXtst development files required for testing only). The optional
+Chromium test uses a temporary browser profile and real XTest keyboard input.
+The compiled Xlib probe is retained in `TEST-ASSETS/x11/bin/xim-client`.
 The private `--gxw-session` mode is reserved for the child invoked by `xinit`.

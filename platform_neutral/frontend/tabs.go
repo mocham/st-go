@@ -11,6 +11,7 @@ type terminalTabManager interface {
 	spawn(*Terminal, string, api.TabSpawnRequest) bool
 	titleChanged(api.WidgetID, string)
 	terminalClosed(api.WidgetID)
+	imeChanged(api.WidgetID)
 	run(*Terminal)
 }
 

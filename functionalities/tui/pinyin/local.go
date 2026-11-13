@@ -56,6 +56,7 @@ func (service *localService) Close() error {
 
 // NewLocalWorker performs lookups on a coalescing goroutine so an application
 // event loop never blocks on first-use corpus validation or a long composition.
-func NewLocalWorker() *Worker {
-	return NewWorker(func(context.Context) (Service, error) { return newLocalService(), nil })
+func NewLocalWorker(notify ...func()) *Worker {
+	ctx, cancel := context.WithCancel(context.Background())
+	return newWorker(ctx, cancel, func(context.Context) (Service, error) { return newLocalService(), nil }, notify...)
 }

@@ -29,6 +29,7 @@ type Color struct{ argb, pixel uint32 }
 // Native display resources and event decoding are accessed only through api.Host;
 // session-owned audio is a separate reusable service.
 type Terminal struct {
+	inputMethod                       terminalIME
 	host                              api.Host
 	fbW, fbH                          int
 	framebuf                          []uint32
@@ -207,6 +208,7 @@ func (t *Terminal) bindWidget(widget api.Widget) error {
 		}
 	}
 	widget.Bind(t.eventCallbacks())
+	t.initIME()
 	widget.SetTitle(t.title)
 	widget.SetIconTitle(t.iconTitle)
 	return nil
@@ -271,6 +273,7 @@ func (t *Terminal) Close() {
 	if !atomic.CompareAndSwapInt32(&t.isClosed, 0, 1) {
 		return
 	}
+	t.closeIME()
 	if t.done != nil {
 		close(t.done)
 	}

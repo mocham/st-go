@@ -35,15 +35,18 @@ type Line struct {
 	Cursor, Min, Limit   int
 	CancelEmptyBackspace bool
 	DisableIME           bool
-	view                 int
-	kill                 string
-	history              []string
-	historyIndex         int
-	draft                string
-	draftCursor          int
-	pending              []byte
-	ime                  *imeState
-	newPinyinWorker      func() *pinyin.Worker
+	// IMENotify wakes the owner after an asynchronous lookup. Set before Handle;
+	// it runs on the worker goroutine and must not mutate the line.
+	IMENotify       func()
+	view            int
+	kill            string
+	history         []string
+	historyIndex    int
+	draft           string
+	draftCursor     int
+	pending         []byte
+	ime             *imeState
+	newPinyinWorker func() *pinyin.Worker
 }
 
 func New(text string, minimum, limit int) *Line {
@@ -130,7 +133,7 @@ func (l *Line) queryIME() error {
 		if l.newPinyinWorker != nil {
 			state.worker = l.newPinyinWorker()
 		} else {
-			state.worker = pinyin.NewLocalWorker()
+			state.worker = pinyin.NewLocalWorker(l.IMENotify)
 		}
 	}
 	state.serial++
@@ -536,6 +539,10 @@ type Display struct {
 // IMEActive reports whether this line is currently interpreting a live [[[...
 // session. Escape leaves this mode without canceling the enclosing readline.
 func (l *Line) IMEActive() bool { return l.ime != nil }
+
+// IMESelectionPending lets native input owners preserve the order of opaque
+// key/paste events while an asynchronous candidate choice is being resolved.
+func (l *Line) IMESelectionPending() bool { return l.ime != nil && l.ime.selection != 0 }
 
 func (l *Line) candidateText() string {
 	if l.ime == nil || len(l.ime.response.Candidates) == 0 {

@@ -20,10 +20,32 @@ The same options generally apply to `st-fb` and `st-web`; see their
 [backend guides](../../platform_dependent/README.md) for launch requirements.
 Put terminal options before `-e`.
 
+## Built-in Pinyin input
+
+st/st-min enable the pure-Go Google Pinyin input method by default; st-fb and
+st-fb-min start with it **off**. Click **IME ON / IME OFF** in the **tab bar**
+to toggle it. The same bar shows the first held `[` / `[[`, preedit, and
+candidates. It is present with a single terminal and with `-no-tabs` or
+`TABS=0`. Each terminal has independent composition and toggle state.
+
+When enabled, only a possible `[[[` trigger is withheld: `[` or `[[` is
+released before the next non-`[` key. `[[[` opens the candidate strip. Type
+lowercase Pinyin, select **1–5**, page with **−/+**, and edit with Backspace,
+just like the shared readline component. **Escape** or **`]]]`** finishes the
+composition and sends its text to the PTY without delimiters. Unconverted
+letters are preserved. Navigation, focus changes, and disabling the IME flush
+unfinished text; queued input stays ordered behind asynchronous selection.
+Clipboard paste remains literal and does not activate Pinyin.
+
+The decoder and dictionary are bundled; no XIM, GTK, helper process, daemon, or
+network lookup is used. Candidates use the existing CJK font fallback. See the
+[dictionary license/notice](../../functionalities/googlepinyin/assets/NOTICE).
+
 ## Lazy terminal tabs
 
-Startup has one terminal and no tab bar. The first successful tab request creates
-the bar and preserves the original terminal in tab 1. The Go file browser uses
+Startup has one terminal. Native frontends already show the input-helper tab
+bar; web creates its bar on the first successful tab request. Additional tabs
+preserve the original terminal in tab 1. The Go file browser uses
 new focused tabs for its built-in document tools when support is enabled.
 
 - Click a tab to select it; wheel over the bar or Ctrl+Shift+PageUp/PageDown switches.

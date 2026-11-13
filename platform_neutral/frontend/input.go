@@ -259,7 +259,21 @@ func addFunctionKeys() []keyDef {
 // When Ctrl is held, translate Latin-1 keysyms to control bytes per Xlib.
 func (t *Terminal) textInput(text string) {
 	if t.termCore.WinMode()&term.ModeKbdLock == 0 {
-		t.termCore.WriteToTTY([]byte(text), true)
+		if t.inputMethod.stream == nil {
+			t.imeCommit(text)
+			return
+		}
+		for _, ch := range text {
+			if t.deferIME(imeInput{text: string(ch)}) {
+				continue
+			}
+			commit, consumed := t.inputMethod.stream.Key(string(ch))
+			t.imeCommit(commit)
+			if !consumed {
+				t.imeCommit(string(ch))
+			}
+		}
+		t.paintIME()
 	}
 }
 
@@ -268,10 +282,16 @@ func (t *Terminal) keyPress(ks uint, modifiers uint16) {
 	if t.termCore.WinMode()&term.ModeKbdLock != 0 {
 		return
 	}
+	if t.deferIME(imeInput{key: ks, mods: modifiers}) {
+		return
+	}
 	// resolve keysym (Shift-aware, Control-independent)
 	state := uint(modifiers) &^ t.ignoreMod
 	ctrl := modifiers&ControlMask != 0
 
+	if t.imeKey(ks, modifiers) {
+		return
+	}
 	// 1. shortcuts
 	if t.handleShortcut(ks, state) {
 		return

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/jezek/xgb/xproto"
 )
@@ -40,18 +41,7 @@ func (w *wm) setupKeys() error {
 		sym := uint32(r.Keysyms[i])
 		code := setup.MinKeycode + xproto.Keycode(i/stride)
 		w.keys[code] = sym
-		var modifiers []uint16
-		switch {
-		case sym >= '0' && sym <= '9', sym == 0xff0d, sym == 0xffc1, sym == 0xff51, sym == 0xff53:
-			modifiers = []uint16{xproto.ModMask1}
-		case sym == 'n', sym == 0xff09:
-			modifiers = []uint16{xproto.ModMask1, xproto.ModMask1 | xproto.ModMaskShift}
-		case sym == 'q':
-			modifiers = []uint16{xproto.ModMask1 | xproto.ModMaskShift}
-		case sym == 0xff61, sym == 0x1008ff11, sym == 0x1008ff12, sym == 0x1008ff13, sym == 0x1008ff02, sym == 0x1008ff03:
-			modifiers = []uint16{0}
-		}
-		for _, mods := range modifiers {
+		for _, mods := range wmKeyModifiers(sym) {
 			for ignore := uint16(0); ignore < 256; ignore++ {
 				if ignore & ^w.ignoredMods != 0 {
 					continue
@@ -62,7 +52,28 @@ func (w *wm) setupKeys() error {
 			}
 		}
 	}
+	if w.xim != nil {
+		return w.xim.grabTriggers()
+	}
 	return nil
+}
+
+func wmKeyModifiers(sym uint32) []uint16 {
+	switch {
+	case sym >= '0' && sym <= '9', sym == 0xff0d, sym == 0xffc1, sym == 0xff51, sym == 0xff53:
+		return []uint16{xproto.ModMask1}
+	case sym == 'n', sym == 0xff09:
+		return []uint16{xproto.ModMask1, xproto.ModMask1 | xproto.ModMaskShift}
+	case sym == 'q':
+		return []uint16{xproto.ModMask1 | xproto.ModMaskShift}
+	case sym == 0xff61, sym == 0x1008ff11, sym == 0x1008ff12, sym == 0x1008ff13, sym == 0x1008ff02, sym == 0x1008ff03:
+		return []uint16{0}
+	}
+	return nil
+}
+
+func (w *wm) ownsKey(e xproto.KeyPressEvent) bool {
+	return slices.Contains(wmKeyModifiers(w.keys[e.Detail]), e.State&0xff & ^w.ignoredMods)
 }
 
 func (w *wm) key(e xproto.KeyPressEvent) {

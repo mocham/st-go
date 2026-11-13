@@ -221,6 +221,9 @@ func (w *wm) activate(id xproto.Window) {
 		return
 	}
 	w.active = family(id, w.clients)
+	if w.focused != id && w.xim != nil {
+		w.xim.flushCapture()
+	}
 	w.focused = id
 	w.clients[id].urgent = false
 	w.layout()

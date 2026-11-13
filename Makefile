@@ -64,6 +64,7 @@ SEMHTML_SRC = $(wildcard functionalities/semhtml/*.go)
 TUI_NAV_SRC = $(wildcard functionalities/tui/navigation/*.go)
 TUI_SEARCH_SRC = $(wildcard functionalities/tui/textsearch/*.go)
 TUI_READLINE_SRC = $(wildcard functionalities/tui/readline/*.go functionalities/tui/pinyin/*.go functionalities/googlepinyin/*.go functionalities/googlepinyin/assets/*)
+TUI_IME_SRC = $(wildcard functionalities/tui/ime/*.go) $(TUI_READLINE_SRC)
 STTERMINAL_SRC = $(wildcard term/*.go platform_neutral/stterminal/*.go)
 FB_GO_SRC    = $(wildcard demo-go/file-browser/*.go) \
 	       $(wildcard platform_neutral/api/*.go) \
@@ -419,7 +420,7 @@ GC_EXTRA   = -Wl,--gc-sections
 WEB_ASSETS := $(wildcard platform_dependent/web/assets/* platform_dependent/web/assets/pdfjs/* platform_dependent/web/assets/pdfjs/*/*)
 PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go) $(WEB_ASSETS)
 GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard functionalities/config/*.go functionalities/audio/*.go functionalities/brightness/*.go functionalities/widgets/*.go functionalities/widgets/systembar/*.go) $(PLATFORM_SRC) \
-	  go.mod go.sum Monaco_Linux.ttf \
+	  go.mod go.sum Monaco_Linux.ttf $(TUI_IME_SRC) \
 	  $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go) \
           $(wildcard functionalities/config/*.json functionalities/ptyutil/*.go functionalities/terminfo/*.go) \
           $(wildcard third_party_wrapper/*.c) $(wildcard third_party_wrapper/*.h) \
@@ -501,7 +502,7 @@ $(OUTPUT_DIR)/gov: $(GOV_GO_SRC)
 demo-go/gxw/Monaco_Linux.ttf: Monaco_Linux.ttf
 	cp $< $@
 
-$(OUTPUT_DIR)/gxw: demo-go/gxw/Monaco_Linux.ttf $(FB_STATUS_FONT) $(wildcard demo-go/gxw/*.go demo-go/gxw/go.* functionalities/config/*.go functionalities/config/*.json functionalities/limits/*.go functionalities/audio/*.go functionalities/brightness/*.go functionalities/widgets/systembar/*.go) $(MODULE_META) | $(OUTPUT_DIR)
+$(OUTPUT_DIR)/gxw: demo-go/gxw/Monaco_Linux.ttf $(FB_STATUS_FONT) $(wildcard demo-go/gxw/*.go demo-go/gxw/go.* functionalities/config/*.go functionalities/config/*.json functionalities/limits/*.go functionalities/audio/*.go functionalities/brightness/*.go functionalities/widgets/systembar/*.go) $(TUI_IME_SRC) $(MODULE_META) | $(OUTPUT_DIR)
 	CGO_ENABLED=0 go -C demo-go/gxw build -trimpath -o $(abspath $@) .
 
 .PHONY: test-gxw test-gxw-x11

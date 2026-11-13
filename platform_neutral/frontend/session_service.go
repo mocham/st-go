@@ -129,4 +129,6 @@ func (*serviceTabs) titleChanged(api.WidgetID, string) {}
 func (*serviceTabs) terminalClosed(api.WidgetID)       {}
 func (*serviceTabs) run(t *Terminal)                   { t.run() }
 
+func (*serviceTabs) imeChanged(api.WidgetID) {}
+
 var _ terminalTabManager = (*serviceTabs)(nil)

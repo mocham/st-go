@@ -45,6 +45,7 @@ require (
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
+	st-go/googlepinyin v0.0.0 // indirect
 )
 
 replace (

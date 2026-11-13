@@ -1,7 +1,7 @@
 # `st-go/googlepinyin`
 
 This module is the pure-Go dictionary and search frontend used directly by the
-universal readline and govim input paths. It has no display,
+universal readline, govim, terminal, and gxw input paths. It has no display,
 input-method-framework, cgo, or OS dependency.
 
 The package provides bounded build and lookup APIs:

@@ -119,6 +119,7 @@ func (w *wm) launchTerminal() {
 func (w *wm) launch(args []string) {
 	cmd := exec.Command(args[0], args[1:]...)
 	cmd.Env = os.Environ()
+	cmd.Env = append(cmd.Env, "XMODIFIERS=@im=gxw", "GTK_IM_MODULE=xim", "QT_IM_MODULE=xim")
 	if w.options.display != "" {
 		cmd.Env = append(cmd.Env, "DISPLAY="+w.options.display)
 	}

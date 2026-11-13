@@ -19,6 +19,7 @@ type Worker struct {
 	results  chan Result
 	cancel   context.CancelFunc
 	done     chan struct{}
+	notify   func()
 }
 
 func NewWorker(start func(context.Context) (Service, error)) *Worker {
@@ -26,8 +27,11 @@ func NewWorker(start func(context.Context) (Service, error)) *Worker {
 	return newWorker(ctx, cancel, start)
 }
 
-func newWorker(ctx context.Context, cancel context.CancelFunc, start func(context.Context) (Service, error)) *Worker {
-	w := &Worker{make(chan Request, 1), make(chan Result, 1), cancel, make(chan struct{})}
+func newWorker(ctx context.Context, cancel context.CancelFunc, start func(context.Context) (Service, error), notify ...func()) *Worker {
+	w := &Worker{requests: make(chan Request, 1), results: make(chan Result, 1), cancel: cancel, done: make(chan struct{})}
+	if len(notify) != 0 {
+		w.notify = notify[0]
+	}
 	go func() {
 		defer close(w.done)
 		service, err := start(ctx)
@@ -73,6 +77,9 @@ func (w *Worker) publish(ctx context.Context, r Result) {
 	default:
 	}
 	w.results <- r
+	if w.notify != nil {
+		w.notify()
+	}
 }
 func (w *Worker) Submit(r Request) error {
 	if err := r.Validate(); err != nil {
