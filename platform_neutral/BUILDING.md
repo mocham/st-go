@@ -8,7 +8,7 @@ Run commands from the repository root. Executables are written to `BINARIES/`.
 - Full native terminals (`st`, `st-fb`) and `zat-djvu`: cgo, C/C++ compilers, static glibc, `curl`,
   `tar`, and `cmake`. Make downloads and builds the required native libraries.
 - `st-fb` also requires `pkg-config` and, on x86, NASM to build its bundled
-  FFmpeg/x264 recording components. These are build-time tools only.
+  FFmpeg/x264 recording and playback components. These are build-time tools only.
 - `st-min`, `st-fb-min`, `st-web`, and the other Go applications build with
   `CGO_ENABLED=0`. Minimal targets require no C compiler or `third_party/` assets.
 
@@ -46,9 +46,12 @@ FreeType C, accelerated PNG/JPEG/WebP decoding, animated WebP,
 and Poppler PDF rendering.
 
 `st-fb` also embeds a restricted FFmpeg 8.1.3 build and pinned x264 source for
-H.264/MP4 screen recording. Make downloads checksum-verified sources into
-`third_party/` and links five archives: avformat, avcodec, avutil, swscale, and
-x264. External library autodetection, networking, devices, filters, and other
+H.264/MP4 screen recording and [`gov`](../demo-go/gov/README.md) playback.
+Make downloads checksum-verified sources into `third_party/` and links six
+archives: avformat, avcodec, avutil, swscale, swresample, and x264. MP4/MOV demuxing,
+H.264/HEVC/MPEG-4 video decoding, and AAC/MP3 audio decoding are enabled by the
+tracked `third_party_wrapper/ffmpeg-configure.sh` build profile. External library
+autodetection, networking, devices, filters, and other
 encoders are disabled. The Go bridge selects this implementation with
 `ffmpeg_static`; `st-fb-min` continues to invoke external `ffmpeg` at runtime.
 
@@ -91,6 +94,7 @@ make test-web             # web protocol, shared clipboard, service/PTY lifecycl
 make test-web-browser     # direct + shared-service Chromium checks; Node >=22, no npm
 make test-zat-djvu        # bundled static DjVuLibre profile
 make test-fb-recording    # external and bundled-static framebuffer recording
+make test-gov             # bundled MP4 playback and terminal/client lifecycle
 go test -race ./platform_neutral/fontraster
 ```
 

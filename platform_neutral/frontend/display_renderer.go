@@ -85,6 +85,17 @@ func (t *Terminal) closeRegionPresenter() {
 }
 
 func (t *Terminal) exposeRegion(surface api.Surface) {
+	if v := t.video; v != nil {
+		v.mu.Lock()
+		matched := v.surface == surface && surface != nil
+		if matched {
+			surface.Expose()
+		}
+		v.mu.Unlock()
+		if matched {
+			return
+		}
+	}
 	p := &t.displayRegions.presenter
 	p.mu.Lock()
 	if p.native == surface && p.native != nil && p.last != nil && p.native.Expose() {

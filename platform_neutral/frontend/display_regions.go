@@ -284,6 +284,7 @@ func (t *Terminal) applyDisplayLayout(cols, rows int) {
 	}
 	s.mu.Unlock()
 	t.configureRegionPresenter()
+	_ = t.configureVideo()
 	if t.termCore != nil {
 		if t.termCore.Cols() != mainCols || t.termCore.Rows() != mainRows {
 			t.termCore.Tresize(mainCols, mainRows)

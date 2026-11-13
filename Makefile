@@ -9,7 +9,7 @@
 #   - libpng      : poppler's embedded-image support
 #   - libjpeg-turbo: poppler's JPEG/DCT image decoder
 #   - DjVuLibre  : static DjVu decoding for zat-djvu
-#   - FFmpeg/x264: H.264/MP4 recording in st-fb
+#   - FFmpeg/x264: MP4 recording and playback in st-fb
 # SQLite uses the pure-Go modernc.org/sqlite driver on every backend.
 #
 # Full terminal profiles also use libpng and libjpeg-turbo for accelerated PNG
@@ -34,13 +34,13 @@ FT_A        = $(FT_DIR)/libfreetype.a
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
-BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv govim opencode-tui
+BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv gov govim opencode-tui
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
-DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gov demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
 MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
 CFG         = functionalities/config/config.json
@@ -74,6 +74,7 @@ ZAT_GO_SRC = $(wildcard demo-go/zat/*.go functionalities/limits/*.go functionali
 ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat-djvu/*.h demo-go/zat-djvu/go.mod demo-go/zat-djvu/go.sum functionalities/limits/*.go functionalities/pdfmeta/*.go) \
 	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
 GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
+GOV_GO_SRC = $(wildcard demo-go/gov/*.go functionalities/tui/video/*.go platform_neutral/api/*.go)
 TUI_WRITING_SRC = $(wildcard functionalities/tui/appbus/*.go functionalities/tui/writing/*.go)
 GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/go.* demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(TUI_WRITING_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 OPENCODE_TUI_GO_SRC = $(wildcard demo-go/opencode-tui/*.go demo-go/opencode-tui/go.* functionalities/tui/preview/*.go platform_neutral/api/*.go) $(TUI_READLINE_SRC) $(TUI_WRITING_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
@@ -127,7 +128,7 @@ WEBP_DEMUX   = third_party/webp/lib/libwebpdemux.a
 WEBP_ANIM_C  = third_party_wrapper/webp_anim.c
 WEBP_ANIM_O  = third_party/webp/webp_anim.o
 
-# Framebuffer recording: a deliberately small, static FFmpeg + x264 build.
+# Framebuffer media: a restricted static FFmpeg + x264 build.
 X264_VERSION = b35605ace3ddf7c1a5d67a2eb553f034aef41d55
 X264_URL = https://code.videolan.org/videolan/x264/-/archive/$(X264_VERSION)/x264-$(X264_VERSION).tar.bz2
 X264_SHA256 = 6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224
@@ -141,8 +142,9 @@ FFMPEG_SHA256 = 7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3
 FFMPEG_TAR = third_party/ffmpeg-$(FFMPEG_VERSION).tar.xz
 FFMPEG_SRC = third_party/ffmpeg-src
 FFMPEG_DIR = third_party/ffmpeg
-FFMPEG_LIBS = $(addprefix $(FFMPEG_DIR)/lib/,libavformat.a libavcodec.a libswscale.a libavutil.a)
+FFMPEG_LIBS = $(addprefix $(FFMPEG_DIR)/lib/,libavformat.a libavcodec.a libswscale.a libswresample.a libavutil.a)
 FFMPEG_BRIDGE = third_party/recording_ffmpeg.o
+VIDEO_BRIDGE = third_party/video_ffmpeg.o
 FFMPEG_STAMP = $(FFMPEG_DIR)/include/st_go_ffmpeg_static.h
 
 # Build every terminal profile/backend, demo, and helper.
@@ -362,32 +364,29 @@ $(FFMPEG_TAR):
 	printf '%s  %s\n' '$(FFMPEG_SHA256)' '$@.tmp' | sha256sum -c -
 	mv "$@.tmp" "$@"
 
-# One recipe owns all four archives, including under parallel make. No host
-# media libraries are auto-detected; only local-file H.264/MP4 recording is built.
-$(FFMPEG_LIBS) &: $(X264_LIB)
+# One recipe owns the archives, including under parallel make. No host media
+# libraries are auto-detected; the tracked profile enables local MP4 playback.
+$(FFMPEG_LIBS) &: $(X264_LIB) third_party_wrapper/ffmpeg-configure.sh
 	@if [ ! -f "$(FFMPEG_TAR)" ]; then $(MAKE) --no-print-directory "$(FFMPEG_TAR)"; fi
 	printf '%s  %s\n' '$(FFMPEG_SHA256)' '$(FFMPEG_TAR)' | sha256sum -c -
 	rm -rf "$(FFMPEG_SRC)" "$(FFMPEG_DIR)"
 	mkdir -p "$(FFMPEG_SRC)"
 	tar -xJf "$(FFMPEG_TAR)" -C "$(FFMPEG_SRC)" --strip-components=1
-	cd "$(FFMPEG_SRC)" && PKG_CONFIG_PATH="$(abspath $(X264_DIR)/lib/pkgconfig)" \
-		./configure --prefix="$(abspath $(FFMPEG_DIR))" --pkg-config-flags=--static \
-		--enable-static --disable-shared --enable-pic --enable-gpl --enable-libx264 \
-		--disable-autodetect --disable-everything --disable-programs --disable-doc \
-		--disable-debug --disable-network --disable-iconv --disable-avdevice --disable-avfilter --disable-swresample \
-		--enable-avformat --enable-avcodec --enable-avutil --enable-swscale \
-		--enable-encoder=libx264 --enable-muxer=mp4 --enable-protocol=file \
-		--extra-cflags="-O2 -ffunction-sections -fdata-sections"
+	cd "$(FFMPEG_SRC)" && sh "$(abspath third_party_wrapper/ffmpeg-configure.sh)" \
+		"$(abspath $(FFMPEG_DIR))" "$(abspath $(X264_DIR))"
 	$(MAKE) -C "$(FFMPEG_SRC)" install-libs install-headers
 	cp "$(FFMPEG_SRC)/COPYING.GPLv2" "$(FFMPEG_DIR)/LICENSE"
 
 $(FFMPEG_BRIDGE): third_party_wrapper/recording_ffmpeg.c third_party_wrapper/recording_ffmpeg.h $(FFMPEG_LIBS)
 	$(CC) -O2 -fPIC -ffunction-sections -fdata-sections -I$(FFMPEG_DIR)/include -c $< -o $@
 
+$(VIDEO_BRIDGE): third_party_wrapper/video_ffmpeg.c third_party_wrapper/video_ffmpeg.h $(FFMPEG_LIBS)
+	$(CC) -O2 -fPIC -ffunction-sections -fdata-sections -I$(FFMPEG_DIR)/include -c $< -o $@
+
 # cgo must observe rebuilt archive/bridge contents instead of reusing a stale
 # Go package: external .a/.o files are not part of Go's own cache key.
-$(FFMPEG_STAMP): $(FFMPEG_BRIDGE) $(FFMPEG_LIBS) $(X264_LIB)
-	@hash=$$(cat $(FFMPEG_BRIDGE) $(FFMPEG_LIBS) $(X264_LIB) | sha256sum | cut -d' ' -f1); \
+$(FFMPEG_STAMP): $(FFMPEG_BRIDGE) $(VIDEO_BRIDGE) $(FFMPEG_LIBS) $(X264_LIB)
+	@hash=$$(cat $(FFMPEG_BRIDGE) $(VIDEO_BRIDGE) $(FFMPEG_LIBS) $(X264_LIB) | sha256sum | cut -d' ' -f1); \
 		printf '#define ST_GO_FFMPEG_STATIC_SHA256 "%s"\n' "$$hash" > "$@.tmp"; \
 		mv "$@.tmp" "$@"
 
@@ -495,6 +494,9 @@ $(OUTPUT_DIR)/zat-djvu: Makefile $(DJVU_LIB) $(DJVU_STAMP) $(ZAT_DJVU_SRC) | $(O
 $(OUTPUT_DIR)/goiv: $(GOIV_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/goiv build -trimpath -o $(abspath $@) .
 
+$(OUTPUT_DIR)/gov: $(GOV_GO_SRC)
+	CGO_ENABLED=0 go -C demo-go/gov build -trimpath -o $(abspath $@) .
+
 # Native Go TUI editor, with terminal clipboard protocol and recovery journal.
 $(OUTPUT_DIR)/govim: $(GOVIM_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/govim build -trimpath -o $(abspath $@) .
@@ -524,7 +526,7 @@ install: st
 # are tested explicitly: Go's ./... pattern never crosses module boundaries.
 TEST_EXTRA = $(FULL_EXTRA)
 
-test: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules test-web test-fb-recording
+test: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules test-web test-fb-recording test-gov
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 # Integrated profile, including the in-process pure-Go Pinyin tests.
@@ -571,6 +573,12 @@ test-fb-recording: $(FFMPEG_STAMP)
 	CGO_ENABLED=0 go test ./platform_dependent/fb
 	go test -tags ffmpeg_static ./platform_dependent/fb
 
+test-gov: st-fb gov
+	GOWORK=off go -C demo-go/gov test ./...
+	go test -tags ffmpeg_static ./platform_neutral/video
+	go test -tags 'ffmpeg_static netgo osusergo $(FULL_GO_TAGS)' ./platform_neutral/frontend \
+		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' -run '^TestCompositedVideo'
+
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
 	rm -f "$(DESTDIR)$(TERMINFO_DIR)/s/st-256color" \
@@ -582,4 +590,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu test-fb-recording $(BINARY_NAMES) terminal-profile-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu test-fb-recording test-gov $(BINARY_NAMES) terminal-profile-force

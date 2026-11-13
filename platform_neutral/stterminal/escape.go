@@ -591,6 +591,8 @@ func (t *Term) dcs() {
 			t.dslWindow(args[1:])
 		case "native-video":
 			t.dslNativeVideo(args[1:])
+		case "video":
+			t.dslVideo(args[1:])
 		case "native-audio":
 			t.dslNativeAudio(args[1:])
 		case "tab-spawn":

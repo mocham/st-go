@@ -354,6 +354,9 @@ func (t *Term) tswapscreen() {
 	t.htmlTransfer = nil
 	t.line, t.alt = t.alt, t.line
 	t.mode ^= termModeAltScreen
+	if hooks, ok := t.hooks.(AlternateScreenHooks); ok {
+		hooks.AlternateScreen(t.isSet(termModeAltScreen))
+	}
 	t.tfulldirt()
 }
 

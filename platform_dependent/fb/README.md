@@ -128,6 +128,14 @@ stty -F /dev/ttyN sane
 If it remains in graphics/process-controlled mode, also restore `KD_TEXT` and
 `VT_AUTO`; a terminal escape reset alone cannot do that.
 
+### Composited MP4 playback
+
+Build `make st-fb gov` and run `gov movie.mp4` inside the terminal. The full
+`st-fb` decodes video with bundled FFmpeg components and presents it through the
+normal framebuffer compositor; no DRM handoff or external player is required.
+Audio uses direct ALSA output. The system bar, tabs, screenshots, and recording
+remain available. See [gov controls and supported codecs](../../demo-go/gov/README.md).
+
 ### Native video handoff
 
 The file browser requests video playback through the terminal. st-fb hands its

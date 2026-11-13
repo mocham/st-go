@@ -11,6 +11,7 @@ clipboard, and tabs. Each is a separate Go module; builds go to `BINARIES/`.
 | [zat](zat/README.md) | PDF navigation, search, outline, and page text |
 | [zat-djvu](zat-djvu/README.md) | DjVu viewer with outline, text, and search |
 | [goiv](goiv/README.md) | Image fit, zoom, pan, and sibling navigation |
+| [gov](gov/README.md) | MP4 playback through st-fb's bundled decoder; pause, seek, and audio controls |
 | [gols](gols/README.md) | Read-only SQLite corpus browser |
 
 ```sh

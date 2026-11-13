@@ -75,6 +75,7 @@ type Terminal struct {
 	refreshUntil                      time.Time
 	ttyResize                         func(rows, cols int)
 	displayRegions                    displayRegionState
+	video                             *videoPresentation
 	pdfSearch                         pdfSearchState
 	keys                              []keyDef
 	shortcuts                         []shortcut
@@ -298,6 +299,7 @@ func (t *Terminal) Close() {
 	if t.audio != nil {
 		t.audio.Close()
 	}
+	t.closeVideo()
 	t.closeRegionPresenter()
 	if t.webpCache != nil {
 		t.webpCache.close()

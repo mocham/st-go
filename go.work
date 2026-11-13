@@ -5,6 +5,7 @@ use (
 	./demo-go
 	./demo-go/file-browser
 	./demo-go/goiv
+	./demo-go/gov
 	./demo-go/gols
 	./demo-go/govim
 	./demo-go/opencode-tui

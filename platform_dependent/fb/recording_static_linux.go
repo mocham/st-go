@@ -4,7 +4,7 @@ package fb
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../third_party/ffmpeg/include -I${SRCDIR}/../../third_party_wrapper
-#cgo LDFLAGS: ${SRCDIR}/../../third_party/recording_ffmpeg.o ${SRCDIR}/../../third_party/ffmpeg/lib/libavformat.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavcodec.a ${SRCDIR}/../../third_party/ffmpeg/lib/libswscale.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavutil.a ${SRCDIR}/../../third_party/x264/lib/libx264.a -lm -lpthread
+#cgo LDFLAGS: ${SRCDIR}/../../third_party/recording_ffmpeg.o ${SRCDIR}/../../third_party/ffmpeg/lib/libavformat.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavcodec.a ${SRCDIR}/../../third_party/ffmpeg/lib/libswscale.a ${SRCDIR}/../../third_party/ffmpeg/lib/libswresample.a ${SRCDIR}/../../third_party/ffmpeg/lib/libavutil.a ${SRCDIR}/../../third_party/x264/lib/libx264.a -lm -lpthread
 #include <stdlib.h>
 #include <libavcodec/defs.h>
 #include <libavutil/error.h>
