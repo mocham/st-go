@@ -188,6 +188,9 @@ func (w *wm) workarea() image.Rectangle {
 
 func (w *wm) updateWorkarea() {
 	a := w.workarea()
+	// st reads this from the current EWMH support window before CreateWindow,
+	// so its first drawable already has the size the WM will assign.
+	w.setWords(w.support, "_GXW_ST_WORKAREA", xproto.AtomCardinal, uint32(a.Min.X), uint32(a.Min.Y), uint32(a.Dx()), uint32(a.Dy()))
 	w.setWords(w.root, "_NET_WORKAREA", xproto.AtomCardinal, uint32(a.Min.X), uint32(a.Min.Y), uint32(a.Dx()), uint32(a.Dy()))
 	w.setWords(w.root, "_NET_DESKTOP_GEOMETRY", xproto.AtomCardinal, uint32(w.width), uint32(w.height))
 	if w.tabbar != 0 {

@@ -21,8 +21,11 @@ make gxw st-min
 ./BINARIES/gxw -- /usr/bin/firefox
 ```
 
-Install **Xorg** and **xinit** for session startup. Run `gxw` directly; it invokes
-`xinit` itself with explicit executable paths for both the WM and X server.
+Install **Xorg** for session startup. Run `gxw` directly; its pure-Go supervisor
+starts Xorg and the WM, waits for Xorg's `-displayfd` readiness notification,
+and shuts down/reaps both processes on session exit or termination signals.
+Startup and graceful shutdown have bounded waits, with forced termination for
+unresponsive children. Neither `xinit` nor `xauth` is required.
 It refuses to launch when `DISPLAY`, `WAYLAND_DISPLAY`, or a graphical
 `XDG_SESSION_TYPE` indicates an existing X11/Wayland session.
 
@@ -32,8 +35,8 @@ temporary private Xauthority file, and removes it when the session ends.
 Xorg retains its normal system hardware configuration. gxw reads st's shared
 JSON configuration for fonts; session options are supplied on the command line.
 
-By default, `gxw` selects the first available local display (`:0`, `:1`, …),
-skipping existing X lock files, socket paths, and active abstract sockets.
+By default, Xorg atomically selects an available local display (`:0`, `:1`, …)
+through `-displayfd`, avoiding a probe-then-bind race between session launchers.
 `-display :1` explicitly selects a display instead.
 The current console is used when available; `-vt 3` explicitly selects VT 3.
 `-font /path/to/font.ttf` overrides the configured font. `-no-autostart` starts with
@@ -67,6 +70,19 @@ glyphs. As in st, `fontawesome-solid.ttf` and `msyh.ttc` provide optional icon/C
 fallbacks, searched in `~/.local/share/fonts` and the working directory. A CJK
 TrueType font or TTC can also be selected directly in `font` or with `-font`.
 Fallback advances and metrics are used for mixed-language titles and clipping.
+
+### st startup without a resize flash
+
+gxw publishes its current pixel allocation in `_GXW_ST_WORKAREA` on the live
+EWMH support window. st/st-min query it **before creating their X window**,
+including when started later from a shell or with a custom window class. Their
+first drawable and PTY are already sized for the work area and terminal helper
+bar; the configured initial grid does not appear briefly before tiling.
+
+gxw preserves matching client dimensions during mapping and tab switches. st
+ignores duplicate, move-only, and child-window configuration notifications.
+Actual screen/workarea changes still resize existing terminals, and new ones
+query the latest allocation.
 
 ## Controls
 
@@ -170,7 +186,7 @@ gxw's toggle, without XIM.
 ```sh
 CGO_ENABLED=0 GOWORK=off go -C demo-go/gxw build -o ../../BINARIES/gxw .
 make test-gxw
-make test-gxw-x11   # Xvfb; xinit also enables the real session-launch test
+make test-gxw-x11   # builds st-min; tests session supervision and geometry under Xvfb
 GXW_TEST_CHROMIUM=1 make test-gxw-x11  # default GTK, GTK3, and XIM disabled
 ```
 
@@ -181,10 +197,12 @@ the repository root to regenerate its relocatable wrappers from `sysroot/`.
 
 Tests cover dialog classification, constrained geometry, overflow tabs, native
 Go font rendering, TrueColor byte orders, graphical-session rejection,
-argument/authentication setup, real xinit startup/shutdown, and live X11
-window/focus/input lifecycles. The X11 tests always use isolated test servers.
+argument/authentication setup, startup failures/timeouts, cancellation and
+child reaping, plus live X11 session startup/shutdown and window/focus/input
+lifecycles. A built st-min regression checks its initial X and PTY geometry,
+tab switching, and genuine screen resizing. These tests use isolated servers.
 The XIM interoperability test compiles a small Xlib/XTest client (C compiler and
 libX11/libXtst development files required for testing only). The optional
 Chromium test uses a temporary browser profile and real XTest keyboard input.
 The compiled Xlib probe is retained in `TEST-ASSETS/x11/bin/xim-client`.
-The private `--gxw-session` mode is reserved for the child invoked by `xinit`.
+The private `--gxw-session` mode is reserved for the Go supervisor's WM child.

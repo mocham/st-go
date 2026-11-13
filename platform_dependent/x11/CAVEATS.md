@@ -22,6 +22,11 @@ These are correctness constraints and regression traps for the native driver.
 - Use final mapped/configured dimensions for PTY sizing. Using configured
   rows/columns before a tiling WM adjusted the window caused incorrect editor
   layouts. Ignore move-only resizes.
+- gxw publishes `_GXW_ST_WORKAREA` on its EWMH support window. Resolve the live
+  support-window/self-check and read this allocation before `CreateWindow`, so
+  st starts with its final drawable dimensions. Never cache it in child launch
+  environments; a shell may create terminals after a screen resize. Only changed
+  top-level client dimensions should dispatch a frontend resize callback.
 - `GetGeometry` coordinates are parent-relative. Translate to root coordinates
   before remembering/restoring a reparented client. Prefer supported EWMH
   placement, with raw `ConfigureWindow` for WM-less operation; WMs can reject

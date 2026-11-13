@@ -69,7 +69,10 @@ func (t *Driver) Dispatch(ev xgb.Event) {
 	case xproto.MotionNotifyEvent:
 		c.PointerMotion(e.State, int(e.EventX), int(e.EventY))
 	case xproto.ConfigureNotifyEvent:
-		c.Resize(int(e.Width), int(e.Height))
+		if e.Window == t.win && e.Width > 0 && e.Height > 0 && (int(e.Width) != t.width || int(e.Height) != t.height) {
+			t.width, t.height = int(e.Width), int(e.Height)
+			c.Resize(t.width, t.height)
+		}
 	case xproto.FocusInEvent:
 		if e.Mode != 1 && e.Mode != 2 {
 			c.Focus(true)

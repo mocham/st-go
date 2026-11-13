@@ -25,6 +25,7 @@ func (w *wm) manage(id xproto.Window, activate bool) {
 		return
 	}
 	c := &client{id: id, input: true, mapped: a.MapState != xproto.MapStateUnmapped, border: g.BorderWidth, original: image.Rect(int(g.X), int(g.Y), int(g.X)+int(g.Width), int(g.Y)+int(g.Height)), requested: image.Pt(int(g.Width), int(g.Height))}
+	c.bounds, c.frameBorder = c.original, c.border
 	w.clients[id] = c
 	w.order = append(w.order, id)
 	w.readMetadata(c)
@@ -163,11 +164,7 @@ func (w *wm) layout() {
 			border = 2
 			bounds = dialogBounds(bounds, c.requested, c.hints, border)
 		}
-		if c.bounds != bounds {
-			c.bounds = bounds
-			xproto.ConfigureWindow(w.conn, id, xproto.ConfigWindowX|xproto.ConfigWindowY|xproto.ConfigWindowWidth|xproto.ConfigWindowHeight|xproto.ConfigWindowBorderWidth, []uint32{uint32(bounds.Min.X), uint32(bounds.Min.Y), uint32(bounds.Dx()), uint32(bounds.Dy()), uint32(border)})
-			w.configureNotify(c)
-		}
+		w.place(c, bounds, uint16(border))
 		w.setWords(id, "_NET_FRAME_EXTENTS", xproto.AtomCardinal, uint32(border), uint32(border), uint32(border), uint32(border))
 		if show && !c.mapped {
 			xproto.MapWindow(w.conn, id)
@@ -206,6 +203,27 @@ func (w *wm) layout() {
 	}
 	w.focus(target)
 	w.drawBars()
+}
+
+// Reusing the actual starting geometry avoids a resize on st's first map, and
+// changing only differing fields keeps moves/tab switches out of its resize
+// path. The server supplies ConfigureNotify for real changes; synthetic replies
+// are only needed when denying an application's ConfigureRequest.
+func (w *wm) place(c *client, bounds image.Rectangle, border uint16) {
+	before := []int{c.bounds.Min.X, c.bounds.Min.Y, c.bounds.Dx(), c.bounds.Dy(), int(c.frameBorder)}
+	after := []int{bounds.Min.X, bounds.Min.Y, bounds.Dx(), bounds.Dy(), int(border)}
+	var mask uint16
+	var values []uint32
+	for i, v := range after {
+		if v != before[i] {
+			mask |= 1 << i
+			values = append(values, uint32(v))
+		}
+	}
+	if mask != 0 {
+		xproto.ConfigureWindow(w.conn, c.id, mask, values)
+	}
+	c.bounds, c.frameBorder = bounds, border
 }
 
 func (w *wm) depth(id xproto.Window) int {

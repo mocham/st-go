@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -27,19 +26,12 @@ func main() {
 	log.SetPrefix("gxw: ")
 	log.SetFlags(0)
 	var o options
-	// xinit alone invokes this private mode. Normal invocations always own
+	// The Go session supervisor invokes this private mode. Normal invocations own
 	// session startup and reject an existing graphical environment.
-	child := len(os.Args) > 1 && os.Args[1] == "--gxw-session" && os.Getenv("GXW_XINIT_CHILD") == "1"
+	child := len(os.Args) > 1 && os.Args[1] == "--gxw-session" && os.Getenv("GXW_SESSION_CHILD") == "1"
 	if child {
-		args := os.Args[2:]
-		if raw := os.Getenv("GXW_SESSION_ARGS"); raw != "" {
-			if err := json.Unmarshal([]byte(raw), &args); err != nil {
-				log.Fatal("invalid internal session arguments")
-			}
-		}
-		os.Args = append(os.Args[:1], args...)
-		os.Unsetenv("GXW_XINIT_CHILD")
-		os.Unsetenv("GXW_SESSION_ARGS")
+		os.Args = append(os.Args[:1], os.Args[2:]...)
+		os.Unsetenv("GXW_SESSION_CHILD")
 	}
 	flag.StringVar(&o.display, "display", "", "local X display to start (default: next available)")
 	flag.IntVar(&o.vt, "vt", 0, "Linux virtual terminal (default: current text console)")
@@ -50,7 +42,7 @@ func main() {
 	flag.Float64Var(&o.fontSize, "font-size", 16, "base tab font size in pixels (10..40; doubled above 1200x800)")
 	flag.BoolVar(&o.noAutostart, "no-autostart", false, "do not launch an initial terminal")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: gxw [options] [-- initial-command args...]\nRun directly from a Linux text console. Starts xinit without user session scripts.")
+		fmt.Fprintln(os.Stderr, "Usage: gxw [options] [-- initial-command args...]\nRun directly from a Linux text console. Starts and supervises Xorg directly.")
 		flag.PrintDefaults()
 	}
 	flag.Parse()

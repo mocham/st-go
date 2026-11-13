@@ -13,12 +13,9 @@ import (
 	"github.com/jezek/xgb/xtest"
 )
 
-func TestX11DirectXinitSession(t *testing.T) {
+func TestX11DirectSession(t *testing.T) {
 	if os.Getenv("GXW_TEST_X11") != "1" {
 		t.Skip("run make test-gxw-x11")
-	}
-	if _, err := exec.LookPath("xinit"); err != nil {
-		t.Skip("xinit is needed for the direct-launch test")
 	}
 	xvfb, err := exec.LookPath("Xvfb")
 	if err != nil {
@@ -34,15 +31,22 @@ func TestX11DirectXinitSession(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	// Substitute only the physical Xorg server with Xvfb. This runs real
-	// xinit, the built launcher, authentication, and the built WM child.
+	// Substitute only physical Xorg with Xvfb. The built Go supervisor owns
+	// readiness, authentication, WM startup, and both children's lifetime.
 	server := `#!/bin/sh
 set -eu
 printf '%s' "$XAUTHORITY" > "$GXW_CAPTURE/auth-path"
-printf '%s' "$1" > "$GXW_CAPTURE/display"
+printf '%s' "$$" > "$GXW_CAPTURE/server-pid"
+# Xvfb has no console/VT; remove the Xorg-only -keeptty option.
+test "$1" = -displayfd
+test "$7" = -keeptty
+set -- "$1" "$2" "$3" "$4" "$5" "$6"
 exec "$GXW_TEST_XVFB" "$@" -screen 0 800x600x24 -noreset
 `
 	if err := os.WriteFile(filepath.Join(dir, "Xorg"), []byte(server), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "xinit"), []byte("#!/bin/sh\necho invoked > \"$GXW_CAPTURE/xinit-ran\"\nexit 99\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{".xinitrc", ".xserverrc", ".xprofile", ".xsession"} {
@@ -50,11 +54,11 @@ exec "$GXW_TEST_XVFB" "$@" -screen 0 800x600x24 -noreset
 			t.Fatal(err)
 		}
 	}
-	env := sessionEnvironment(os.Environ(), "", nil)
+	env := sessionEnvironment(os.Environ(), "", "")
 	var consoleEnv []string
 	for _, s := range env {
 		key, _, _ := strings.Cut(s, "=")
-		if key == "GXW_XINIT_CHILD" || key == "GXW_SESSION_ARGS" || key == "XDG_SESSION_TYPE" || key == "XAUTHORITY" || key == "PATH" || key == "HOME" {
+		if key == "XDG_SESSION_TYPE" || key == "XAUTHORITY" || key == "PATH" || key == "HOME" {
 			continue
 		}
 		consoleEnv = append(consoleEnv, s)
@@ -66,7 +70,7 @@ exec "$GXW_TEST_XVFB" "$@" -screen 0 800x600x24 -noreset
 		t.Fatal(err)
 	}
 	defer log.Close()
-	cmd := exec.Command(binary, "-no-autostart", "--", "/bin/sh", "-c", `printf '%s\n' "$@" > "$GXW_CAPTURE/initial-args"`, "gxw-initial", "space here", "--", "世界")
+	cmd := exec.Command(binary, "-no-autostart", "--", "/bin/sh", "-c", `printf '%s' "$DISPLAY" > "$GXW_CAPTURE/display"; printf '%s\n' "$@" > "$GXW_CAPTURE/initial-args"`, "gxw-initial", "space here", "--", "世界")
 	cmd.Env = consoleEnv
 	cmd.Stdout, cmd.Stderr = log, log
 	if err := cmd.Start(); err != nil {
@@ -116,10 +120,13 @@ exec "$GXW_TEST_XVFB" "$@" -screen 0 800x600x24 -noreset
 	}
 	defer conn.Close()
 	h := &xHarness{t: t, conn: conn, root: xproto.Setup(conn).DefaultScreen(conn).Root, atoms: make(map[string]xproto.Atom)}
-	h.wait("xinit starts WM", func() bool { return len(h.words(h.root, "_NET_SUPPORTING_WM_CHECK")) == 1 })
+	h.wait("supervisor starts WM", func() bool { return len(h.words(h.root, "_NET_SUPPORTING_WM_CHECK")) == 1 })
 	h.wait("initial command argument forwarding", func() bool { return readValue(filepath.Join(dir, "initial-args")) == "space here\n--\n世界" })
 	if _, err := os.Stat(filepath.Join(dir, "config-ran")); !os.IsNotExist(err) {
 		t.Fatal("user configuration was executed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "xinit-ran")); !os.IsNotExist(err) {
+		t.Fatal("xinit was invoked")
 	}
 	if info, err := os.Stat(auth); err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("authority permissions: %v %v", info, err)
@@ -127,7 +134,7 @@ exec "$GXW_TEST_XVFB" "$@" -screen 0 800x600x24 -noreset
 	if err := xtest.Init(conn); err != nil {
 		t.Fatal(err)
 	}
-	h.key(0xffe9, 0xffe1, 'q') // Alt+Shift+Q exits WM, then xinit and X server.
+	h.key(0xffe9, 0xffe1, 'q') // Alt+Shift+Q exits WM, then supervisor and X server.
 	conn.Close()
 	select {
 	case err := <-done:
@@ -136,9 +143,10 @@ exec "$GXW_TEST_XVFB" "$@" -screen 0 800x600x24 -noreset
 			t.Fatal(err)
 		}
 	case <-time.After(15 * time.Second):
-		t.Fatal("xinit did not end session")
+		t.Fatal("supervisor did not end session")
 	}
 	if _, err := os.Stat(auth); !os.IsNotExist(err) {
 		t.Fatalf("authority file survived session: %v", err)
 	}
+	assertSessionReaped(t, dir)
 }

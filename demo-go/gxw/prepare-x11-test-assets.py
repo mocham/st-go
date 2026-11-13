@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a relocatable, persistent Xvfb/xinit bundle from an extracted sysroot.
+"""Prepare a relocatable, persistent Xvfb bundle from an extracted sysroot.
 
 Place packages and their extracted files in TEST-ASSETS/x11/{packages,sysroot}.
 No system files or global symlinks are installed.
@@ -28,7 +28,7 @@ if not xkb.exists():
     shutil.copytree("/usr/share/X11/xkb", xkb)
 bindir = root / "bin"
 bindir.mkdir(exist_ok=True)
-for name in ("Xvfb", "xinit", "xkbcomp"):
+for name in ("Xvfb", "xkbcomp"):
     executable = sysroot / "usr/bin" / name
     if not executable.is_file():
         raise SystemExit(f"missing test tool: {executable}")
@@ -47,7 +47,7 @@ files = sorted((root / "packages").glob("*")) + [original, relocated]
 ))
 (root / "README.md").write_text("""# Persistent X11 test tools
 
-`bin/` contains relocatable wrappers for Xvfb, xinit and xkbcomp. `sysroot/`
+`bin/` contains relocatable wrappers for Xvfb and xkbcomp. `sysroot/`
 retains their extracted packages, libraries and XKB data; `packages/` retains
 the original Arch Linux x86-64 package archives. SHA256SUMS records the archives
 and original/relocated Xvfb executables. These tools use the host's other shared

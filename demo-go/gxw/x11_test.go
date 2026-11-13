@@ -379,7 +379,7 @@ func TestX11WindowManager(t *testing.T) {
 	defer log.Close()
 	shot := filepath.Join(t.TempDir(), "screenshot.png")
 	cmd := exec.Command(binary, "--gxw-session", "-display", display, "-no-autostart", "-screenshot", shot)
-	cmd.Env = append(os.Environ(), "GXW_XINIT_CHILD=1")
+	cmd.Env = append(os.Environ(), "GXW_SESSION_CHILD=1")
 	cmd.Stdout, cmd.Stderr = log, log
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -416,7 +416,7 @@ func TestX11WindowManager(t *testing.T) {
 	assertFull(b)
 	// A second manager must fail without disturbing the incumbent.
 	second := exec.Command(binary, "--gxw-session", "-display", display, "-no-autostart")
-	second.Env = append(os.Environ(), "GXW_XINIT_CHILD=1")
+	second.Env = append(os.Environ(), "GXW_SESSION_CHILD=1")
 	if out, err := second.CombinedOutput(); err == nil || !strings.Contains(string(out), "another window manager") {
 		t.Fatalf("second WM: %v %s", err, out)
 	}

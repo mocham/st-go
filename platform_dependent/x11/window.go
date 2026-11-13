@@ -39,14 +39,15 @@ type Driver struct {
 	pixmap xproto.Pixmap
 	gc     xproto.Gcontext
 
-	cols, rows int
-	cw, ch     int
-	baseline   int
-	borderpx   int
-	ratio      float64
-	x, y       int
-	geomMask   XGeometryMask
-	isFixed    bool
+	cols, rows    int
+	width, height int // last client size; native move/stack notifications are not resizes
+	cw, ch        int
+	baseline      int
+	borderpx      int
+	ratio         float64
+	x, y          int
+	geomMask      XGeometryMask
+	isFixed       bool
 
 	title               string
 	iconTitle           string
@@ -171,7 +172,7 @@ func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMa
 		"WM_DELETE_WINDOW", "UTF8_STRING", "CLIPBOARD", "PRIMARY", "TARGETS",
 		"INCR", "TIMESTAMP", "ATOM", "STRING", "WM_STATE", "INTEGER", "WM_CLASS",
 		"_NET_WM_NAME", "_NET_WM_ICON_NAME", "_NET_WM_PID", "CARDINAL",
-		"WM_NORMAL_HINTS", "WM_SIZE_HINTS", "BAR_DATA", "_ST_GO_DIRECT_INPUT"} {
+		"WM_NORMAL_HINTS", "WM_SIZE_HINTS", "BAR_DATA", "_ST_GO_DIRECT_INPUT", "_NET_SUPPORTING_WM_CHECK", "_GXW_ST_WORKAREA"} {
 		t.intern(name)
 	}
 	managerName := "_ST_GO_CLIPBOARD_SYNC_MANAGER"
@@ -189,6 +190,13 @@ func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMa
 	}
 	w := t.borderpx*2 + t.cols*t.cw
 	h := t.borderpx*2 + t.rows*t.ch
+	allocation, managed := t.gxwWorkarea()
+	if managed {
+		w, h = allocation.Dx(), allocation.Dy()
+		t.cols = max(1, (w-2*t.borderpx)/t.cw)
+		t.rows = max(1, (h-2*t.borderpx)/t.ch)
+	}
+	t.width, t.height = w, h
 	if !limits.Grid(t.cols, t.rows) {
 		return nil, fmt.Errorf("terminal grid exceeds resource limit")
 	}
@@ -210,6 +218,9 @@ func newDriver(cfg *config.Config, ratio float64, x, y int, geomMask XGeometryMa
 	}
 	if t.geomMask&YNegative != 0 {
 		winY += int(scr.HeightInPixels) - h - 2
+	}
+	if managed {
+		winX, winY = allocation.Min.X, allocation.Min.Y
 	}
 
 	mask := uint32(xproto.CwBackPixel | xproto.CwEventMask)

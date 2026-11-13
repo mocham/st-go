@@ -509,7 +509,7 @@ $(OUTPUT_DIR)/gxw: demo-go/gxw/Monaco_Linux.ttf $(FB_STATUS_FONT) $(wildcard dem
 test-gxw: gxw
 	CGO_ENABLED=0 GOWORK=off go -C demo-go/gxw test ./...
 
-test-gxw-x11: gxw
+test-gxw-x11: gxw st-min
 	GXW_TEST_X11=1 CGO_ENABLED=0 GOWORK=off sh demo-go/gxw/test-x11.sh go -C demo-go/gxw test -run TestX11 -count=1 -v ./...
 
 # Native Go TUI editor, with terminal clipboard protocol and recovery journal.

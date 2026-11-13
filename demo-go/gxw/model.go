@@ -16,6 +16,7 @@ type client struct {
 	unmaps                           []uint16 // Sequences of our own UnmapWindow requests.
 	original, bounds                 image.Rectangle
 	border                           uint16
+	frameBorder                      uint16
 	requested                        image.Point
 	hints                            sizeHints
 }
