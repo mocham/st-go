@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -27,7 +28,7 @@ type Player struct {
 func Start(path string, width, height, volume int, muted bool, present func([]uint32, int, int)) *Player {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &Player{width: width, height: height, commands: make(chan api.VideoRequest, 16), wake: make(chan struct{}, 1), cancel: cancel, done: make(chan struct{}), present: present,
-		status: api.VideoStatus{Supported: Supported(), State: "loading", Volume: volume, Muted: muted}}
+		status: api.VideoStatus{Supported: Supported(), State: "loading", Volume: volume, Muted: muted, Speed: 1}}
 	go func() {
 		defer close(p.done)
 		err := p.run(ctx, path)
@@ -55,6 +56,9 @@ func (p *Player) Resize(w, h int) {
 	}
 }
 func (p *Player) Control(r api.VideoRequest) error {
+	if err := r.Validate(); err != nil {
+		return err
+	}
 	select {
 	case <-p.done:
 		return fmt.Errorf("video is closed")
@@ -110,7 +114,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 	var kind int
 	var pts, position, skipTo time.Duration
 	var lastPresentation time.Time
-	base := time.Now()
+	clock := playbackClock{wall: time.Now(), speed: 1}
 	seek := func(target time.Duration) error {
 		if info.duration > 0 {
 			target = min(target, max(0, info.duration-time.Millisecond))
@@ -121,7 +125,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 		}
 		dropAudio()
 		position, skipTo = target, target
-		base = time.Now().Add(-target)
+		clock.reset(time.Now(), target)
 		pending, ended, preview = false, false, true
 		return nil
 	}
@@ -136,7 +140,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 			} else {
 				paused = !paused
 			}
-			base = time.Now().Add(-position)
+			clock.reset(time.Now(), position)
 			dropAudio()
 		case "seek":
 			if err := seek(time.Duration(r.PositionMS) * time.Millisecond); err != nil {
@@ -144,6 +148,17 @@ func (p *Player) run(ctx context.Context, path string) error {
 			}
 		case "volume":
 			volume = r.Volume
+		case "speed":
+			now := time.Now()
+			anchor := position
+			if !paused && !ended && !preview {
+				anchor = clock.position(now)
+			}
+			clock.reset(now, anchor)
+			clock.speed = r.Speed
+			// Discard hardware-buffered samples at the old rate. Subsequent
+			// samples are resampled to the new duration before PCM playback.
+			dropAudio()
 		case "mute":
 			muted = r.Muted
 			dropAudio()
@@ -160,6 +175,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 		}
 		p.mu.Lock()
 		p.status.State, p.status.PositionMS, p.status.Volume, p.status.Muted = state, position.Milliseconds(), volume, muted
+		p.status.Speed = clock.speed
 		p.mu.Unlock()
 	}
 	for {
@@ -202,6 +218,15 @@ func (p *Player) run(ctx context.Context, path string) error {
 			}
 			if kind == 0 {
 				ended = true
+				if preview {
+					// An end-of-track seek can fall after the final timestamp.
+					// Show the last decoded picture rather than the old seek origin.
+					if err := render(); err != nil {
+						return err
+					}
+					preview = false
+				}
+				position = max(position, info.duration)
 				if pcm != nil {
 					pcm.Close(true)
 					pcm = nil
@@ -218,7 +243,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 			pending = true
 		}
 		if !preview {
-			wait := time.Until(base.Add(pts))
+			wait := time.Until(clock.deadline(pts))
 			if wait > 0 {
 				timer := time.NewTimer(wait)
 				select {
@@ -246,14 +271,14 @@ func (p *Player) run(ctx context.Context, path string) error {
 			position = pts
 			// Decode reference pictures even when late. Still display occasional
 			// frames if the machine cannot decode at the source frame rate.
-			if preview || time.Since(base.Add(pts)) < 150*time.Millisecond || time.Since(lastPresentation) >= 250*time.Millisecond {
+			if preview || time.Since(clock.deadline(pts)) < 150*time.Millisecond || time.Since(lastPresentation) >= 250*time.Millisecond {
 				if err := render(); err != nil {
 					return err
 				}
 				lastPresentation = time.Now()
 			}
 			if preview {
-				base = time.Now().Add(-pts)
+				clock.reset(time.Now(), pts)
 				preview = false
 			}
 		} else if !muted {
@@ -265,7 +290,9 @@ func (p *Player) run(ctx context.Context, path string) error {
 				}
 			}
 			if pcm != nil {
-				samples, err := d.audio(pcm.Rate())
+				// Playing fewer/more resampled samples at the hardware rate
+				// changes audio duration and pitch together with video speed.
+				samples, err := d.audio(int(math.Round(float64(pcm.Rate()) / clock.speed)))
 				if err != nil {
 					return err
 				}

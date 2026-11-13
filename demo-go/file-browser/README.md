@@ -61,6 +61,8 @@ Put `BINARIES/` on `PATH` to enable built-in tools:
 - PDF: **zat**; DjVu: **zat-djvu**.
 - Text/source/configuration: **govim**, with `--web` on web hosts.
 
+Framebuffer videos use **gov** in the same terminal; `q` returns to the browser.
+
 The Go browser opens these in focused terminal tabs when supported. Otherwise
 it runs them in the same terminal and restores the browser on exit.
 Archive edits are not written back into the
@@ -97,17 +99,16 @@ The Go browser reads MP3 metadata locally and requests playback from st-go;
 
 ### Framebuffer video
 
-The browser uses `file-browser --native-video FILE` to request mpv playback on
-st-fb's real VT. Defaults are DRM output, `auto-copy` hardware decoding, ALSA
-`plughw:1,0`, and 33% mpv volume. st-fb restores the terminal afterward.
+In the Go browser, **Enter**, **o**, or **double-click** opens videos in
+[`gov`](../gov/README.md). Build `make st-fb gov file-browser` and put `BINARIES/`
+on `PATH`. Playback requires the full `st-fb`; gov supports MP4/MOV containers
+with H.264, HEVC, or MPEG-4 video, and AAC/MP3 audio.
 
-- `ST_FILE_BROWSER_ALSA_DEVICE`: explicit device, e.g. `plughw:Generic_1,0`.
-- `ALSA_PCM_CARD` (or `ALSA_CARD`) and `ALSA_PCM_DEVICE`: card/device overrides.
-- `ST_FILE_BROWSER_VOLUME=0..100`: mpv volume.
-
-These settings do not change MP3 playback or global mixer levels. mpv requires
-DRM/ALSA support and device access. No default X11/web video player is launched.
-See [VT handoff](../../platform_dependent/fb/README.md#native-video-handoff).
+Use `[` / `]` for speed, `-` / `+` for volume, and click the progress bar to seek.
+`q` returns to the same browser selection. `ST_FILE_BROWSER_VOLUME=0..100` sets
+the initial player volume (default 33). Audio uses st-fb's direct ALSA output;
+screenshots, recording, and terminal controls remain available during playback.
+Matching custom openers take precedence. X11/web have no default video player.
 
 ## Build and test
 

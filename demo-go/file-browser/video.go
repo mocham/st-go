@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -23,8 +24,8 @@ func videoFile(path string) bool {
 	return fileCommandAvailable && strings.HasPrefix(fileMime(path), "video/")
 }
 
-// The helper requests a real-console handoff over DCS. Never launch DRM mpv
-// directly on the PTY: that disables its VT switcher and races console ownership.
+// gov uses the terminal's bundled decoder and retained surface. Give it the
+// foreground PTY using the same handoff/restoration as other terminal viewers.
 func (b *Browser) openDefaultVideo(path string) bool {
 	if !videoFile(path) {
 		return false
@@ -32,14 +33,22 @@ func (b *Browser) openDefaultVideo(path string) bool {
 	backend := browserBackend()
 	b.status = "No video player for " + backend
 	if backend == "fb" {
-		_, err := exec.LookPath("mpv")
+		tool, err := exec.LookPath("gov")
 		if err != nil {
-			b.status = "mpv not found"
-		} else if os.Getenv("ST_GO_NATIVE_VIDEO") != "1" {
-			b.status = "Restart st-fb for native video"
-		} else if tool, err := os.Executable(); err == nil {
-			b.runTerminalTool(tool, path, "--native-video")
-			return true
+			b.status = "gov not found"
+		} else if os.Getenv("ST_GO_NATIVE_VIDEO_TOKEN") == "" {
+			b.status = "Restart st-fb for video playback"
+		} else {
+			tool, err = filepath.Abs(tool)
+			volume, volumeErr := playbackVolume(os.Getenv("ST_FILE_BROWSER_VOLUME"))
+			if err != nil {
+				b.status = "gov: " + displayText(err.Error())
+			} else if volumeErr != nil {
+				b.status = displayText(volumeErr.Error())
+			} else {
+				b.runTerminalTool(tool, path, "-volume", strconv.Itoa(volume))
+				return true
+			}
 		}
 	}
 	b.drawStatus()

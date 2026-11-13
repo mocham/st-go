@@ -30,6 +30,11 @@ func TestVideoClassification(t *testing.T) {
 
 func TestFramebufferVideoPlayerPTY(t *testing.T) {
 	for implementation, program := range documentBrowserCommands(t) {
+		// The Bash browser still uses the legacy helper; the Go browser's
+		// composited gov route is exercised separately below.
+		if implementation != "bash" {
+			continue
+		}
 		for _, backend := range []string{"fb", "x11", "web"} {
 			for _, mode := range []string{"default", "missing", "custom", "failed"} {
 				if mode == "failed" && backend != "fb" {
@@ -139,6 +144,77 @@ func TestFramebufferVideoPlayerPTY(t *testing.T) {
 					waitContains(t, f, "Refreshed", "browser input restored after mpv")
 				})
 			}
+		}
+	}
+}
+
+func TestGovVideoOpenerPTY(t *testing.T) {
+	for _, backend := range []string{"fb", "x11", "web"} {
+		for _, mode := range []string{"enter", "open", "double", "missing", "custom", "failed"} {
+			if backend != "fb" && (mode == "open" || mode == "double" || mode == "failed") {
+				continue
+			}
+			t.Run(backend+"/"+mode, func(t *testing.T) {
+				dir, tools := t.TempDir(), documentToolTestPath(t)
+				name := "movie ';--.MP4"
+				writeFiles(t, dir, name)
+				marker := filepath.Join(tools, "args")
+				if mode != "missing" {
+					writeDocumentTool(t, tools, "gov", `
+[[ -t 0 && -t 1 && -t 2 ]] || exit 81
+printf '%s|%s|%s|%s|%s' "$#" "$1" "$2" "$3" "$PWD" > "$MARKER"
+stty -echo -icanon min 1 time 0
+printf 'GOV_READY'
+IFS= read -rsn1 key
+[[ $key == q ]] || exit 82
+exit "${TOOL_EXIT:-0}"
+`)
+				}
+				for _, other := range []string{"mpv", "bar", "xdg-open", "st"} {
+					writeDocumentTool(t, tools, other, `printf 'WRONG_PLAYER' > "$MARKER"`)
+				}
+				env := envWithout(testEnv("PATH="+tools, "MARKER="+marker, "ST_GO_BACKEND="+backend, "ST_GO_NATIVE_VIDEO_TOKEN=secret", "ST_FILE_BROWSER_VOLUME=75"), "ST_FILE_BROWSER_OPEN")
+				args := []string{browserBin}
+				if mode == "custom" {
+					args = append(args, "--open-for", backend, `printf 'custom' > "$MARKER"`)
+				}
+				if mode == "failed" {
+					env = append(env, "TOOL_EXIT=7")
+				}
+				f := startBrowserCommand(t, env, append(args, dir)...)
+				if mode == "double" {
+					f.send("\x1b[<0;60;9M\x1b[<0;60;9M")
+				} else if mode == "open" {
+					f.send("\x1b[Bo")
+				} else {
+					f.send("\x1b[B\r")
+				}
+				if mode == "custom" {
+					waitFileContent(t, marker, "custom")
+					return
+				}
+				if backend != "fb" || mode == "missing" {
+					message := "No video"
+					if backend == "fb" {
+						message = "gov not found"
+					}
+					waitContains(t, f, message, "video opener availability")
+					if _, err := os.Stat(marker); !os.IsNotExist(err) {
+						t.Fatal("unexpected fallback player")
+					}
+					return
+				}
+				waitFileContent(t, marker, "3|-volume|75|"+filepath.Join(dir, name)+"|"+dir)
+				waitContains(t, f, "GOV_READY", "gov owns the PTY")
+				f.send("q")
+				result := "gov finished"
+				if mode == "failed" {
+					result = "gov: exit" // The status line quotes/truncates the error.
+				}
+				waitContains(t, f, result, "browser restored after gov")
+				f.send("r")
+				waitContains(t, f, "Refreshed", "browser input restored")
+			})
 		}
 	}
 }

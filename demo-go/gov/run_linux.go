@@ -36,7 +36,7 @@ func run(o options, in *os.File, out io.Writer) error {
 		return err
 	}
 	defer func() {
-		fmt.Fprint(out, "\x18")
+		fmt.Fprint(out, "\x18\x1b[?1000l\x1b[?1006l")
 		_ = client.Send(api.VideoRequest{Action: "close"})
 		// Consume the ordered close acknowledgement (and preceding status
 		// replies) before returning the PTY to the shell.
@@ -44,13 +44,13 @@ func run(o options, in *os.File, out io.Writer) error {
 		fmt.Fprint(out, "\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l")
 		_ = unix.IoctlSetTermios(fd, unix.TCSETS, old)
 	}()
-	v := &viewer{out: out, client: client, options: o, status: api.VideoStatus{State: "connecting", Volume: o.volume, Muted: o.muted}, cols: 80, rows: 24}
+	v := &viewer{out: out, client: client, options: o, status: api.VideoStatus{State: "connecting", Volume: o.volume, Muted: o.muted, Speed: 1}, cols: 80, rows: 24}
 	resize := func() {
 		if ws, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ); err == nil {
 			v.cols = max(1, int(ws.Col))
 			v.rows = max(1, int(ws.Row))
 		}
-		v.lastTop, v.lastBottom = "", ""
+		v.lastTop, v.lastBottom, v.lastProgress = "", "", ""
 		if v.ready {
 			v.send(api.VideoRequest{Action: "resize", Bounds: v.bounds()})
 		}
@@ -59,11 +59,11 @@ func run(o options, in *os.File, out io.Writer) error {
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
-	if _, err := fmt.Fprint(out, "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J"); err != nil {
+	if _, err := fmt.Fprint(out, "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1006h\x1b[2J"); err != nil {
 		return err
 	}
 	v.send(api.VideoRequest{Action: "query"})
-	var parser inputParser
+	parser := inputParser{mouse: v.mouse}
 	lastReply := time.Now()
 	var nextQuery time.Time
 	for !v.quit && v.err == nil {

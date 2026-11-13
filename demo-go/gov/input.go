@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -9,6 +11,41 @@ import (
 type inputParser struct {
 	pending []byte
 	since   time.Time
+	mouse   func(mouseEvent)
+}
+
+type mouseEvent struct {
+	button, x, y int
+	press        bool
+}
+
+func parseMouse(sequence string) (mouseEvent, bool) {
+	if !strings.HasPrefix(sequence, "[<") || len(sequence) < 8 {
+		return mouseEvent{}, false
+	}
+	final := sequence[len(sequence)-1]
+	if final != 'M' && final != 'm' {
+		return mouseEvent{}, false
+	}
+	fields := strings.Split(sequence[2:len(sequence)-1], ";")
+	if len(fields) != 3 {
+		return mouseEvent{}, false
+	}
+	values := [3]int{}
+	for i, field := range fields {
+		if field == "" || strings.IndexFunc(field, func(r rune) bool { return r < '0' || r > '9' }) != -1 {
+			return mouseEvent{}, false
+		}
+		n, err := strconv.Atoi(field)
+		if err != nil || n > 65535 {
+			return mouseEvent{}, false
+		}
+		values[i] = n
+	}
+	if values[0] > 255 || values[1] == 0 || values[2] == 0 {
+		return mouseEvent{}, false
+	}
+	return mouseEvent{button: values[0], x: values[1], y: values[2], press: final == 'M'}, true
 }
 
 func (p *inputParser) feed(data []byte, now time.Time, key func(string), reply func(string)) {
@@ -51,7 +88,11 @@ func (p *inputParser) feed(data []byte, now time.Time, key func(string), reply f
 			if end == len(b) {
 				break
 			}
-			name := map[string]string{"[A": "up", "[B": "down", "[C": "right", "[D": "left", "[H": "home", "[1~": "home", "OH": "home"}[string(b[1:end+1])]
+			sequence := string(b[1 : end+1])
+			if event, ok := parseMouse(sequence); ok && p.mouse != nil {
+				p.mouse(event)
+			}
+			name := map[string]string{"[A": "up", "[B": "down", "[C": "right", "[D": "left", "[H": "home", "[1~": "home", "OH": "home"}[sequence]
 			if name != "" {
 				key(name)
 			}

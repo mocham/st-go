@@ -32,7 +32,7 @@ Otherwise the
 external fallbacks are used on X11 only. Matching explicit openers take precedence.
 ST_FILE_BROWSER_OPEN_X11, _FB, _WEB, or _ALL register environment openers.
 Legacy ST_FILE_BROWSER_OPEN is X11-only. ST_GO_BACKEND identifies the terminal.
-Framebuffer video uses mpv --vo=drm with --audio-device=alsa/plughw:1,0 by default.
+Framebuffer video opens in gov using the full st-fb's bundled decoder.
 There is no default X11/web video player; matching custom openers still override.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn

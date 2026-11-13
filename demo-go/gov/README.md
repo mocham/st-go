@@ -25,7 +25,9 @@ Or start both from a foreground Linux text VT:
 | Space / k | Pause/resume; replay at the end |
 | Left / h, Right / l | Seek backward/forward five seconds |
 | 0 / Home | Return to the start |
+| [ / ] | Decrease/increase playback speed by a factor of 1.1 (0.25×–4×) |
 | + / Up, − / Down | Adjust playback volume |
+| Left-click progress bar | Seek to that position |
 | m | Mute/unmute |
 | q / Escape / Ctrl-C | Quit |
 
@@ -33,6 +35,10 @@ Or start both from a foreground Linux text VT:
 the system-bar volume remains the hardware volume. If ALSA is unavailable, video
 continues and the status line reports the audio error. Resizing fits the video
 into the available area, preserving aspect ratio with black borders.
+The current speed appears in the top status line. Audio follows the selected
+speed through resampling, which also changes pitch. The clickable progress bar
+sits above the bottom controls and is hidden in terminals smaller than four
+rows or four columns.
 
 ## Playback path
 

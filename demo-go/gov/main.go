@@ -23,7 +23,7 @@ func parseOptions(args []string, out io.Writer) (options, error) {
 	f.BoolVar(&o.muted, "mute", false, "start muted")
 	f.IntVar(&o.volume, "volume", 100, "playback volume (0..100)")
 	f.Usage = func() {
-		fmt.Fprintln(out, "Usage: gov [-mute] [-volume 0..100] movie.mp4\n\nSpace pause/resume; Left/Right seek 5s; 0 restart; +/- volume; m mute; q quit.")
+		fmt.Fprintln(out, "Usage: gov [-mute] [-volume 0..100] movie.mp4\n\nSpace pause/resume; Left/Right seek 5s; click progress bar to seek; [/] speed; 0 restart; +/- volume; m mute; q quit.")
 	}
 	if err := f.Parse(args); err != nil {
 		return o, err

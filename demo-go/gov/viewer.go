@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"math"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -12,14 +13,16 @@ import (
 )
 
 type viewer struct {
-	out                 io.Writer
-	client              *video.Client
-	options             options
-	status              api.VideoStatus
-	cols, rows          int
-	ready, quit         bool
-	err                 error
-	lastTop, lastBottom string
+	out                               io.Writer
+	client                            *video.Client
+	options                           options
+	status                            api.VideoStatus
+	cols, rows                        int
+	ready, quit                       bool
+	err                               error
+	lastTop, lastBottom, lastProgress string
+	pendingSpeed                      float64
+	pendingVolume                     *int
 }
 
 func (v *viewer) send(r api.VideoRequest) {
@@ -31,7 +34,25 @@ func (v *viewer) bounds() api.Rect {
 	if v.rows < 3 {
 		return api.Rect{X: 1, Y: v.rows + 1, Width: 1, Height: 1}
 	}
-	return api.Rect{X: 1, Y: 2, Width: max(1, v.cols), Height: v.rows - 2}
+	height := v.rows - 2
+	if v.progressRow() != 0 {
+		height--
+	}
+	return api.Rect{X: 1, Y: 2, Width: max(1, v.cols), Height: height}
+}
+
+func (v *viewer) progressRow() int {
+	if v.rows < 4 || v.cols < 4 {
+		return 0
+	}
+	return v.rows - 1
+}
+
+func (v *viewer) speed() float64 {
+	if v.status.Speed <= 0 {
+		return 1
+	}
+	return v.status.Speed
 }
 func (v *viewer) reply(payload string) bool {
 	s, ok := v.client.Reply(payload)
@@ -39,6 +60,22 @@ func (v *viewer) reply(payload string) bool {
 		return false
 	}
 	v.status = s
+	// Control acknowledgements may carry a snapshot from before the worker
+	// applied the request. Keep repeated keys cumulative until it catches up.
+	if v.pendingSpeed != 0 {
+		if math.Abs(s.Speed-v.pendingSpeed) < 1e-9 {
+			v.pendingSpeed = 0
+		} else {
+			v.status.Speed = v.pendingSpeed
+		}
+	}
+	if v.pendingVolume != nil {
+		if s.Volume == *v.pendingVolume {
+			v.pendingVolume = nil
+		} else {
+			v.status.Volume = *v.pendingVolume
+		}
+	}
 	if !s.Supported {
 		v.err = fmt.Errorf("MP4 playback requires the full st-fb build")
 		return true
@@ -79,6 +116,12 @@ func (v *viewer) key(key string) {
 	case "-", "down":
 		r.Action = "volume"
 		r.Volume = max(0, v.status.Volume-5)
+	case "]":
+		r.Action = "speed"
+		r.Speed = min(api.MaxVideoSpeed, v.speed()*1.1)
+	case "[":
+		r.Action = "speed"
+		r.Speed = max(api.MinVideoSpeed, v.speed()/1.1)
 	case "m":
 		r.Action = "mute"
 		r.Muted = !v.status.Muted
@@ -86,6 +129,36 @@ func (v *viewer) key(key string) {
 		return
 	}
 	v.send(r)
+	if v.err == nil {
+		if r.Action == "speed" {
+			v.pendingSpeed, v.status.Speed = r.Speed, r.Speed
+		}
+		if r.Action == "volume" {
+			v.pendingVolume = &r.Volume
+			v.status.Volume = r.Volume
+		}
+	}
+}
+
+func (v *viewer) mouse(event mouseEvent) {
+	row := v.progressRow()
+	if !v.ready || row == 0 || event.y != row || !event.press || event.button&^28 != 0 || event.x < 1 || event.x > v.cols || v.status.DurationMS <= 0 {
+		return
+	}
+	// Brackets clamp to the endpoints; track cells map from start to end.
+	column := max(0, min(v.cols-3, event.x-2))
+	position := int64(column) * v.status.DurationMS / int64(v.cols-3)
+	v.send(api.VideoRequest{Action: "seek", PositionMS: position})
+}
+
+func (v *viewer) progress() string {
+	width := v.cols - 2
+	if v.status.DurationMS <= 0 {
+		return "[" + strings.Repeat("-", width) + "]"
+	}
+	position := max(int64(0), min(v.status.DurationMS, v.status.PositionMS))
+	head := int(position * int64(width-1) / v.status.DurationMS)
+	return "[" + strings.Repeat("=", head) + ">" + strings.Repeat("-", width-head-1) + "]"
 }
 func safeText(s string) string {
 	return strings.Map(func(r rune) rune {
@@ -104,8 +177,8 @@ func (v *viewer) draw() {
 	if v.status.Muted {
 		sound = "muted"
 	}
-	top := fmt.Sprintf("gov | %s | %s %s / %s | %s", safeText(filepath.Base(v.options.file)), v.status.State, clock(v.status.PositionMS), clock(v.status.DurationMS), sound)
-	bottom := "Space pause  arrows seek  0 restart  +/- volume  m mute  q quit"
+	top := fmt.Sprintf("gov | %.2fx | %s %s / %s | %s | %s", v.speed(), v.status.State, clock(v.status.PositionMS), clock(v.status.DurationMS), sound, safeText(filepath.Base(v.options.file)))
+	bottom := "Space pause  arrows seek  [/] speed  +/- vol  m mute  q quit"
 	if v.status.Warning != "" {
 		bottom = "Audio: " + safeText(v.status.Warning) + " | m mute / q quit"
 	}
@@ -123,6 +196,9 @@ func (v *viewer) draw() {
 		}
 	}
 	line(1, top, &v.lastTop)
+	if row := v.progressRow(); row != 0 {
+		line(row, v.progress(), &v.lastProgress)
+	}
 	if v.rows > 1 {
 		line(v.rows, bottom, &v.lastBottom)
 	}

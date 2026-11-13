@@ -5,6 +5,8 @@ package video
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,6 +193,8 @@ func TestPlayerPauseSeekResizeReplayAndClose(t *testing.T) {
 	if before != after {
 		t.Fatal("frames advanced while paused")
 	}
+	control(api.VideoRequest{Action: "speed", Speed: 2})
+	awaitPlayer(t, p, func(s api.VideoStatus) bool { return s.State == "paused" && s.Speed == 2 })
 	control(api.VideoRequest{Action: "seek", PositionMS: 900})
 	awaitPlayer(t, p, func(s api.VideoStatus) bool { return s.State == "paused" && s.PositionMS >= 900 })
 	p.Resize(100, 80)
@@ -208,7 +212,55 @@ func TestPlayerPauseSeekResizeReplayAndClose(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	control(api.VideoRequest{Action: "toggle"})
+	resumed := time.Now()
 	awaitPlayer(t, p, func(s api.VideoStatus) bool { return s.State == "ended" })
+	if elapsed := time.Since(resumed); elapsed > 600*time.Millisecond {
+		t.Fatalf("2x playback took %v for 700ms of media", elapsed)
+	}
+	mu.Lock()
+	before = frames
+	mu.Unlock()
+	control(api.VideoRequest{Action: "seek", PositionMS: p.Status().DurationMS})
+	awaitPlayer(t, p, func(s api.VideoStatus) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return frames > before && s.State == "ended" && s.PositionMS == s.DurationMS
+	})
 	control(api.VideoRequest{Action: "toggle"})
 	awaitPlayer(t, p, func(s api.VideoStatus) bool { return s.State == "playing" && s.PositionMS < 900 })
+}
+
+func TestNativeAudioDurationFollowsPlaybackSpeed(t *testing.T) {
+	path := testMovie(t)
+	for _, speed := range []float64{0.5, 2} {
+		t.Run(fmt.Sprint(speed), func(t *testing.T) {
+			d, err := openNative(context.Background(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.close()
+			samples := 0
+			for {
+				kind, _, err := d.next()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kind == 0 {
+					break
+				}
+				if kind != 2 {
+					continue
+				}
+				pcm, err := d.audio(int(48000 / speed))
+				if err != nil {
+					t.Fatal(err)
+				}
+				samples += len(pcm) / 4
+			}
+			seconds := float64(samples) / 48000
+			if math.Abs(seconds-1.6/speed) > 0.05 {
+				t.Fatalf("audio duration %.3f at speed %.2f", seconds, speed)
+			}
+		})
+	}
 }

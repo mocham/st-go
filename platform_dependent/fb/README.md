@@ -138,7 +138,7 @@ remain available. See [gov controls and supported codecs](../../demo-go/gov/READ
 
 ### Native video handoff
 
-The file browser requests video playback through the terminal. st-fb hands its
+The legacy `file-browser --native-video FILE` helper requests a handoff. st-fb hands its
 real VT to mpv, pauses its own input/scanout, and restores ownership afterward.
 It does not launch DRM playback on the browser's PTY. Defaults use DRM output,
 `auto-copy` hardware decoding, ALSA `plughw:1,0`, and 33% mpv volume.
