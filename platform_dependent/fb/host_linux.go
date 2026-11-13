@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 	"st-go/audio"
+	"st-go/brightness"
 	"st-go/limits"
 	"st-go/platform_neutral/api"
 	"st-go/platform_neutral/sharedclipboard"
@@ -116,7 +117,7 @@ func New(window api.WindowOptions, o Options) (driver *Driver, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("fb %s: %w", o.Device, err)
 	}
-	d := &Driver{window: window, screen: f, pointer: image.Pt(f.layout.width/2, f.layout.height/2), systemBar: &systemBar{powerSupplyPath: "/sys/class/power_supply", audioOutput: audio.SelectedOutput, setAudioOutput: audio.SetOutput, setAudioVolume: audio.SetVolume, volumeLevel: window.InitialAudioVolume, brightness: systemBrightness, changeBrightness: setSystemBrightness}, done: make(chan struct{}), signals: make(chan os.Signal, 16), clipboard: make(map[byte]string), mousePaths: o.Mouse, grabMouse: o.GrabMouse}
+	d := &Driver{window: window, screen: f, pointer: image.Pt(f.layout.width/2, f.layout.height/2), systemBar: &systemBar{powerSupplyPath: "/sys/class/power_supply", audioOutput: audio.SelectedOutput, setAudioOutput: audio.SetOutput, setAudioVolume: audio.SetVolume, volumeLevel: window.InitialAudioVolume, brightness: brightness.Read, changeBrightness: brightness.Change}, done: make(chan struct{}), signals: make(chan os.Signal, 16), clipboard: make(map[byte]string), mousePaths: o.Mouse, grabMouse: o.GrabMouse}
 	d.clipboardSync = sharedclipboard.New(window.CachePath, sharedclipboard.Hooks{Changed: d.sharedClipboardChanged, Status: d.sharedClipboardStatus})
 	defer func() {
 		if err != nil {

@@ -1,6 +1,6 @@
 //go:build linux
 
-package fb
+package brightness
 
 import (
 	"os"
@@ -31,7 +31,7 @@ func TestBacklightBrightnessAndLogin1Change(t *testing.T) {
 	}
 	var args []string
 	run := func(got ...string) error { args = slices.Clone(got); return nil }
-	if next, ok := changeBacklightBrightness(root, -systemBarBrightnessDownStep, run); !ok || next != 0 {
+	if next, ok := changeBacklightBrightness(root, -4, run); !ok || next != 0 {
 		t.Fatal("brightness-down did not clamp at zero", next, ok)
 	}
 	wantSuffix := []string{"string:backlight", "string:panel", "uint32:0"}
@@ -39,7 +39,7 @@ func TestBacklightBrightnessAndLogin1Change(t *testing.T) {
 		t.Fatal("login1 brightness arguments are wrong", args)
 	}
 	writeBacklight(t, root, "panel", "98\n", "100\n")
-	if next, ok := changeBacklightBrightness(root, systemBarBrightnessUpStep, run); !ok || next != 100 || args[len(args)-1] != "uint32:100" {
+	if next, ok := changeBacklightBrightness(root, 5, run); !ok || next != 100 || args[len(args)-1] != "uint32:100" {
 		t.Fatal("brightness-up did not clamp at maximum", next, ok, args)
 	}
 }

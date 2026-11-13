@@ -12,16 +12,44 @@ import (
 	"time"
 
 	"github.com/jezek/xgb/xproto"
+	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
+	"st-go/widgets/systembar"
 )
 
 var (
-	barBG    = color.RGBA{45, 43, 70, 255}
-	barFG    = color.RGBA{196, 223, 181, 255}
+	barBG    = systemColor(systembar.Background)
+	barFG    = systemColor(systembar.Foreground)
 	activeBG = color.RGBA{79, 76, 111, 255}
 	urgentFG = color.RGBA{255, 201, 105, 255}
 )
+
+func systemColor(pixel uint32) color.RGBA {
+	return color.RGBA{byte(pixel >> 16), byte(pixel >> 8), byte(pixel), byte(pixel >> 24)}
+}
+
+func (w *wm) icon(kind byte) *image.Alpha {
+	if kind == 0 {
+		return nil
+	}
+	if w.icons == nil {
+		w.icons = make(map[byte]*image.Alpha)
+	}
+	if mask := w.icons[kind]; mask != nil {
+		return mask
+	}
+	source := systembar.Icon(kind)
+	if source == nil {
+		return nil
+	}
+	height := max(1, w.barHeight-8)
+	width := max(1, height*systembar.IconWidth/systembar.IconHeight)
+	mask := image.NewAlpha(image.Rect(0, 0, width, height))
+	xdraw.BiLinear.Scale(mask, mask.Rect, source, source.Rect, draw.Src, nil)
+	w.icons[kind] = mask
+	return mask
+}
 
 func (w *wm) label(img *image.RGBA, r image.Rectangle, text string, fg color.RGBA) {
 	r = r.Intersect(img.Rect)
@@ -103,35 +131,56 @@ func (w *wm) drawBars() {
 	bottom := image.NewRGBA(image.Rect(0, 0, w.width, w.height-a.Max.Y))
 	draw.Draw(bottom, bottom.Rect, image.NewUniform(barBG), image.Point{}, draw.Src)
 	x := w.width
-	put := func(text, action string) {
+	put := func(text, action string, icon byte) {
 		width := font.MeasureString(w.face, text).Ceil() + 18
+		mask := w.icon(icon)
+		if mask != nil {
+			width += mask.Rect.Dx()
+			if text != "" {
+				width += 4
+			}
+		}
 		if x-width < 0 {
 			return
 		}
 		r := image.Rect(x-width, 0, x, bottom.Rect.Dy())
 		x -= width
-		w.button(bottom, w.systembar, r, text, action, 0, false)
+		if mask == nil {
+			w.button(bottom, w.systembar, r, text, action, 0, false)
+		} else {
+			w.button(bottom, w.systembar, r, "", action, 0, false)
+			at := image.Pt(r.Min.X+8, r.Min.Y+(r.Dy()-mask.Rect.Dy())/2)
+			draw.DrawMask(bottom, mask.Rect.Add(at), image.NewUniform(barFG), image.Point{}, mask, image.Point{}, draw.Over)
+			if text != "" {
+				r.Min.X += mask.Rect.Dx() + 4
+				w.label(bottom, r, text, barFG)
+			}
+		}
 	}
 	// Clock and terminal button have priority on small screens.
-	put("+ Term", "terminal")
-	put(time.Now().Format("2006-01-02 15:04:05"), "")
-	if w.status.battery >= 0 {
-		put(fmt.Sprintf("BAT %d%%", w.status.battery), "")
+	put("", "terminal", systembar.NewTerminalIcon)
+	now := w.status.sampledAt
+	if now.IsZero() {
+		now = time.Now()
 	}
-	put("Shot", "shot")
+	put(now.Format("2006-01-02 15:04:05"), "", 0)
+	if w.status.battery >= 0 {
+		put(fmt.Sprintf("%d%%", w.status.battery), "", systembar.BatteryIcon)
+	}
+	put("", "shot", systembar.ScreenshotIcon)
 	if w.status.brightness >= 0 {
-		put("B+", "bright+")
-		put(fmt.Sprintf("%d%%", w.status.brightness), "")
-		put("B-", "bright-")
+		put("", "bright+", systembar.BrightnessUpIcon)
+		put(fmt.Sprintf("%d", w.status.brightness), "", 0)
+		put("", "bright-", systembar.BrightnessDownIcon)
 	}
 	if w.status.volume >= 0 {
-		put("V+", "vol+")
+		put("", "vol+", systembar.VolumeUpIcon)
 		text := fmt.Sprintf("%d%%", w.status.volume)
 		if w.status.muted {
 			text = "Mute"
 		}
-		put(text, "mute")
-		put("V-", "vol-")
+		put(text, "mute", 0)
+		put("", "vol-", systembar.VolumeDownIcon)
 	}
 	text := "gxw"
 	if time.Now().Before(w.messageUntil) {

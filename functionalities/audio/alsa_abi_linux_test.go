@@ -98,3 +98,20 @@ func TestBoundedPCMAndMixerHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestVolumeReadbackConversion(t *testing.T) {
+	for _, tt := range []struct {
+		min, max, value alsaLong
+		want            int
+		ok              bool
+	}{
+		{0, 74, 0, 0, true}, {0, 74, 24, 32, true}, {0, 74, 74, 100, true},
+		{-10, 10, 0, 50, true}, {0, 31, 1, 3, true},
+		{0, 74, 75, 0, false}, {0, 74, -1, 0, false}, {10, 10, 10, 0, false},
+	} {
+		got, ok := controlValuePercent(tt.min, tt.max, tt.value)
+		if got != tt.want || ok != tt.ok {
+			t.Fatalf("volume readback %+v: %d, %v", tt, got, ok)
+		}
+	}
+}

@@ -9,6 +9,9 @@ func TestSelectedOutputRejectsInvalidCardsWithoutProbingPlayback(t *testing.T) {
 			if _, known := SelectedOutput(); known {
 				t.Fatal("invalid card was accepted")
 			}
+			if _, known := Volume(); known {
+				t.Fatal("volume reported for invalid card")
+			}
 		})
 	}
 }

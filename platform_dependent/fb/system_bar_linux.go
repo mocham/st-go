@@ -12,33 +12,34 @@ import (
 	"time"
 
 	"st-go/platform_neutral/api"
+	"st-go/widgets/systembar"
 )
 
 const (
-	systemBarBatteryIcon        = byte(0x80)
-	systemBarCheckedIcon        = byte(0x81)
-	systemBarUncheckedIcon      = byte(0x82)
-	systemBarUnknownIcon        = byte(0x83)
-	systemBarVolumeDownIcon     = byte(0x84)
-	systemBarVolumeUpIcon       = byte(0x85)
-	systemBarBrightnessDownIcon = byte(0x86)
-	systemBarBrightnessUpIcon   = byte(0x87)
-	systemBarScreenshotIcon     = byte(0x88)
-	systemBarCropIcon           = byte(0x89)
-	systemBarNewTerminalIcon    = byte(0x8a)
+	systemBarBatteryIcon        = systembar.BatteryIcon
+	systemBarCheckedIcon        = systembar.CheckedIcon
+	systemBarUncheckedIcon      = systembar.UncheckedIcon
+	systemBarUnknownIcon        = systembar.UnknownIcon
+	systemBarVolumeDownIcon     = systembar.VolumeDownIcon
+	systemBarVolumeUpIcon       = systembar.VolumeUpIcon
+	systemBarBrightnessDownIcon = systembar.BrightnessDownIcon
+	systemBarBrightnessUpIcon   = systembar.BrightnessUpIcon
+	systemBarScreenshotIcon     = systembar.ScreenshotIcon
+	systemBarCropIcon           = systembar.CropIcon
+	systemBarNewTerminalIcon    = systembar.NewTerminalIcon
 )
 
 const (
-	systemBarInterval           = 30 * time.Second
+	systemBarInterval           = systembar.PollInterval
 	systemBarPadding            = 8
-	systemBarBackground         = 0xff2d2b46 // Muted dark blue, slightly purple.
-	systemBarForeground         = 0xffc4dfb5 // Soft light green.
+	systemBarBackground         = systembar.Background
+	systemBarForeground         = systembar.Foreground
 	systemBarMaxInitialVolume   = 50
-	systemBarMaxVolume          = 100
-	systemBarVolumeDownStep     = 4
-	systemBarVolumeUpStep       = 3
-	systemBarBrightnessDownStep = 4
-	systemBarBrightnessUpStep   = 5
+	systemBarMaxVolume          = systembar.MaxVolume
+	systemBarVolumeDownStep     = systembar.VolumeDownStep
+	systemBarVolumeUpStep       = systembar.VolumeUpStep
+	systemBarBrightnessDownStep = systembar.BrightnessDownStep
+	systemBarBrightnessUpStep   = systembar.BrightnessUpStep
 )
 
 // Backend-owned presentation state, protected by Driver.mu. No rows are

@@ -4,20 +4,49 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"st-go/audio"
+	"st-go/brightness"
+	"st-go/widgets/systembar"
 )
 
 type systemStatus struct {
+	sampledAt                   time.Time
 	battery, volume, brightness int // -1 means unavailable.
 	muted                       bool
-	mixer, backlight            string
-	maximum, rawBrightness      int
 	err                         string
+}
+
+type systemControls struct {
+	volume                                     func() (int, bool)
+	setVolume                                  func(int) bool
+	brightness                                 func() (int, int, bool)
+	changeBrightness                           func(int) (int, bool)
+	volumeKnown                                bool
+	volumeLevel, volumeReadback, restoreVolume int
+}
+
+func newSystemControls() *systemControls {
+	return &systemControls{volume: audio.Volume, setVolume: audio.SetVolume, brightness: brightness.Read, changeBrightness: brightness.Change}
+}
+
+func (c *systemControls) readVolume() (int, bool) {
+	actual, ok := c.volume()
+	if !ok {
+		c.volumeKnown = false
+		return 0, false
+	}
+	// Keep successful requested levels across quantized hardware readbacks,
+	// like the framebuffer bar, so small repeated steps can accumulate.
+	if !c.volumeKnown || actual != c.volumeReadback {
+		c.volumeLevel = actual
+	}
+	c.volumeKnown, c.volumeReadback = true, actual
+	return c.volumeLevel, true
 }
 
 func readValue(path string) string { b, _ := os.ReadFile(path); return strings.TrimSpace(string(b)) }
@@ -36,118 +65,67 @@ func batteryPercent(root string) int {
 	return -1
 }
 
-func backlight(root string) (path string, level, maximum int) {
-	entries, _ := os.ReadDir(root)
-	for _, e := range entries {
-		base := filepath.Join(root, e.Name())
-		n, e1 := strconv.Atoi(readValue(filepath.Join(base, "brightness")))
-		m, e2 := strconv.Atoi(readValue(filepath.Join(base, "max_brightness")))
-		if e1 == nil && e2 == nil && m > 0 && n >= 0 && n <= m {
-			return base, n, m
-		}
+func (c *systemControls) poll() systemStatus {
+	s := systemStatus{sampledAt: time.Now(), battery: batteryPercent("/sys/class/power_supply"), volume: -1, brightness: -1}
+	if level, ok := c.readVolume(); ok {
+		s.volume = level
+		s.muted = level == 0
 	}
-	return "", 0, 0
-}
-
-func command(ctx context.Context, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	b, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", args[0], err)
-	}
-	return strings.TrimSpace(string(b)), nil
-}
-
-var percentRE = regexp.MustCompile(`(\d+)%`)
-
-func volume(ctx context.Context) (backend string, level int, muted bool) {
-	if s, err := command(ctx, "wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"); err == nil {
-		parts := strings.Fields(s)
-		if len(parts) >= 2 {
-			if f, err := strconv.ParseFloat(parts[1], 64); err == nil {
-				return "wpctl", int(f*100 + 0.5), strings.Contains(s, "MUTED")
-			}
-		}
-	}
-	if s, err := command(ctx, "pactl", "get-sink-volume", "@DEFAULT_SINK@"); err == nil {
-		if m := percentRE.FindStringSubmatch(s); len(m) > 1 {
-			n, _ := strconv.Atoi(m[1])
-			mute, _ := command(ctx, "pactl", "get-sink-mute", "@DEFAULT_SINK@")
-			return "pactl", n, strings.Contains(mute, "yes")
-		}
-	}
-	if s, err := command(ctx, "amixer", "get", "Master"); err == nil {
-		if m := percentRE.FindStringSubmatch(s); len(m) > 1 {
-			n, _ := strconv.Atoi(m[1])
-			return "amixer", n, strings.Contains(s, "[off]")
-		}
-	}
-	return "", -1, false
-}
-
-func pollSystem(ctx context.Context) systemStatus {
-	s := systemStatus{battery: batteryPercent("/sys/class/power_supply"), brightness: -1}
-	s.mixer, s.volume, s.muted = volume(ctx)
-	s.backlight, s.rawBrightness, s.maximum = backlight("/sys/class/backlight")
-	if s.maximum > 0 {
-		s.brightness = (100*s.rawBrightness + s.maximum/2) / s.maximum
+	if level, _, ok := c.brightness(); ok {
+		s.brightness = level
 	}
 	return s
 }
 
-func changeSystem(ctx context.Context, s systemStatus, action string) error {
-	var args []string
+func (c *systemControls) change(action string) error {
 	switch action {
 	case "vol+", "vol-", "mute":
-		next := s.volume + 3
+		level, ok := c.readVolume()
+		if !ok {
+			return fmt.Errorf("selected ALSA output volume unavailable")
+		}
+		next := level + systembar.VolumeUpStep
 		if action == "vol-" {
-			next = s.volume - 4
+			next = level - systembar.VolumeDownStep
 		}
-		next = max(0, min(100, next))
-		switch s.mixer {
-		case "wpctl":
-			args = []string{"wpctl", "set-volume", "-l", "1", "@DEFAULT_AUDIO_SINK@", fmt.Sprintf("%d%%", next)}
-			if action == "mute" {
-				args = []string{"wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"}
+		if action == "mute" {
+			next = 0
+			if level == 0 {
+				if c.restoreVolume == 0 {
+					return fmt.Errorf("no previous volume to restore; use volume up")
+				}
+				next = c.restoreVolume
 			}
-		case "pactl":
-			args = []string{"pactl", "set-sink-volume", "@DEFAULT_SINK@", fmt.Sprintf("%d%%", next)}
-			if action == "mute" {
-				args = []string{"pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"}
-			}
-		case "amixer":
-			args = []string{"amixer", "set", "Master", fmt.Sprintf("%d%%", next)}
-			if action == "mute" {
-				args = []string{"amixer", "set", "Master", "toggle"}
-			}
-		default:
-			return fmt.Errorf("no working wpctl, pactl or amixer volume control")
 		}
+		next = max(0, min(systembar.MaxVolume, next))
+		if !c.setVolume(next) {
+			return fmt.Errorf("set ALSA output volume failed")
+		}
+		if next == 0 && level > 0 {
+			c.restoreVolume = level
+		} else if next > 0 {
+			c.restoreVolume = next
+		}
+		c.volumeLevel = next
+		c.volumeReadback, c.volumeKnown = c.volume()
+		return nil
 	case "bright+", "bright-":
-		if s.backlight == "" {
-			return fmt.Errorf("no backlight device")
-		}
-		step := max(1, s.maximum*3/100)
+		step := systembar.BrightnessUpStep
 		if action == "bright-" {
-			step = -max(1, s.maximum*4/100)
+			step = -systembar.BrightnessDownStep
 		}
-		value := max(1, min(s.maximum, s.rawBrightness+step))
-		if err := os.WriteFile(filepath.Join(s.backlight, "brightness"), []byte(strconv.Itoa(value)), 0644); err == nil {
-			return nil
+		if _, ok := c.changeBrightness(step); !ok {
+			return fmt.Errorf("set logind backlight brightness failed")
 		}
-		args = []string{"brightnessctl", "-d", filepath.Base(s.backlight), "set", strconv.Itoa(value)}
+		return nil
 	default:
 		return fmt.Errorf("unknown system action %q", action)
 	}
-	_, err := command(ctx, args...)
-	return err
 }
 
 func systemWorker(ctx context.Context, jobs <-chan string, updates chan<- systemStatus) {
-	s := pollSystem(ctx)
+	controls := newSystemControls()
+	s := controls.poll()
 	send := func() bool {
 		select {
 		case updates <- s:
@@ -159,20 +137,20 @@ func systemWorker(ctx context.Context, jobs <-chan string, updates chan<- system
 	if !send() {
 		return
 	}
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(systembar.PollInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case action := <-jobs:
-			err := changeSystem(ctx, s, action)
-			s = pollSystem(ctx)
+			err := controls.change(action)
+			s = controls.poll()
 			if err != nil {
 				s.err = err.Error()
 			}
 		case <-ticker.C:
-			s = pollSystem(ctx)
+			s = controls.poll()
 		}
 		if !send() {
 			return

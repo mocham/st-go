@@ -20,3 +20,4 @@ func playMP3(context.Context, string) error { return fmt.Errorf("ALSA audio requ
 func SelectedOutput() (int, bool)           { return 0, false }
 func SetOutput(int) bool                    { return false }
 func SetVolume(int) bool                    { return false }
+func Volume() (int, bool)                   { return 0, false }

@@ -704,6 +704,48 @@ func (m *outputMixer) volumeControl(mode int) (*mixerControl, error) {
 	return findControl(m.file, m.controls, ctlElementInteger, base+" Playback Volume", base+" Volume", base)
 }
 
+func controlValuePercent(minimum, maximum, value alsaLong) (int, bool) {
+	if _, ok := controlPercentValue(minimum, maximum, 0); !ok || value < minimum || value > maximum {
+		return 0, false
+	}
+	return int(float64(int64(value)-int64(minimum))*100/float64(int64(maximum)-int64(minimum)) + 0.5), true
+}
+
+// Volume reads the same selected hardware route used by SetVolume, without
+// changing mixer or PCM state. It reports the loudest channel as 0..100.
+func Volume() (percent int, known bool) {
+	card, ok := outputCard()
+	if !ok {
+		return 0, false
+	}
+	mixer, err := openOutputMixer(card)
+	if err != nil {
+		return 0, false
+	}
+	defer mixer.close()
+	mode, known := mixer.selected()
+	if !known {
+		return 0, false
+	}
+	control, err := mixer.volumeControl(mode)
+	if err != nil {
+		return 0, false
+	}
+	_, values, err := control.readValues()
+	if err != nil {
+		return 0, false
+	}
+	rangeValues := controlInfoLongs(&control.info)
+	for _, value := range values {
+		n, ok := controlValuePercent(rangeValues[0], rangeValues[1], value)
+		if !ok {
+			return 0, false
+		}
+		percent = max(percent, n)
+	}
+	return percent, true
+}
+
 // SetVolume adjusts every channel of the currently selected hardware route.
 func SetVolume(percent int) bool {
 	if percent < 0 || percent > 100 {

@@ -1,9 +1,7 @@
 // Code generated from bundled Font Awesome Free SVGs; DO NOT EDIT.
 // Font Awesome Free 6.7.2, CC BY 4.0 solid and regular icons from
-// https://github.com/FortAwesome/Font-Awesome/tree/6.x/svgs; license details in platform_dependent/fb/README.md.
-//go:build linux
-
-package fb
+// https://github.com/FortAwesome/Font-Awesome/tree/6.x/svgs; license details in functionalities/widgets/systembar/README.md.
+package systembar
 
 const systemBarIconBitmapWidth = 21
 const systemBarIconBitmapHeight = 35

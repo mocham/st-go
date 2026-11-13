@@ -48,24 +48,31 @@ an empty desktop. The default terminal is a sibling `st`/`st-min`, then
 | Alt+Shift+N / Alt+Shift+Tab / Alt+Left | Previous tab |
 | Click a tab | Select it |
 | Wheel over tabs / click `<` or `>` | Cycle tabs, including overflow |
-| Alt+Enter / `+ Term` | New terminal |
+| Alt+Enter / terminal-plus icon | New terminal |
 | Alt+F4 | Close the focused window/dialog |
 | Alt+Shift+Q | End the X session and return to the console |
-| Print Screen / `Shot` | Save `/tmp/gxw-screenshot.png` |
-| `V-`, volume percentage, `V+` | Lower volume, toggle mute, raise volume |
-| `B-`, `B+` | Lower/raise brightness |
+| Print Screen / camera icon | Save `/tmp/gxw-screenshot.png` |
+| Volume-down icon, percentage, volume-up icon | Lower volume, toggle mute, raise volume |
+| Brightness-down / brightness-up icons | Lower/raise brightness |
 
 Caps Lock and Num Lock do not interfere with shortcuts. Media volume and
 brightness keys are supported. `-screenshot /path/to/file.png` changes the
 screenshot destination; successful saves atomically replace the file.
 
-The system bar uses the framebuffer terminal's dark blue/light green styling,
-with a clock, date, system battery, volume, brightness, screenshot, and terminal
-controls. Volume uses the first working `wpctl`, `pactl`, or `amixer` backend.
-Brightness uses Linux backlight sysfs, falling back to `brightnessctl` when
-direct writes are unavailable. Unavailable hardware controls are omitted;
-command failures appear in the bar. System commands run outside the X event
-loop.
+The system bar shares the framebuffer terminal's icons, dark blue/light green
+colors, and **30-second status polling interval**. It includes a clock,
+date, system battery, volume, brightness, screenshot, and terminal controls.
+Volume calls the same `st-go/audio.SetVolume` direct ALSA implementation as
+`st-fb`, reading the initial level from the selected hardware route.
+`ST_GO_AUDIO_OUTPUT_CARD` selects the card using that module's existing rules.
+Mute saves the current level, sets volume to zero, and restores that saved level.
+Volume steps are −4/+3 percentage points.
+
+Brightness uses the shared `st-go/brightness` implementation extracted from
+`st-fb`: read raw sysfs values and call logind's `SetBrightness` through
+`dbus-send`. Its display and −4/+5 steps use raw kernel units. Unavailable
+hardware controls are omitted; failures appear in the bar. Hardware operations
+run outside the X event loop, and controls refresh immediately after an action.
 
 ## Window policy
 

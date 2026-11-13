@@ -36,7 +36,7 @@ BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
 BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv gov govim opencode-tui gxw
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
-FUNCTIONAL_MODULES = $(addprefix functionalities/,audio config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
+FUNCTIONAL_MODULES = $(addprefix functionalities/,audio brightness config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
@@ -418,7 +418,7 @@ GC_EXTRA   = -Wl,--gc-sections
 
 WEB_ASSETS := $(wildcard platform_dependent/web/assets/* platform_dependent/web/assets/pdfjs/* platform_dependent/web/assets/pdfjs/*/*)
 PLATFORM_SRC := $(wildcard platform_neutral/*/*.go platform_dependent/*/*.go) $(WEB_ASSETS)
-GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard functionalities/config/*.go functionalities/audio/*.go functionalities/widgets/*.go) $(PLATFORM_SRC) \
+GO_SRC := $(wildcard *.go) $(wildcard term/*.go) $(wildcard functionalities/config/*.go functionalities/audio/*.go functionalities/brightness/*.go functionalities/widgets/*.go functionalities/widgets/systembar/*.go) $(PLATFORM_SRC) \
 	  go.mod go.sum Monaco_Linux.ttf \
 	  $(wildcard functionalities/pdfmeta/*.go functionalities/limits/*.go) \
           $(wildcard functionalities/config/*.json functionalities/ptyutil/*.go functionalities/terminfo/*.go) \
@@ -498,7 +498,7 @@ $(OUTPUT_DIR)/gov: $(GOV_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/gov build -trimpath -o $(abspath $@) .
 
 # Standalone X11 WM: native Go FreeType rasterization and X protocol.
-$(OUTPUT_DIR)/gxw: $(wildcard demo/gxw/*.go demo/gxw/go.*) | $(OUTPUT_DIR)
+$(OUTPUT_DIR)/gxw: $(wildcard demo/gxw/*.go demo/gxw/go.* functionalities/audio/*.go functionalities/brightness/*.go functionalities/widgets/systembar/*.go) $(MODULE_META) | $(OUTPUT_DIR)
 	CGO_ENABLED=0 go -C demo/gxw build -trimpath -o $(abspath $@) .
 
 .PHONY: test-gxw test-gxw-x11

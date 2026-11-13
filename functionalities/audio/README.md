@@ -2,11 +2,10 @@
 
 `st-go/audio` is a session-owned host service using the
 Go MP3 decoder → 16-bit stereo PCM → direct-hardware ALSA playback chain,
-without subprocess players or PCM attenuation. The framebuffer system bar is
-the one mixer client: it switches output and adjusts the selected route's
-hardware playback volume.
+without subprocess players or PCM attenuation. The framebuffer and `gxw`
+system bars share its direct ALSA hardware volume control.
 
-Only st-go imports this module. Clients use `st-go/tui/audio` and the
+The terminal host and standalone `gxw` import this module. TUI clients use `st-go/tui/audio` and the
 [authenticated terminal protocol](../../platform_neutral/stterminal/native_audio.go).
 The file-browser's `q` closes its viewer and stops its matching playback job.
 Normal completion drains the finite hardware buffer; cancellation drops it so
@@ -32,3 +31,6 @@ open or reconfigure a PCM stream. The highest of the first two discovered cards
 is used unless `ST_GO_AUDIO_OUTPUT_CARD` supplies an explicit card number.
 `SetVolume` adjusts the selected raw `Headphone` or `Speaker` playback control
 in the ALSA 0..100 percentage range without reopening or reconfiguring PCM.
+`Volume` reads the same selected control, reporting its loudest channel's
+percentage without changing the mixer. `gxw` uses it to initialize its display
+from hardware and observe external volume changes.

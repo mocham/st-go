@@ -19,6 +19,7 @@ require (
 	golang.org/x/net v0.60.0
 	modernc.org/sqlite v1.62.0
 	st-go/audio v0.0.0
+	st-go/brightness v0.0.0
 	st-go/config v0.0.0
 	st-go/limits v0.0.0
 	st-go/pdfmeta v0.0.0
@@ -49,6 +50,7 @@ require (
 replace (
 	github.com/mocham/GoLS/latexpdf => ./functionalities/latexpdf
 	st-go/audio => ./functionalities/audio
+	st-go/brightness => ./functionalities/brightness
 	st-go/config => ./functionalities/config
 	st-go/googlepinyin => ./functionalities/googlepinyin
 	st-go/limits => ./functionalities/limits

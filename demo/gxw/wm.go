@@ -35,6 +35,7 @@ type wm struct {
 	keys                             map[xproto.Keycode]uint32
 	ignoredMods                      uint16
 	hits                             map[xproto.Window][]hit
+	icons                            map[byte]*image.Alpha
 	status                           systemStatus
 	jobs                             chan string
 	message                          string
@@ -211,8 +212,6 @@ func (w *wm) run(ctx context.Context) error {
 	}()
 	updates := make(chan systemStatus, 1)
 	go systemWorker(ctx, w.jobs, updates)
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
 	for !w.quit {
 		select {
 		case <-ctx.Done():
@@ -225,8 +224,6 @@ func (w *wm) run(ctx context.Context) error {
 			if status.err != "" {
 				w.notice(status.err)
 			}
-			w.drawBars()
-		case <-ticker.C:
 			w.drawBars()
 		case e, ok := <-events:
 			if !ok {

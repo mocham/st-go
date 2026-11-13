@@ -11,6 +11,7 @@ import (
 	"io"
 
 	"golang.org/x/image/draw"
+	"st-go/widgets/systembar"
 )
 
 // Keep the generated text atlas in source control so headless/pure-Go builds
@@ -68,99 +69,21 @@ func scaleSystemBarGlyph(glyph []uint32, width, height int) []uint32 {
 }
 
 func loadSystemBarIcons() map[byte][]uint32 {
-	icons := make(map[byte][]uint32, len(systemBarIconBitmapBase64))
-	for kind, encoded := range systemBarIconBitmapBase64 {
-		packed, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			panic(fmt.Sprintf("invalid system-bar icon %x: %v", kind, err))
-		}
-		zr, err := zlib.NewReader(bytes.NewReader(packed))
-		if err != nil {
-			panic(fmt.Sprintf("invalid system-bar icon %x: %v", kind, err))
-		}
-		alpha, err := io.ReadAll(io.LimitReader(zr, int64(systemBarIconBitmapWidth*systemBarIconBitmapHeight+1)))
-		zr.Close()
-		if err != nil || len(alpha) != systemBarIconBitmapWidth*systemBarIconBitmapHeight {
-			panic(fmt.Sprintf("invalid system-bar icon %x size", kind))
-		}
+	icons := make(map[byte][]uint32)
+	for kind := systembar.BatteryIcon; kind <= systembar.NewTerminalIcon; kind++ {
+		mask := systembar.Icon(kind)
 		glyph := make([]uint32, systemBarFontCellWidth*systemBarFontCellHeight)
 		for i := range glyph {
 			glyph[i] = systemBarBackground
 		}
-		for y := 0; y < systemBarIconBitmapHeight && y < systemBarFontCellHeight; y++ {
-			for x := 0; x < systemBarIconBitmapWidth && x < systemBarFontCellWidth; x++ {
-				glyph[y*systemBarFontCellWidth+x] = systemBarBlend(alpha[y*systemBarIconBitmapWidth+x])
+		for y := 0; y < mask.Rect.Dy() && y < systemBarFontCellHeight; y++ {
+			for x := 0; x < mask.Rect.Dx() && x < systemBarFontCellWidth; x++ {
+				glyph[y*systemBarFontCellWidth+x] = systemBarBlend(mask.AlphaAt(x, y).A)
 			}
 		}
 		icons[kind] = glyph
 	}
-	icons[systemBarScreenshotIcon] = systemBarCameraGlyph()
-	icons[systemBarCropIcon] = systemBarCropGlyph()
-	icons[systemBarNewTerminalIcon] = systemBarNewTerminalGlyph()
 	return icons
-}
-
-func blankSystemBarIcon() []uint32 {
-	glyph := make([]uint32, systemBarFontCellWidth*systemBarFontCellHeight)
-	for i := range glyph {
-		glyph[i] = systemBarBackground
-	}
-	return glyph
-}
-
-func systemBarIconLine(glyph []uint32, x0, y0, x1, y1 int) {
-	for y := max(0, y0); y < min(systemBarFontCellHeight, y1); y++ {
-		for x := max(0, x0); x < min(systemBarFontCellWidth, x1); x++ {
-			glyph[y*systemBarFontCellWidth+x] = systemBarForeground
-		}
-	}
-}
-
-func systemBarCameraGlyph() []uint32 {
-	glyph := blankSystemBarIcon()
-	// Camera body, viewfinder bump, and lens. These are kept procedural so the
-	// framebuffer build does not acquire another font or icon dependency.
-	systemBarIconLine(glyph, 1, 11, 20, 14)
-	systemBarIconLine(glyph, 1, 14, 4, 28)
-	systemBarIconLine(glyph, 17, 14, 20, 28)
-	systemBarIconLine(glyph, 1, 25, 20, 28)
-	systemBarIconLine(glyph, 7, 7, 14, 11)
-	for y := 14; y < 25; y++ {
-		for x := 5; x < 16; x++ {
-			distance := (x-10)*(x-10) + (y-19)*(y-19)
-			if distance >= 12 && distance <= 28 {
-				glyph[y*systemBarFontCellWidth+x] = systemBarForeground
-			}
-		}
-	}
-	return glyph
-}
-
-func systemBarCropGlyph() []uint32 {
-	glyph := blankSystemBarIcon()
-	// Four open corners distinguish capture mode from the idle camera.
-	for _, line := range [][4]int{
-		{2, 7, 10, 10}, {2, 7, 5, 16},
-		{12, 7, 20, 10}, {17, 7, 20, 16},
-		{2, 25, 10, 28}, {2, 19, 5, 28},
-		{12, 25, 20, 28}, {17, 19, 20, 28},
-	} {
-		systemBarIconLine(glyph, line[0], line[1], line[2], line[3])
-	}
-	return glyph
-}
-
-func systemBarNewTerminalGlyph() []uint32 {
-	glyph := blankSystemBarIcon()
-	// A terminal window with a prompt and a plus in its lower-right corner.
-	for _, line := range [][4]int{
-		{1, 7, 20, 9}, {1, 9, 3, 27}, {18, 9, 20, 18}, {1, 25, 10, 27},
-		{5, 12, 7, 14}, {7, 14, 9, 16}, {5, 16, 7, 18},
-		{15, 19, 17, 29}, {11, 23, 21, 25},
-	} {
-		systemBarIconLine(glyph, line[0], line[1], line[2], line[3])
-	}
-	return glyph
 }
 
 func loadSystemBarGlyphs() [128][]uint32 {
