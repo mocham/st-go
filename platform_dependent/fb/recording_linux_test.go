@@ -68,18 +68,24 @@ func TestRecordingCapturesCompositionAndHoldsCompleteFrameWhileSuspended(t *test
 	}
 }
 
-func requireRecordingEncoder(t *testing.T) {
+func requireRecordingEncoder(t *testing.T) (ffmpeg, ffprobe string) {
 	t.Helper()
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
+	var err error
+	if ffmpeg, err = exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("ffmpeg unavailable")
 	}
-	if _, err := exec.LookPath("ffprobe"); err != nil {
+	if ffprobe, err = exec.LookPath("ffprobe"); err != nil {
 		t.Skip("ffprobe unavailable")
 	}
+	if !recordingTestsUseExternalEncoder {
+		// Only validation may use external tools, via the saved absolute paths.
+		t.Setenv("PATH", t.TempDir())
+	}
+	return ffmpeg, ffprobe
 }
 
 func TestRecordingEncodesPlayableMP4AndAtomicallyReplacesPreviousFile(t *testing.T) {
-	requireRecordingEncoder(t)
+	ffmpeg, ffprobe := requireRecordingEncoder(t)
 	directory := t.TempDir()
 	path, target := filepath.Join(directory, "record.mp4"), filepath.Join(directory, "previous")
 	if err := os.WriteFile(target, []byte("previous recording"), 0600); err != nil {
@@ -117,7 +123,7 @@ func TestRecordingEncodesPlayableMP4AndAtomicallyReplacesPreviousFile(t *testing
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 {
 		t.Fatal("recording was not a private regular file", info, err)
 	}
-	probe, err := exec.Command("ffprobe", "-v", "error", "-show_entries", "stream=codec_name,pix_fmt,width,height,nb_frames", "-of", "json", path).Output()
+	probe, err := exec.Command(ffprobe, "-v", "error", "-show_entries", "stream=codec_name,pix_fmt,width,height,nb_frames", "-of", "json", path).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +141,7 @@ func TestRecordingEncodesPlayableMP4AndAtomicallyReplacesPreviousFile(t *testing
 	if stream.Codec != "h264" || stream.Format != "yuv420p" || stream.Width != 66 || stream.Height != 50 {
 		t.Fatal("wrong codec or odd-dimension padding", string(probe))
 	}
-	decoded, err := exec.Command("ffmpeg", "-v", "error", "-i", path, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1").Output()
+	decoded, err := exec.Command(ffmpeg, "-v", "error", "-i", path, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1").Output()
 	if err != nil {
 		t.Fatal("MP4 could not be decoded", err)
 	}
@@ -166,7 +172,7 @@ func waitForRecording(t *testing.T, r *screenRecording) {
 }
 
 func TestRecordingButtonStopsAndShutdownFinalizes(t *testing.T) {
-	requireRecordingEncoder(t)
+	_, ffprobe := requireRecordingEncoder(t)
 	d := memoryDriver(t, 900, 100)
 	d.systemBar = &systemBar{powerSupplyPath: t.TempDir()}
 	path := filepath.Join(t.TempDir(), "record.mp4")
@@ -196,12 +202,15 @@ func TestRecordingButtonStopsAndShutdownFinalizes(t *testing.T) {
 	second := filepath.Join(t.TempDir(), "exit.mp4")
 	d.startRecording(second)
 	d.Close()
-	if output, err := exec.Command("ffprobe", "-v", "error", second).CombinedOutput(); err != nil {
+	if output, err := exec.Command(ffprobe, "-v", "error", second).CombinedOutput(); err != nil {
 		t.Fatal("exit did not finalize a playable MP4", string(output), err)
 	}
 }
 
 func TestRecordingMissingEncoderReportsErrorAndAllowsKeyboardRetry(t *testing.T) {
+	if !recordingTestsUseExternalEncoder {
+		t.Skip("external encoder profile")
+	}
 	t.Setenv("PATH", t.TempDir())
 	d := memoryDriver(t, 900, 100)
 	d.systemBar = &systemBar{powerSupplyPath: t.TempDir()}
@@ -233,6 +242,9 @@ func TestRecordingMissingEncoderReportsErrorAndAllowsKeyboardRetry(t *testing.T)
 }
 
 func TestRecordingShutdownKillsStalledEncoderAndPreservesPreviousFile(t *testing.T) {
+	if !recordingTestsUseExternalEncoder {
+		t.Skip("external encoder profile")
+	}
 	directory := t.TempDir()
 	if err := os.WriteFile(filepath.Join(directory, "ffmpeg"), []byte("#!/bin/sh\nexec /bin/sleep 30\n"), 0700); err != nil {
 		t.Fatal(err)

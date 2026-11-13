@@ -72,8 +72,10 @@ Tabs share the bottom band with the bar, or sit above it on narrow screens.
 Clipboard/PRIMARY is process-local unless synchronization is enabled. Desktop
 window placement/collapse requests are unsupported.
 
-Recording requires `ffmpeg` on `PATH` with the `libx264` encoder. It captures the
-full composed screen, including previews, system bar, caret, and pointer, as a
+`st-fb` includes statically linked FFmpeg/x264 recording components; recording
+works without an installed `ffmpeg` executable. `st-fb-min` uses external `ffmpeg`
+on `PATH` with the `libx264` encoder. Both capture the full composed screen,
+including previews, system bar, caret, and pointer, as a
 30 FPS H.264 MP4 without audio. **SAVE** indicates finalization; **REC!** indicates
 an encoder/save error (details in the st-go diagnostic log). Clicking REC again
 starts a new recording, replacing the previous file only after a successful save.
@@ -139,6 +141,7 @@ See [video configuration](../../demo-go/file-browser/README.md#framebuffer-video
 ```sh
 CGO_ENABLED=0 go test ./platform_dependent/fb
 go test -race ./platform_dependent/fb
+make test-fb-recording  # external and bundled-static recording profiles
 ```
 
 These tests use simulated devices. Real device behavior requires a foreground-VT

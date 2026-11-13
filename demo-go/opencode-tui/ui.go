@@ -228,7 +228,7 @@ func (application *app) helpLine() string {
 	if application.preview == nil || !application.preview.enabled {
 		previewKey = "text response"
 	}
-	return "Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /Subscribe /sessions /models /variants /export · Ctrl-Q quit · " + previewKey
+	return "F4 fold prompt · Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /Subscribe /sessions /models /variants /export · Ctrl-Q quit · " + previewKey
 }
 
 func writeFull(writer io.Writer, data []byte) error {
@@ -321,6 +321,8 @@ func (application *app) drawPanes(output *strings.Builder) {
 			application.exportHits[y] = row.exportID
 		}
 		switch {
+		case row.action == "fold":
+			application.sidebarHits[y] = sidebarHit{"fold", row.promptID}
 		case row.fileID != "":
 			application.sidebarHits[y] = sidebarHit{"file", row.fileID}
 		case row.sessionID != "":

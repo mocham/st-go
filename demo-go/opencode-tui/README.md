@@ -90,6 +90,10 @@ unavailable files show an error in the preview.
 The sidebar groups prompts by session, showing workdir and title. Click a session
 to expand it, a prompt to read its response, or **More** for older prompts.
 Click the already-selected prompt again to jump to the end of its response.
+Long prompts start folded to three wrapped lines. Click **Show more** to expand
+one and **Fold prompt** at its top or bottom to collapse it. **F4** toggles the
+selected prompt. Fold choices survive refreshes and session switching while the
+client is open; folding preserves the selected response and unfinished input.
 Every session is boxed. The selected/connecting session is highlighted; sessions
 with work in progress show **Awaiting response**, including folded sessions.
 Inactive sessions use muted borders.
@@ -111,6 +115,7 @@ The header displays model, variant, and context usage.
 | Ctrl-U / Ctrl-D | Move preview up / down one full screen (also in message-file previews) |
 | Mouse wheel | Scroll pane under pointer |
 | F2 | Toggle rich/text response |
+| F4 | Expand/fold selected prompt |
 | Ctrl-C | Interrupt active work; quit while idle |
 | Ctrl-Q | Quit |
 | `y` / `a` / `n` | Allow once / always / reject permission request |

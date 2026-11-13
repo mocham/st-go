@@ -212,6 +212,7 @@ func (parser *inputParser) feed(data []byte, now time.Time, emit func(inputEvent
 				"[3~": "<Delete>", "[5~": "<PageUp>", "[6~": "<PageDown>",
 				"OQ": "<F2>", "[12~": "<F2>", "[1;5D": "<C-Left>", "[1;5C": "<C-Right>",
 				"OR": "<F3>", "[13~": "<F3>",
+				"OS": "<F4>", "[14~": "<F4>",
 				"[1;3A": "<A-Up>", "[1;3B": "<A-Down>",
 				"[5;3~": "<A-PageUp>", "[6;3~": "<A-PageDown>",
 			}[sequence]; key != "" {

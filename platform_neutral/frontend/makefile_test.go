@@ -50,9 +50,14 @@ func TestMakefileReusesThirdPartyArchives(t *testing.T) {
 		"third_party/djvu/lib/libdjvulibre.a",
 		"third_party/webp/lib/libwebp.a", "third_party/webp/lib/libwebpdemux.a",
 		"third_party/webp/webp_anim.o", "third_party/pdf_bridge.o", "third_party/image_decode.o",
+		"third_party/x264/lib/libx264.a",
+		"third_party/ffmpeg/lib/libavformat.a", "third_party/ffmpeg/lib/libavcodec.a",
+		"third_party/ffmpeg/lib/libswscale.a", "third_party/ffmpeg/lib/libavutil.a",
+		"third_party/recording_ffmpeg.o", "third_party/ffmpeg/include/st_go_ffmpeg_static.h",
 	}
 	for _, path := range append(append([]string{}, artifacts...),
 		"third_party_wrapper/image_decode.c", "third_party_wrapper/webp_anim.c",
+		"third_party_wrapper/recording_ffmpeg.c", "third_party_wrapper/recording_ffmpeg.h",
 		"platform_dependent/fb/generate_system_bar_font.go", "platform_dependent/fb/system_bar_font_generated.go",
 		"third_party_wrapper/pdf_bridge.cpp", "pdf_bridge.h", "go.mod", "go.sum", "Monaco_Linux.ttf", "st", "file-browser") {
 		write(path, nil, old)

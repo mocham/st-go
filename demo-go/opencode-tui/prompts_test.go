@@ -267,3 +267,113 @@ func TestRepeatedPromptClickJumpsToEndAndControlKeysPagePreview(t *testing.T) {
 		})
 	}
 }
+
+func TestLongPromptFoldingPreservesResponseAndDraft(t *testing.T) {
+	for _, rich := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rich=%v", rich), func(t *testing.T) {
+			text := strings.Repeat("Long document paragraph with 世界.\n", 100) + "Last source line"
+			application, _ := promptTestApp(t, []apiMessage{
+				{ID: "msg_long", Type: "user", Text: text}, answer("answer_long", "Earlier answer"),
+				{ID: "msg_short", Type: "user", Text: "Short question"}, answer("answer_short", "Selected answer"),
+			}, rich)
+			application.input.Insert("unfinished draft")
+			countLines := func() int {
+				count := 0
+				for _, row := range application.promptRows(application.bodyLayout().prompts.width - 2) {
+					if row.promptID == "msg_long" && row.action == "" {
+						count++
+					}
+				}
+				return count
+			}
+			if countLines() != 3 {
+				t.Fatal("long prompt did not start collapsed to three lines")
+			}
+			generation, follow := application.preview.generation, application.followPreview
+			sidebarClick(t, application, "fold", "msg_long")
+			if countLines() <= 100 || application.selectedPrompt != "msg_short" || application.selectedResponse() != "Selected answer" {
+				t.Fatal("expanding an unselected prompt lost text or changed the response")
+			}
+			// Collapse using the bottom control after scrolling through the text.
+			for index, row := range application.sidebarRows(application.bodyLayout().prompts.width) {
+				if row.promptID == "msg_long" && row.action == "fold" {
+					application.scroll = index
+				}
+			}
+			if err := application.draw(); err != nil {
+				t.Fatal(err)
+			}
+			clicked := false
+			for y, hit := range application.sidebarHits {
+				if hit.kind == "fold" && hit.id == "msg_long" {
+					var parser inputParser
+					parser.feed([]byte(fmt.Sprintf("\x1b[<0;3;%dM", y)), time.Now(), application.handleInput)
+					clicked = true
+					break
+				}
+			}
+			if !clicked || countLines() != 3 {
+				t.Fatal("bottom fold control did not collapse prompt")
+			}
+			if application.followPreview != follow || application.preview.generation != generation || application.responseScroll != 0 || application.preview.endPending || application.input.Text() != promptPrefix+"unfinished draft" {
+				t.Fatal("folding changed preview state or composer draft")
+			}
+			if application.messages[application.messageIndex["msg_long"]].Text != text {
+				t.Fatal("folding changed saved prompt text")
+			}
+			if err := application.draw(); err != nil {
+				t.Fatal(err)
+			}
+			visible := false
+			for _, hit := range application.sidebarHits {
+				visible = visible || hit.kind == "prompt" && hit.id == "msg_long"
+			}
+			if !visible {
+				t.Fatal("folding from the bottom lost the prompt offscreen")
+			}
+		})
+	}
+}
+
+func TestPromptFoldKeyboardRefreshResizeAndSessionIsolation(t *testing.T) {
+	messages := []apiMessage{{ID: "msg_long", Type: "user", Text: strings.Repeat("中文 é paragraph\n", 20)}, answer("answer", "Response")}
+	application, _ := promptTestApp(t, messages, true)
+	key := promptFoldKey{"ses_test", "msg_long"}
+	var parser inputParser
+	for _, b := range []byte("\x1bOS") {
+		parser.feed([]byte{b}, time.Now(), application.handleInput)
+	}
+	if !application.expandedPrompts[key] {
+		t.Fatal("F4 did not expand selected prompt")
+	}
+	application.replaceMessages(messages)
+	application.applyEvent(apiEvent{Type: "session.text.delta", Data: json.RawMessage(`{"sessionID":"ses_test","assistantMessageID":"answer","ordinal":0,"delta":" continued"}`)})
+	for _, width := range []int{8, 28, 100} {
+		application.handleInput(inputEvent{region: &regionLayout{mainColumns: width, mainRows: 24}})
+		if err := application.draw(); err != nil {
+			t.Fatal(err)
+		}
+		if !application.expandedPrompts[key] {
+			t.Fatal("refresh/stream/resize lost expansion")
+		}
+		for _, row := range application.promptRows(width) {
+			if row.action == "" && textWidth(row.text) > width {
+				t.Fatalf("wide-character prompt exceeded width %d: %q", width, row.text)
+			}
+		}
+	}
+	application.session.ID = "ses_other"
+	for _, row := range application.promptRows(80) {
+		if row.action == "fold" && !strings.Contains(row.text, "Show more") {
+			t.Fatal("another session inherited a prompt's expanded state")
+		}
+	}
+	application.session.ID = "ses_test"
+	if !application.expandedPrompts[key] {
+		t.Fatal("switching sessions lost expansion")
+	}
+	parser.feed([]byte("\x1b[14~"), time.Now(), application.handleInput)
+	if application.expandedPrompts[key] || application.selectedPrompt != "msg_long" {
+		t.Fatal("alternate F4 encoding failed to fold selected prompt")
+	}
+}

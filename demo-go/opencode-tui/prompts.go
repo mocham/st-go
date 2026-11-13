@@ -5,6 +5,50 @@ import (
 	"strings"
 )
 
+const foldedPromptLines = 3
+
+type promptFoldKey struct{ session, message string }
+
+func (application *app) togglePromptFold(id string) {
+	index, ok := application.messageIndex[id]
+	if !ok || application.messages[index].Role != "user" {
+		return
+	}
+	first, foldable := -1, false
+	for index, row := range application.sidebarRows(application.bodyLayout().prompts.width) {
+		if row.promptID != id {
+			continue
+		}
+		if first < 0 {
+			first = index
+		}
+		foldable = foldable || row.action == "fold"
+	}
+	if !foldable {
+		application.status, application.dirty = "Prompt fits without folding", true
+		return
+	}
+	key := promptFoldKey{application.session.ID, id}
+	if application.expandedPrompts[key] {
+		delete(application.expandedPrompts, key)
+		application.status = "Prompt folded"
+	} else {
+		if application.expandedPrompts == nil {
+			application.expandedPrompts = make(map[promptFoldKey]bool)
+		}
+		application.expandedPrompts[key] = true
+		application.status = "Prompt expanded"
+	}
+	// When folding from the bottom of a long prompt, keep its beginning in
+	// view. Folding does not change the selected response or composer draft.
+	if first < application.scroll || first >= application.scroll+application.bodyLayout().prompts.height {
+		application.scroll = first
+	}
+	application.sidebarFocus = ""
+	application.sidebarHits, application.deleteHits, application.exportHits = nil, nil, nil
+	application.dirty = true
+}
+
 func (application *app) selectPrompt(id string) {
 	index, ok := application.messageIndex[id]
 	if !ok || application.messages[index].Role != "user" {
@@ -74,12 +118,29 @@ func (application *app) promptRows(width int) []displayRow {
 		if strings.TrimSpace(text) == "" {
 			text = "(attachment)"
 		}
-		for line, value := range wrapText(text, max(1, width-indent)) {
+		lines := wrapText(text, max(1, width-indent))
+		long := len(lines) > foldedPromptLines
+		expanded := application.expandedPrompts[promptFoldKey{application.session.ID, message.ID}]
+		fold := displayRow{text: "  ▾ Fold prompt", style: dimStyle, promptID: message.ID, action: "fold"}
+		if long && expanded {
+			rows = append(rows, fold)
+		}
+		visible := lines
+		if long && !expanded {
+			visible = lines[:foldedPromptLines]
+		}
+		for line, value := range visible {
 			leader := strings.Repeat(" ", indent)
 			if line == 0 {
 				leader = prefix
 			}
 			rows = append(rows, displayRow{text: leader + value, style: style, promptID: message.ID})
+		}
+		if long {
+			if !expanded {
+				fold.text = fmt.Sprintf("  ▸ Show more (%d lines)", len(lines)-foldedPromptLines)
+			}
+			rows = append(rows, fold)
 		}
 		rows = append(rows, displayRow{})
 	}
@@ -255,6 +316,8 @@ func (application *app) handleMouse(mouse mouseEvent) {
 		}
 		hit := application.sidebarHits[mouse.y]
 		switch hit.kind {
+		case "fold":
+			application.togglePromptFold(hit.id)
 		case "session":
 			application.attachSession(hit.id)
 		case "prompt":

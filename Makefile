@@ -9,6 +9,7 @@
 #   - libpng      : poppler's embedded-image support
 #   - libjpeg-turbo: poppler's JPEG/DCT image decoder
 #   - DjVuLibre  : static DjVu decoding for zat-djvu
+#   - FFmpeg/x264: H.264/MP4 recording in st-fb
 # SQLite uses the pure-Go modernc.org/sqlite driver on every backend.
 #
 # Full terminal profiles also use libpng and libjpeg-turbo for accelerated PNG
@@ -125,6 +126,24 @@ WEBP_LIB     = third_party/webp/lib/libwebp.a
 WEBP_DEMUX   = third_party/webp/lib/libwebpdemux.a
 WEBP_ANIM_C  = third_party_wrapper/webp_anim.c
 WEBP_ANIM_O  = third_party/webp/webp_anim.o
+
+# Framebuffer recording: a deliberately small, static FFmpeg + x264 build.
+X264_VERSION = b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+X264_URL = https://code.videolan.org/videolan/x264/-/archive/$(X264_VERSION)/x264-$(X264_VERSION).tar.bz2
+X264_SHA256 = 6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224
+X264_TAR = third_party/x264-$(X264_VERSION).tar.bz2
+X264_SRC = third_party/x264-src
+X264_DIR = third_party/x264
+X264_LIB = $(X264_DIR)/lib/libx264.a
+FFMPEG_VERSION = 8.1.3
+FFMPEG_URL = https://ffmpeg.org/releases/ffmpeg-$(FFMPEG_VERSION).tar.xz
+FFMPEG_SHA256 = 7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3
+FFMPEG_TAR = third_party/ffmpeg-$(FFMPEG_VERSION).tar.xz
+FFMPEG_SRC = third_party/ffmpeg-src
+FFMPEG_DIR = third_party/ffmpeg
+FFMPEG_LIBS = $(addprefix $(FFMPEG_DIR)/lib/,libavformat.a libavcodec.a libswscale.a libavutil.a)
+FFMPEG_BRIDGE = third_party/recording_ffmpeg.o
+FFMPEG_STAMP = $(FFMPEG_DIR)/include/st_go_ffmpeg_static.h
 
 # Build every terminal profile/backend, demo, and helper.
 all: $(BINARY_PATHS)
@@ -317,6 +336,61 @@ $(POPPLER_LIB): $(FT_A) $(ZLIB_LIB) $(PNG_LIB) $(JPEG_LIB)
 	cp "$(POPPLER_SRC)/cpp/"*.h third_party/poppler/include/
 	cp "$(POPPLER_BUILD)/cpp/poppler_cpp_export.h" third_party/poppler/include/
 
+# --- static framebuffer recording ----------------------------------------
+$(X264_TAR):
+	@mkdir -p third_party
+	curl --fail --location --retry 3 --output "$@.tmp" "$(X264_URL)"
+	printf '%s  %s\n' '$(X264_SHA256)' '$@.tmp' | sha256sum -c -
+	mv "$@.tmp" "$@"
+
+$(X264_LIB):
+	@if [ ! -f "$(X264_TAR)" ]; then $(MAKE) --no-print-directory "$(X264_TAR)"; fi
+	printf '%s  %s\n' '$(X264_SHA256)' '$(X264_TAR)' | sha256sum -c -
+	rm -rf "$(X264_SRC)" "$(X264_DIR)"
+	mkdir -p "$(X264_SRC)"
+	tar -xjf "$(X264_TAR)" -C "$(X264_SRC)" --strip-components=1
+	cd "$(X264_SRC)" && ./configure --prefix="$(abspath $(X264_DIR))" \
+		--enable-static --enable-pic --disable-cli --disable-opencl \
+		--bit-depth=8 --chroma-format=420 \
+		--extra-cflags="-O2 -ffunction-sections -fdata-sections"
+	$(MAKE) -C "$(X264_SRC)" install-lib-static
+	cp "$(X264_SRC)/COPYING" "$(X264_DIR)/LICENSE"
+
+$(FFMPEG_TAR):
+	@mkdir -p third_party
+	curl --fail --location --retry 3 --output "$@.tmp" "$(FFMPEG_URL)"
+	printf '%s  %s\n' '$(FFMPEG_SHA256)' '$@.tmp' | sha256sum -c -
+	mv "$@.tmp" "$@"
+
+# One recipe owns all four archives, including under parallel make. No host
+# media libraries are auto-detected; only local-file H.264/MP4 recording is built.
+$(FFMPEG_LIBS) &: $(X264_LIB)
+	@if [ ! -f "$(FFMPEG_TAR)" ]; then $(MAKE) --no-print-directory "$(FFMPEG_TAR)"; fi
+	printf '%s  %s\n' '$(FFMPEG_SHA256)' '$(FFMPEG_TAR)' | sha256sum -c -
+	rm -rf "$(FFMPEG_SRC)" "$(FFMPEG_DIR)"
+	mkdir -p "$(FFMPEG_SRC)"
+	tar -xJf "$(FFMPEG_TAR)" -C "$(FFMPEG_SRC)" --strip-components=1
+	cd "$(FFMPEG_SRC)" && PKG_CONFIG_PATH="$(abspath $(X264_DIR)/lib/pkgconfig)" \
+		./configure --prefix="$(abspath $(FFMPEG_DIR))" --pkg-config-flags=--static \
+		--enable-static --disable-shared --enable-pic --enable-gpl --enable-libx264 \
+		--disable-autodetect --disable-everything --disable-programs --disable-doc \
+		--disable-debug --disable-network --disable-iconv --disable-avdevice --disable-avfilter --disable-swresample \
+		--enable-avformat --enable-avcodec --enable-avutil --enable-swscale \
+		--enable-encoder=libx264 --enable-muxer=mp4 --enable-protocol=file \
+		--extra-cflags="-O2 -ffunction-sections -fdata-sections"
+	$(MAKE) -C "$(FFMPEG_SRC)" install-libs install-headers
+	cp "$(FFMPEG_SRC)/COPYING.GPLv2" "$(FFMPEG_DIR)/LICENSE"
+
+$(FFMPEG_BRIDGE): third_party_wrapper/recording_ffmpeg.c third_party_wrapper/recording_ffmpeg.h $(FFMPEG_LIBS)
+	$(CC) -O2 -fPIC -ffunction-sections -fdata-sections -I$(FFMPEG_DIR)/include -c $< -o $@
+
+# cgo must observe rebuilt archive/bridge contents instead of reusing a stale
+# Go package: external .a/.o files are not part of Go's own cache key.
+$(FFMPEG_STAMP): $(FFMPEG_BRIDGE) $(FFMPEG_LIBS) $(X264_LIB)
+	@hash=$$(cat $(FFMPEG_BRIDGE) $(FFMPEG_LIBS) $(X264_LIB) | sha256sum | cut -d' ' -f1); \
+		printf '#define ST_GO_FFMPEG_STATIC_SHA256 "%s"\n' "$$hash" > "$@.tmp"; \
+		mv "$@.tmp" "$@"
+
 # --- st targets ------------------------------------------------------------
 # Full and minimal native profiles for X11 and Linux framebuffer. Every profile
 # decodes ordinary raster images with Go; full profiles prefer libpng,
@@ -384,8 +458,8 @@ FONT_RASTER_SRC = $(filter-out %_test.go,$(wildcard platform_neutral/fontraster/
 $(FB_STATUS_FONT): Monaco_Linux.ttf platform_dependent/fb/generate_system_bar_font.go $(FONT_RASTER_SRC) go.mod go.sum
 	CGO_ENABLED=0 GOOS=$$(go env GOHOSTOS) GOARCH=$$(go env GOHOSTARCH) go run platform_dependent/fb/generate_system_bar_font.go -font Monaco_Linux.ttf -output $@
 
-$(OUTPUT_DIR)/st-fb: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(FB_STATUS_FONT) $(GO_SRC)
-	go build -trimpath -tags 'backend_fb netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
+$(OUTPUT_DIR)/st-fb: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(FFMPEG_STAMP) $(FB_STATUS_FONT) $(GO_SRC)
+	go build -trimpath -tags 'backend_fb ffmpeg_static netgo osusergo $(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
 
 $(OUTPUT_DIR)/st-fb-min: $(FB_STATUS_FONT) $(GO_SRC)
 	CGO_ENABLED=0 go build -trimpath -tags 'purego backend_fb netgo osusergo $(TAB_GO_TAGS)' -o $@ .
@@ -450,7 +524,7 @@ install: st
 # are tested explicitly: Go's ./... pattern never crosses module boundaries.
 TEST_EXTRA = $(FULL_EXTRA)
 
-test: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules test-web
+test: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(WEBP_ANIM_O) st-web st-fb file-browser test-modules test-web test-fb-recording
 	go test -tags '$(FULL_GO_TAGS)' ./... -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(TEST_EXTRA)"' -run 'Test[^Render]' -count=1
 
 # Integrated profile, including the in-process pure-Go Pinyin tests.
@@ -493,6 +567,10 @@ test-zat-djvu: $(DJVU_LIB) $(DJVU_STAMP)
 	GOWORK=off go -C demo-go/zat-djvu test -tags 'djvu_static' \
 		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' ./...
 
+test-fb-recording: $(FFMPEG_STAMP)
+	CGO_ENABLED=0 go test ./platform_dependent/fb
+	go test -tags ffmpeg_static ./platform_dependent/fb
+
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
 	rm -f "$(DESTDIR)$(TERMINFO_DIR)/s/st-256color" \
@@ -504,4 +582,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu $(BINARY_NAMES) terminal-profile-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu test-fb-recording $(BINARY_NAMES) terminal-profile-force

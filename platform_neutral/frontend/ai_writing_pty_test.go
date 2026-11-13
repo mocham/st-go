@@ -26,7 +26,7 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
-	messageID, prediction := "", ""
+	messageID, prediction, promptText := "", "", ""
 	prompts, forks, created := 0, 0, 0
 	completed := false
 	model := map[string]string{"id": "model-a", "providerID": "test"}
@@ -97,6 +97,7 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 				return
 			}
 			messageID = body["id"]
+			promptText = body["text"]
 			prompts++
 			begin, end := writing.Markers(strings.TrimPrefix(messageID, "msg_"))
 			prediction = "Editorial commentary.\n" + begin + "\nA generated next paragraph.\n" + end
@@ -125,7 +126,7 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 					text = prediction
 					messages = append(messages, map[string]any{"id": "idle", "type": "idle", "outcome": "succeeded"})
 				}
-				messages = append(messages, map[string]any{"id": "answer", "type": "assistant", "content": []any{map[string]string{"type": "reasoning", "text": "Visible provider reasoning."}, map[string]string{"type": "text", "text": text}}}, map[string]string{"id": messageID, "type": "user", "text": "Writing request"})
+				messages = append(messages, map[string]any{"id": "answer", "type": "assistant", "content": []any{map[string]string{"type": "reasoning", "text": "Visible provider reasoning."}, map[string]string{"type": "text", "text": text}}}, map[string]string{"id": messageID, "type": "user", "text": promptText})
 			}
 			json.NewEncoder(w).Encode(map[string]any{"data": messages})
 		default:
@@ -241,6 +242,13 @@ func TestAIWritingRealClientsPTY(t *testing.T) {
 	await("live progress in subscribed session", func() bool {
 		text := providerScreen()
 		return strings.Contains(text, "Visible provider reasoning.") && strings.Contains(text, "Generating the next paragraph")
+	})
+	fmt.Fprint(provider, "\x1bOS")
+	await("long writing prompt expanded", func() bool { return strings.Contains(providerScreen(), "Fold prompt") })
+	fmt.Fprint(provider, "\x1b[14~")
+	await("long writing prompt folded", func() bool {
+		text := providerScreen()
+		return strings.Contains(text, "Show more") && strings.Contains(text, "Visible provider reasoning.")
 	})
 	fmt.Fprint(provider, "/models Model B\r")
 	await("model picker", func() bool {

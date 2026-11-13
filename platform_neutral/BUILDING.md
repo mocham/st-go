@@ -4,9 +4,11 @@ Run commands from the repository root. Executables are written to `BINARIES/`.
 
 ## Requirements
 
-- Go 1.26 or newer and Make.
+- Go 1.26 or newer and GNU Make 4.3 or newer.
 - Full native terminals (`st`, `st-fb`) and `zat-djvu`: cgo, C/C++ compilers, static glibc, `curl`,
   `tar`, and `cmake`. Make downloads and builds the required native libraries.
+- `st-fb` also requires `pkg-config` and, on x86, NASM to build its bundled
+  FFmpeg/x264 recording components. These are build-time tools only.
 - `st-min`, `st-fb-min`, `st-web`, and the other Go applications build with
   `CGO_ENABLED=0`. Minimal targets require no C compiler or `third_party/` assets.
 
@@ -42,6 +44,13 @@ Make's binaries are statically linked and embed their default fonts/configuratio
 X11 uses pure-Go XGB, without libX11, Xft, or fontconfig. Full native profiles use
 FreeType C, accelerated PNG/JPEG/WebP decoding, animated WebP,
 and Poppler PDF rendering.
+
+`st-fb` also embeds a restricted FFmpeg 8.1.3 build and pinned x264 source for
+H.264/MP4 screen recording. Make downloads checksum-verified sources into
+`third_party/` and links five archives: avformat, avcodec, avutil, swscale, and
+x264. External library autodetection, networking, devices, filters, and other
+encoders are disabled. The Go bridge selects this implementation with
+`ffmpeg_static`; `st-fb-min` continues to invoke external `ffmpeg` at runtime.
 
 `st-min` and `st-fb-min` use the Go FreeType port and Go raster codecs, including
 static WebP. PDF rendering and animated WebP use unsupported-operation stubs.
@@ -81,6 +90,7 @@ make test-tui             # standalone modules, without graphical libraries
 make test-web             # web protocol, shared clipboard, service/PTY lifecycle
 make test-web-browser     # direct + shared-service Chromium checks; Node >=22, no npm
 make test-zat-djvu        # bundled static DjVuLibre profile
+make test-fb-recording    # external and bundled-static framebuffer recording
 go test -race ./platform_neutral/fontraster
 ```
 

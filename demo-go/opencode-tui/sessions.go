@@ -152,6 +152,11 @@ func (application *app) removeSession(id string) {
 		}
 	}
 	application.sessions = remaining
+	for key := range application.expandedPrompts {
+		if application.deleted[key.session] {
+			delete(application.expandedPrompts, key)
+		}
+	}
 	for id := range application.sessionActivity {
 		if application.deleted[id] {
 			delete(application.sessionActivity, id)

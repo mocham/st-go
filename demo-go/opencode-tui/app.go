@@ -83,6 +83,7 @@ type app struct {
 	rows, cols               int
 	scroll                   int
 	selectedPrompt           string
+	expandedPrompts          map[promptFoldKey]bool
 	activePrompt             string
 	followPreview            bool
 	busy                     bool
@@ -944,6 +945,11 @@ func (application *app) handleInput(event inputEvent) {
 			return
 		}
 		application.morePrompts()
+		return
+	case "<F4>":
+		if !application.filesMode {
+			application.togglePromptFold(application.selectedPrompt)
+		}
 		return
 	case "<F2>":
 		if !application.preview.visible && !application.preview.canStart(application.cols, application.rows) {
