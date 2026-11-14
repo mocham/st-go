@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+	"st-go/aiharness"
 )
 
 type commandsFlag []string
@@ -33,6 +34,9 @@ func run(args []string) (code int) {
 	flags.BoolVar(recoverFile, "recover", false, "recover a govim swap")
 	readonly := flags.Bool("R", false, "open readonly (explicit :w! can write)")
 	noPreview := flags.Bool("no-preview", false, "disable automatic document preview")
+	aiServer := flags.String("ai-server", "", "OpenCode V2 server (overrides %server and GOVIM_AI_SERVER; default: local service)")
+	aiModel := flags.String("ai-model", "", "paragraph model: provider/model[#variant] (overrides document and GOVIM_AI_MODEL)")
+	aiInstruction := flags.String("ai-instruction", aiharness.DefaultInstruction, "paragraph generation instruction")
 	flags.BoolVar(&previewOptions.web, "web", false, "send HTML previews to st-web (reserve a blank preview pane on fb/X11)")
 	flags.IntVar(&previewOptions.width, "preview-width", previewOptions.width, "preview width percent (editor uses the remainder)")
 	flags.StringVar(&previewOptions.background, "preview-bg", previewOptions.background, "preview paper/canvas color (#RRGGBB)")
@@ -84,6 +88,12 @@ func run(args []string) (code int) {
 		return listRecovery(options)
 	}
 	e := newEditor(options)
+	model, modelErr := aiharness.ParseModel(*aiModel)
+	if modelErr != nil {
+		fmt.Fprintln(os.Stderr, "govim:", modelErr)
+		return 2
+	}
+	e.inlineOptions = inlineAIOptions{server: *aiServer, authorization: os.Getenv("GOVIM_AI_AUTHORIZATION"), instruction: *aiInstruction, model: model, envServer: os.Getenv("GOVIM_AI_SERVER"), envModel: os.Getenv("GOVIM_AI_MODEL")}
 	e.arguments = append([]string(nil), paths...)
 	var restore func()
 	defer func() {
@@ -368,7 +378,21 @@ Save to refresh; %cursor wins, otherwise follow the cursor saved with :w.
 :wnomove[!] refreshes without jumping. Wheel scrolls the preview locally.
 :Preview [LINE] / :PreviewScroll COUNT navigate manually. --no-preview disables.
 
-AI writing (govim + opencode-tui in tabs of one st):
+BUILT-IN AI: --ai-server URL, --ai-model provider/model[#variant].
+In Markdown/LaTeX Insert mode, {{{ creates {{{%UUID\n<++>}}} without a request.
+:AI requests all unfilled Initial slots; :AI UUID requests a specific slot.
+Ctrl-J jumps to the next <++>, inserts its ready paragraph, and triggers :toggle!.
+:UnIns [UUID] discards that insertion and restores its slot; :AI regenerates.
+%project=PATH selects a database (default: FILENAME.db); %context=PATH adds text.
+%server=URL, %model=provider/model, %variant=NAME configure requests.
+Explicit flags override directives, then GOVIM_AI_SERVER / GOVIM_AI_MODEL apply.
+Without a server URL, use the normal local OpenCode service and its authentication.
+Provider subscription login stays in OpenCode; no provider API key is needed here.
+Preview slots: Initial gray / Processing yellow / Ready green / Inserted white.
+Paths are relative to the document. Inputs and UUID versions are stored locally.
+Only instruction + explicit context + current document enter the stateless prompt.
+
+Session-backed AI writing (govim + opencode-tui in tabs of one st):
 :AICheckpoint inserts a source comment marking the start of AI context.
 :AINext [instruction] creates a durable UUID paragraph placeholder.
 Only source between the last checkpoint and the request cursor enters the prompt.

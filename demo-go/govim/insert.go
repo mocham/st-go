@@ -104,7 +104,7 @@ func (e *Editor) insertKey(key string) {
 	if key != "\x0e" && key != "\x10" {
 		e.completion = nil
 	}
-	if e.mode == insertMode && key == "\n" && texEditing(b) {
+	if e.mode == insertMode && key == "\n" && placeholderEditing(b) {
 		e.jumpTexPlaceholder()
 		return
 	}
@@ -224,7 +224,7 @@ func (e *Editor) insertKey(key string) {
 					e.window().cursor = start + indent
 				}
 			}
-			if e.mode != insertMode || !e.expandTexIMAP(key) {
+			if e.mode != insertMode || !e.expandInlineIMAP(key) && !e.expandTexIMAP(key) {
 				e.insertLiteral(key)
 			}
 		}

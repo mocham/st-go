@@ -35,14 +35,14 @@ func writeTestCorpus(t *testing.T) string {
 			sha256 TEXT NOT NULL, indexed_at TEXT NOT NULL
 		);
 		INSERT INTO documents VALUES
-			(1, 'AA/shared/macros.tex', 'AA/shared', 'macros.tex', '.tex', 'Macros', 'AA', 'include', 'current', 'user', 0,
+			(1, 'course-a/shared/macros.tex', 'course-a/shared', 'macros.tex', '.tex', 'Macros', 'course-a', 'include', 'current', 'user', 0,
 			 '\newcommand{\R}{\mathbb R}', 'newcommand real', 29, 1, 'one', 'now'),
-			(2, 'AA/lecture.tex', 'AA', 'lecture.tex', '.tex', 'Lecture one', 'AA', 'lecture', 'current', 'user', 1,
+			(2, 'course-a/lecture.tex', 'course-a', 'lecture.tex', '.tex', 'Lecture one', 'course-a', 'lecture', 'current', 'user', 1,
 			 '\documentclass{article}\input{shared/macros}\begin{document}\section{First topic}Needle $\R$.\end{document}', 'Needle real', 90, 2, 'two', 'now'),
-			(3, 'AA/notes.md', 'AA', 'notes.md', '.md', 'Notes', 'AA', 'note', 'historical', 'user', 2,
+			(3, 'course-a/notes.md', 'course-a', 'notes.md', '.md', 'Notes', 'course-a', 'note', 'historical', 'user', 2,
 			 '# Notes
 Markdown body with inline $x^2$.', 'markdown body inline math', 40, 3, 'three', 'now'),
-			(4, 'BB/reference.tex', 'BB', 'reference.tex', '.tex', 'Reference', 'BB', 'reference', 'current', 'public', 1,
+			(4, 'course-b/reference.tex', 'course-b', 'reference.tex', '.tex', 'Reference', 'course-b', 'reference', 'current', 'public', 1,
 			 '\begin{document}Reference.\end{document}', 'reference', 40, 4, 'four', 'now');
 	`)
 	if err != nil {
@@ -66,12 +66,12 @@ func TestCorpusHierarchySearchAndInputExpansion(t *testing.T) {
 		t.Fatalf("opened corpus = %q with %d documents", corpus.label, len(corpus.documents))
 	}
 	courses := corpus.courses()
-	if len(courses) != 2 || courses[0].Name != "AA" || courses[0].Count != 3 || courses[1].Name != "BB" {
+	if len(courses) != 2 || courses[0].Name != "course-a" || courses[0].Count != 3 || courses[1].Name != "course-b" {
 		t.Fatalf("courses = %#v", courses)
 	}
-	documents := corpus.documentsForCourse("AA")
+	documents := corpus.documentsForCourse("course-a")
 	if len(documents) != 3 || documents[0].Title != "Macros" || documents[1].Title != "Lecture one" {
-		t.Fatalf("AA documents = %#v", documents)
+		t.Fatalf("course-a documents = %#v", documents)
 	}
 	loaded, err := corpus.document(context.Background(), 2)
 	if err != nil {
@@ -97,9 +97,9 @@ func TestCorpusAddsUsedTableCompanionToStandaloneFragment(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = db.Exec(`INSERT INTO documents VALUES
-		(5, 'CC/example-tables.tex', 'CC', 'example-tables.tex', '.tex', 'Tables', 'CC', 'include', 'current', 'user', 0,
+		(5, 'course-c/example-tables.tex', 'course-c', 'example-tables.tex', '.tex', 'Tables', 'course-c', 'include', 'current', 'user', 0,
 		 '\newcommand{\ExampleTable}{\begin{tabular}{cc}Name & $x$\\A & $1$\end{tabular}}', 'table', 80, 5, 'five', 'now'),
-		(6, 'CC/example.tex', 'CC', 'example.tex', '.tex', 'Example', 'CC', 'include', 'current', 'user', 1,
+		(6, 'course-c/example.tex', 'course-c', 'example.tex', '.tex', 'Example', 'course-c', 'include', 'current', 'user', 1,
 		 '\section[Short]{Long heading}\ExampleTable', 'example', 48, 6, 'six', 'now')`)
 	closeErr := db.Close()
 	if err != nil {
@@ -160,10 +160,10 @@ func TestBrowserBuildsDatabaseCourseDocumentHierarchy(t *testing.T) {
 	browser.view = viewState{kind: viewCourses, corpusIndex: 0}
 	browser.idx = 0
 	browser.buildEntries()
-	if len(browser.entries) != 3 || browser.entries[1].kind != entryCourse || browser.entries[1].label != "AA" {
+	if len(browser.entries) != 3 || browser.entries[1].kind != entryCourse || browser.entries[1].label != "course-a" {
 		t.Fatalf("course entries = %#v", browser.entries)
 	}
-	browser.view = viewState{kind: viewDocuments, corpusIndex: 0, course: "BB"}
+	browser.view = viewState{kind: viewDocuments, corpusIndex: 0, course: "course-b"}
 	browser.idx = 0
 	browser.buildEntries()
 	if len(browser.entries) != 2 || browser.entries[1].kind != entryDocument || browser.entries[1].document.Title != "Reference" {
@@ -183,7 +183,7 @@ func TestPreviewRendersExpandedArchiveTeXWithoutServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer opened.close()
-	metadata := opened.documentPaths["AA/lecture.tex"]
+	metadata := opened.documentPaths["course-a/lecture.tex"]
 	previewer := newDocumentPreviewer(t.TempDir())
 	preview, err := previewer.render(context.Background(), opened, metadata, 120, 160)
 	if err != nil {
@@ -220,7 +220,7 @@ func TestPreviewRendersArchiveMarkdownWithInlineMath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer opened.close()
-	metadata := opened.documentPaths["AA/notes.md"]
+	metadata := opened.documentPaths["course-a/notes.md"]
 	previewer := newDocumentPreviewer(t.TempDir())
 	preview, err := previewer.render(context.Background(), opened, metadata, 120, 160)
 	if err != nil {
@@ -246,7 +246,7 @@ func TestCorpusRefreshRemovesStalePreviewRevision(t *testing.T) {
 	}
 	previewer := newDocumentPreviewer(t.TempDir())
 	browser := &Browser{corpora: []*corpus{opened}, previewer: previewer}
-	metadata := opened.documentPaths["AA/lecture.tex"]
+	metadata := opened.documentPaths["course-a/lecture.tex"]
 	preview, err := previewer.render(context.Background(), opened, metadata, 120, 160)
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +277,7 @@ func TestCorpusRefreshRemovesStalePreviewRevision(t *testing.T) {
 		t.Fatalf("stale preview %q still exists: %v", preview.path, err)
 	}
 	refreshed := browser.corpora[0]
-	updated, err := previewer.render(context.Background(), refreshed, refreshed.documentPaths["AA/lecture.tex"], 120, 160)
+	updated, err := previewer.render(context.Background(), refreshed, refreshed.documentPaths["course-a/lecture.tex"], 120, 160)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestDocumentContentsUsePinnedOpenedPDF(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer opened.close()
-	metadata := opened.documentPaths["AA/lecture.tex"]
+	metadata := opened.documentPaths["course-a/lecture.tex"]
 	previewer := newDocumentPreviewer(t.TempDir())
 	preview, err := previewer.render(context.Background(), opened, metadata, 120, 160)
 	if err != nil {
@@ -324,7 +324,7 @@ func TestDocumentContentsUsePinnedOpenedPDF(t *testing.T) {
 	}
 	browser := &Browser{
 		corpora: []*corpus{opened}, previewer: previewer,
-		visible: 20, view: viewState{kind: viewTOC, corpusIndex: 0, course: "AA", documentID: metadata.ID},
+		visible: 20, view: viewState{kind: viewTOC, corpusIndex: 0, course: "course-a", documentID: metadata.ID},
 		openedDocumentID: metadata.ID, openedPreview: preview,
 	}
 	browser.buildEntries()
@@ -359,7 +359,7 @@ func TestDocumentSelectionPreviewsAndEnterShowsContents(t *testing.T) {
 		t.Fatal("navigation is hidden at startup")
 	}
 	browser.terminalSize()
-	browser.view = viewState{kind: viewDocuments, corpusIndex: 0, course: "AA"}
+	browser.view = viewState{kind: viewDocuments, corpusIndex: 0, course: "course-a"}
 	browser.idx = 1
 	browser.buildEntries()
 	browser.selectIndex(2) // Lecture one, including a real rendered section.

@@ -31,7 +31,7 @@ func TestGoLSNativeDocumentSearchPTY(t *testing.T) {
 	_, err = db.Exec(`CREATE TABLE archive_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 INSERT INTO archive_meta VALUES('catalogue_title','Synthetic corpus');
 CREATE TABLE documents(id INTEGER PRIMARY KEY,path TEXT,dir TEXT,name TEXT,extension TEXT,title TEXT,course TEXT,kind TEXT,status TEXT,visibility TEXT,sequence INTEGER,content TEXT,search_text TEXT,size INTEGER,mod_time_ns INTEGER,sha256 TEXT,indexed_at TEXT);
-INSERT INTO documents VALUES(1,'AA/document.tex','AA','document.tex','.tex','Synthetic document','AA','lecture','current','user',1,?,'needle café alpha',100,1,'synthetic','now');`,
+INSERT INTO documents VALUES(1,'course-a/document.tex','course-a','document.tex','.tex','Synthetic document','course-a','lecture','current','user',1,?,'needle café alpha',100,1,'synthetic','now');`,
 		`\begin{document}needle needle café α.`+strings.Repeat("\n\nA neutral filler paragraph for page navigation.", 8)+`\section{Later}needle\end{document}`)
 	if err != nil {
 		db.Close()

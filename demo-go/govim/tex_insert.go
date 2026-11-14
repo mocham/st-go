@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"st-go/tui/imap"
+	"st-go/tui/preview"
 )
 
 // The editor supplies only context and journaled edits. All suffix mappings,
@@ -24,6 +25,8 @@ var texIMAP = func() *imap.Set {
 }()
 
 func texEditing(b *Buffer) bool { return texIMAP.Supports(b.meta.Path) }
+
+func placeholderEditing(b *Buffer) bool { return preview.Supported(b.meta.Path) }
 
 func (e *Editor) expandTexIMAP(key string) bool {
 	b, pos := e.buffer(), e.pos()
@@ -155,7 +158,10 @@ func (e *Editor) jumpTexPlaceholder() {
 	b := e.buffer()
 	target, last, ok := texIMAP.NextPlaceholder(b.text, e.pos())
 	if !ok {
-		e.message = "No TeX placeholders"
+		e.message = "No placeholders"
+		return
+	}
+	if e.jumpInlinePlaceholder(target, last) {
 		return
 	}
 	oldMode := e.mode

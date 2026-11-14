@@ -222,6 +222,8 @@ func (t *Term) dslRegion(args []string) error {
 		t.htmlTransfer = nil
 	}
 	switch args[1] {
+	case "status":
+		return t.dslRegionStatus(id, args[2:])
 	case "html":
 		return t.dslRegionHTML(id, args[2:])
 	case "list":

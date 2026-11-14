@@ -28,6 +28,7 @@ type displayRegionState struct {
 	mainRows, windowRows  int           // nonzero mainRows selects a stacked layout
 	overlay               term.CellRect // positive width keeps the main grid full-sized
 	secondary             *regionSurface
+	status                *regionStatusSurface
 	listPreview           *regionSurface // suspended image/PDF while a list is shown
 	listVisible           *regionListSurface
 	listVisibleY          float64 // last committed frame, not the animation target
@@ -37,6 +38,7 @@ type displayRegionState struct {
 	jobs                  chan regionJob // one pending job, latest request wins
 	fullDirty             bool
 	pane, viewport        image.Rectangle
+	statusBounds          image.Rectangle
 	layoutEpoch           uint64
 	background            uint32
 	cellWidth, cellHeight int
@@ -221,6 +223,7 @@ func (t *Terminal) SetRegions(regions []term.DisplayRegion) error {
 		s.generation++ // invalidate both pending and in-flight decode results
 		s.documentRevision++
 		s.secondary = nil
+		s.status = nil
 		s.listPreview = nil
 		s.listVisible = nil
 		t.cancelRegionDecode()
@@ -273,7 +276,15 @@ func (t *Terminal) applyDisplayLayout(cols, rows int) {
 	}
 	changed := mainCols != t.cols || mainRows != t.rows
 	t.windowCols, s.windowRows, t.cols, t.rows = cols, rows, mainCols, mainRows
+	if s.status != nil && (s.status.cw != t.cw || s.status.ch != t.ch || s.status.baseline != t.baseline) {
+		s.status = &regionStatusSurface{items: s.status.items, cw: t.cw, ch: t.ch, baseline: t.baseline}
+	}
 	s.pane, s.viewport = t.secondaryPanePixels(), t.secondaryPixels()
+	s.statusBounds = image.Rectangle{}
+	if s.status != nil {
+		full := t.secondaryFullPanePixels()
+		s.statusBounds = image.Rect(full.Min.X, s.pane.Max.Y, full.Max.X, full.Max.Y)
+	}
 	s.layoutEpoch++
 	s.background = t.colorAt(ColDefaultBg)
 	s.cellWidth, s.cellHeight = t.cw, t.ch
@@ -853,6 +864,12 @@ func (t *Terminal) secondaryPixels() image.Rectangle {
 }
 
 func (t *Terminal) secondaryPanePixels() image.Rectangle {
+	r := t.secondaryFullPanePixels()
+	r.Max.Y -= t.displayRegions.status.height(r)
+	return r
+}
+
+func (t *Terminal) secondaryFullPanePixels() image.Rectangle {
 	if b := t.displayRegions.overlay; b.Width > 0 {
 		// Clip in cells before multiplying, including after a physical shrink.
 		x, y := min(b.X, t.cols), min(b.Y, t.rows)
@@ -866,7 +883,7 @@ func (t *Terminal) secondaryPanePixels() image.Rectangle {
 }
 
 func (t *Terminal) overSecondary(px, py int) bool {
-	return t.displayRegions.secondary != nil && image.Pt(px, py).In(t.secondaryPanePixels())
+	return t.displayRegions.secondary != nil && image.Pt(px, py).In(t.secondaryFullPanePixels())
 }
 
 func (t *Terminal) regionMousePress(button byte, state uint16, px, py int) bool {
@@ -876,6 +893,9 @@ func (t *Terminal) regionMousePress(button byte, state uint16, px, py int) bool 
 	t.regionButtons |= buttonmask(button)
 	t.displayRegions.mu.Lock()
 	defer t.displayRegions.mu.Unlock()
+	if image.Pt(px, py).In(t.displayRegions.statusBounds) {
+		return true
+	}
 	surface := t.displayRegions.secondary
 	if surface.list != nil {
 		t.listMousePress(button, px, py)
@@ -1466,8 +1486,15 @@ func (t *Terminal) paintSecondary() image.Rectangle {
 		return image.Rectangle{}
 	}
 	renderRegionPixels(frame.surface, frame.viewport, frame.pane, frame.background, t.framebuf, t.fbW)
+	if frame.status != nil && !frame.statusBounds.Empty() {
+		r := frame.statusBounds
+		pixels := statusPixels(frame.status, r.Dx(), r.Dy())
+		for y := 0; y < r.Dy(); y++ {
+			copy(t.framebuf[(r.Min.Y+y)*t.fbW+r.Min.X:(r.Min.Y+y)*t.fbW+r.Max.X], pixels[y*r.Dx():(y+1)*r.Dx()])
+		}
+	}
 	t.noteRegionListFrame(frame)
-	return frame.pane
+	return frame.pane.Union(frame.statusBounds)
 }
 
 func renderRegionPixels(surface regionSurface, r, pane image.Rectangle, fallback uint32, pixels []uint32, stride int) {

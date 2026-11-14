@@ -12,6 +12,7 @@ For DCS syntax and behavior, use the implementation and adjacent tests:
 | Retained preview regions, navigation, and document queries | [`display_regions.go`](display_regions.go) |
 | Browser HTML previews and chunked transfers | [`region_html.go`](region_html.go) |
 | Retained navigation lists | [`region_list.go`](region_list.go) |
+| Retained colored preview footer (`region secondary status BASE64_JSON` / `clear`) | [`region_status.go`](region_status.go) |
 | Fixed-page PDF search | [`pdf_search.go`](pdf_search.go) |
 | Terminal tabs | [`tab_spawn.go`](tab_spawn.go) |
 | Shared clipboard | [`clipboard_sync.go`](clipboard_sync.go) |

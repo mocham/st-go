@@ -17,6 +17,7 @@ import (
 type regionPresenter struct {
 	mu     sync.Mutex
 	native api.Surface
+	status api.Surface
 	epoch  uint64
 	last   *regionFrame
 }
@@ -27,6 +28,8 @@ type regionFrame struct {
 	background     uint32
 	epoch          uint64
 	presentation   uint64
+	status         *regionStatusSurface
+	statusBounds   image.Rectangle
 }
 
 // Called with Terminal.mu, after releasing the preview state mutex.
@@ -56,6 +59,21 @@ func (t *Terminal) configureRegionPresenter() {
 	} else {
 		p.native.Configure(s.pane, s.background)
 	}
+	statusBounds := s.statusBounds
+	if s.status == nil || statusBounds.Empty() {
+		if p.status != nil {
+			p.status.Close()
+			p.status = nil
+		}
+	} else if p.status == nil {
+		var err error
+		p.status, err = t.host.NewSurface(statusBounds, regionStatusBackground)
+		if err != nil {
+			limits.Report("preview status", "%v", err)
+		}
+	} else {
+		p.status.Configure(statusBounds, regionStatusBackground)
+	}
 	p.last = nil
 	if s.wake == nil {
 		s.wake = make(chan struct{}, 1)
@@ -70,6 +88,10 @@ func (t *Terminal) configureRegionPresenter() {
 
 func (p *regionPresenter) destroy() {
 	p.last = nil
+	if p.status != nil {
+		p.status.Close()
+		p.status = nil
+	}
 	if p.native != nil {
 		p.native.Close()
 		p.native = nil
@@ -98,6 +120,10 @@ func (t *Terminal) exposeRegion(surface api.Surface) {
 	}
 	p := &t.displayRegions.presenter
 	p.mu.Lock()
+	if p.status == surface && surface != nil && surface.Expose() {
+		p.mu.Unlock()
+		return
+	}
 	if p.native == surface && p.native != nil && p.last != nil && p.native.Expose() {
 		// Repaint the last committed surface even during synchronized output.
 		p.mu.Unlock()
@@ -118,6 +144,7 @@ func (p *regionPresenter) present(frame regionFrame, pixels []uint32) {
 	if p.native == nil || frame.epoch != p.epoch {
 		return // resized, reset or closed while preparing this frame
 	}
+	p.presentStatus(frame)
 	if frame.surface.html.Document != nil {
 		if html, ok := p.native.(api.HTMLSurface); ok && html.PresentHTML(frame.presentation, frame.surface.html) {
 			p.last = &frame
@@ -252,7 +279,7 @@ func (t *Terminal) regionFrame() (regionFrame, bool) {
 	}
 	surface.html.CaptureTab = s.overlay.Width > 0
 	surface.media.CaptureTab = s.overlay.Width > 0
-	return regionFrame{surface: surface, pane: s.pane, viewport: s.viewport, background: s.background, epoch: s.layoutEpoch, presentation: generation}, true
+	return regionFrame{surface: surface, pane: s.pane, viewport: s.viewport, background: s.background, epoch: s.layoutEpoch, presentation: generation, status: s.status, statusBounds: s.statusBounds}, true
 }
 
 // Called with Terminal.mu at PTY batch boundaries. Region hooks also sample

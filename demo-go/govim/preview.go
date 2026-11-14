@@ -77,6 +77,10 @@ type editorPreview struct {
 	results                                        chan previewResult
 	stop                                           chan struct{}
 	render                                         func(previewRequest, <-chan struct{}) previewResult
+	slotBuffer                                     *Buffer
+	slotRevision                                   uint64
+	slotCheck                                      time.Time
+	slotPayload                                    string
 }
 
 func newEditorPreview(options previewOptions, out io.Writer) *editorPreview {
@@ -105,7 +109,7 @@ func renderPreview(request previewRequest, stop <-chan struct{}) (result preview
 		default:
 		}
 		if text, ok := request.overrides[path]; ok {
-			return text, nil
+			return inlinePreviewText(path, text), nil
 		}
 		b, err := loadBuffer(path)
 		if err != nil {
@@ -114,7 +118,7 @@ func renderPreview(request previewRequest, stop <-chan struct{}) (result preview
 		if !b.meta.Existed {
 			return "", os.ErrNotExist
 		}
-		return previewText(b), nil
+		return inlinePreviewText(path, previewText(b)), nil
 	}
 	if request.web {
 		result.source, result.err = preview.LoadWeb(request.path, read)
@@ -188,6 +192,7 @@ func (p *editorPreview) observe(e *Editor) {
 	}
 	p.serial++
 	p.path = path
+	p.slotCheck = time.Time{}
 	p.pending = nil
 	p.completed = nil
 	p.source = nil
@@ -305,6 +310,7 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 				return err
 			}
 			p.split, p.ready = false, false
+			p.slotPayload = ""
 			e.dirty, e.fullRedraw = true, true
 		}
 		return nil
@@ -345,6 +351,9 @@ func (p *editorPreview) tick(e *Editor, now time.Time) error {
 		if p.toc != nil {
 			p.toc.sent = false
 		}
+	}
+	if err := p.syncSlotStatus(e, now); err != nil {
+		return err
 	}
 	if p.toc != nil && p.toc.active {
 		return p.drawContents(e)

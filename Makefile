@@ -36,7 +36,7 @@ BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
 BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv gov govim opencode-tui gxw
 BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
-FUNCTIONAL_MODULES = $(addprefix functionalities/,audio brightness config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
+FUNCTIONAL_MODULES = $(addprefix functionalities/,aiharness audio brightness config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
@@ -77,7 +77,7 @@ ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat
 GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
 GOV_GO_SRC = $(wildcard demo-go/gov/*.go functionalities/tui/video/*.go platform_neutral/api/*.go)
 TUI_WRITING_SRC = $(wildcard functionalities/tui/appbus/*.go functionalities/tui/writing/*.go)
-GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/go.* demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(TUI_WRITING_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
+GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/go.* demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json functionalities/aiharness/*.go functionalities/aiharness/go.*) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(TUI_WRITING_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 OPENCODE_TUI_GO_SRC = $(wildcard demo-go/opencode-tui/*.go demo-go/opencode-tui/go.* functionalities/tui/preview/*.go platform_neutral/api/*.go) $(TUI_READLINE_SRC) $(TUI_WRITING_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------

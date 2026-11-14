@@ -47,9 +47,18 @@ X11/framebuffer discard HTML, so omit `--web` on those hosts.
 
 ## AI writing
 
-For project-scoped paragraph prediction, adaptation, and insertion with
-opencode-tui, see [AI writing](AI-WRITING.md). Start with `:AINext`, edit with
-`:AIEdit`, and accept with `:AIIns`. The pending box uses the existing preview.
+The [built-in paragraph harness](INLINE-AI.md) uses Insert-mode `{{{` to create
+a UUID placeholder; `:AI` requests paragraphs for the unfilled slots. Ctrl-J accepts
+a ready paragraph and refreshes the unsaved preview; `:UnIns` discards it.
+`%project=history.db` selects a versioned
+project dictionary and `%context=notes.txt` supplies explicit extra context.
+Use `%server=http://127.0.0.1:4096`, `%model=provider/model`, and `%variant=NAME`
+in the document, or override with `--ai-server` and `--ai-model`.
+The preview footer tracks each slot: gray Initial, yellow Processing, green Ready,
+white Inserted. Removing a UUID from source removes its footer entry.
+
+For the session-backed opencode-tui subscription workflow, see
+[AI writing](AI-WRITING.md).
 
 ## Recovery and saving
 

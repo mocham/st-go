@@ -13,3 +13,8 @@ remaining stops are consumed by Ctrl-J.
 Edit the JSON and run `make govim` to add/change text expansions. A new literal
 suffix rule can use any printable trigger, not only a backtick/Greek key. See
 [`tui/imap/README.md`](../../../functionalities/tui/imap/README.md) for the schema and mechanism.
+
+The [built-in AI mapping](../INLINE-AI.md) is handled by `inline_ai.go`: typing
+`{{{` allocates a UUID slot; `:AI` separately requests its paragraph. Its dynamic UUID/action
+does not belong to this table of literal TeX expansions. Ctrl-J shares the same
+placeholder navigation for both features.

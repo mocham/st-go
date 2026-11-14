@@ -147,6 +147,18 @@ func (e *Editor) execute(command string) {
 		return
 	}
 	switch name {
+	case "AI":
+		if force || explicit {
+			e.error(fmt.Errorf("usage: :AI [UUID]"))
+			return
+		}
+		e.error(e.inlineRequest(args))
+	case "UnIns":
+		if force || explicit {
+			e.error(fmt.Errorf("usage: :UnIns [UUID]"))
+			return
+		}
+		e.error(e.inlineUninsert(args))
 	case "Subscribe", "AICheckpoint", "AINext", "AIList", "AIView", "AIEdit", "AIIns", "AIDismiss", "AIRefine", "AIRetry", "AIReasoning", "AICancel", "AIBack":
 		e.aiCommand(name, args)
 	case "w", "write", "wnomove", "wq", "x", "xit", "exit", "saveas", "sav":

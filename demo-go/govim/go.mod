@@ -8,6 +8,7 @@ require (
 	golang.org/x/sys v0.49.0
 	golang.org/x/text v0.42.0
 	modernc.org/sqlite v1.62.0
+	st-go/aiharness v0.0.0
 	st-go/config v0.0.0
 	st-go/limits v0.0.0
 	st-go/platform_neutral/api v0.0.0
@@ -37,6 +38,7 @@ require (
 
 replace (
 	github.com/mocham/GoLS/latexpdf => ../../functionalities/latexpdf
+	st-go/aiharness => ../../functionalities/aiharness
 	st-go/config => ../../functionalities/config
 	st-go/googlepinyin => ../../functionalities/googlepinyin
 	st-go/limits => ../../functionalities/limits

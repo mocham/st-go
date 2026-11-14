@@ -31,7 +31,7 @@ func searchTestBrowser(t *testing.T) (*Browser, *testOutput) {
 	if err := os.WriteFile(file, []byte("%PDF-1.4\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	b.view = viewState{kind: viewTOC, corpusIndex: 0, course: "AA", documentID: 2}
+	b.view = viewState{kind: viewTOC, corpusIndex: 0, course: "course-a", documentID: 2}
 	b.openedDocumentID = 2
 	b.openedPreview = renderedPreview{path: file, pdf: true, pageCount: 3, toc: []previewTOCEntry{{Title: "First", Page: 1}, {Title: "Second", Page: 2}}}
 	b.idx = 1
@@ -193,7 +193,7 @@ func TestDocumentSearchCancelAndDocumentChange(t *testing.T) {
 
 func TestSelectedDocumentSearchPinsPreviewVariant(t *testing.T) {
 	b, _ := searchTestBrowser(t)
-	b.view = viewState{kind: viewDocuments, corpusIndex: 0, course: "AA"}
+	b.view = viewState{kind: viewDocuments, corpusIndex: 0, course: "course-a"}
 	b.idx = 2
 	b.buildEntries()
 	b.renderAll()

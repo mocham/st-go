@@ -25,7 +25,7 @@ func TestGoLSPreviewFontIsNinetyPercentLarger(t *testing.T) {
 	defer opened.close()
 	previewer := newDocumentPreviewer(t.TempDir())
 	streamPattern := regexp.MustCompile(`(?s)stream\r?\n(.*?)\r?\nendstream`)
-	for _, path := range []string{"AA/lecture.tex", "AA/notes.md"} {
+	for _, path := range []string{"course-a/lecture.tex", "course-a/notes.md"} {
 		t.Run(path, func(t *testing.T) {
 			preview, err := previewer.render(context.Background(), opened, opened.documentPaths[path], 120, 160)
 			if err != nil {

@@ -37,6 +37,9 @@ type (
 	RegionList            = stterminal.RegionList
 	RegionListItem        = stterminal.RegionListItem
 	RegionListHooks       = stterminal.RegionListHooks
+	RegionStatus          = stterminal.RegionStatus
+	RegionStatusItem      = stterminal.RegionStatusItem
+	RegionStatusHooks     = stterminal.RegionStatusHooks
 	PDFSearchRequest      = stterminal.PDFSearchRequest
 	PDFSearchHooks        = stterminal.PDFSearchHooks
 	ClipboardHooks        = stterminal.ClipboardHooks

@@ -12,6 +12,7 @@ use (
 	./demo-go/opencode-tui
 	./demo-go/zat
 	./demo-go/zat-djvu
+	./functionalities/aiharness
 	./functionalities/audio
 	./functionalities/brightness
 	./functionalities/config

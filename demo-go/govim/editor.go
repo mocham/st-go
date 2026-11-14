@@ -127,6 +127,8 @@ type Editor struct {
 	syntax                           *syntaxHighlighter
 	preview                          *editorPreview
 	ai                               *editorAI
+	inlineAI                         *inlineAI
+	inlineOptions                    inlineAIOptions
 	clip                             clipboard
 	clipboardError                   string
 	clipboardRead                    *clipboardRead
@@ -542,7 +544,7 @@ func (e *Editor) normalKey(key string) {
 		e.pendingKey(key)
 		return
 	}
-	if key == "\n" && e.operator == "" && !e.visual() && texEditing(b) {
+	if key == "\n" && e.operator == "" && !e.visual() && placeholderEditing(b) {
 		e.jumpTexPlaceholder()
 		return
 	}
@@ -1069,6 +1071,7 @@ func (e *Editor) playRegisterMacro(value register, count int) {
 
 func (e *Editor) tick(now time.Time) {
 	e.aiTick(now)
+	e.inlineTick()
 	e.pollCJK()
 	e.pollPrompt()
 	if read := e.clipboardRead; read != nil && !now.Before(read.deadline) {
@@ -1082,9 +1085,11 @@ func (e *Editor) tick(now time.Time) {
 	}
 }
 func (e *Editor) close(normalExit bool) error {
-	var first error
+	first := e.closeInlineAI()
 	if e.ai != nil {
-		first = e.aiSaveDraft()
+		if err := e.aiSaveDraft(); first == nil {
+			first = err
+		}
 		_ = e.ai.bus.Close()
 		if err := e.ai.store.db.Close(); first == nil {
 			first = err

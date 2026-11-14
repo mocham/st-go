@@ -6,6 +6,13 @@
 *.swp
 *.govim.swp.damaged-*
 
+# Local govim AI histories contain document/context snapshots
+.govim/
+*.tex.db
+*.tex.db-*
+*.md.db
+*.md.db-*
+
 # Local helper: per-module Go line counts
 /loc.sh
 
