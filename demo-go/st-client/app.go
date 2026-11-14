@@ -47,6 +47,10 @@ type previewInfo struct {
 }
 
 type app struct {
+	prompt                                           *transferPrompt
+	transferCancel                                   context.CancelFunc
+	transferWG                                       sync.WaitGroup
+	transfers                                        chan transferResult
 	tabs                                             *serviceTabs
 	info                                             *previewInfo
 	dialWG                                           sync.WaitGroup
@@ -228,6 +232,7 @@ func (a *app) run(parent context.Context, signals <-chan os.Signal) error {
 	a.ctx = ctx
 	a.events = make(chan wireEvent, 16)
 	a.dials = make(chan dialResult, 1)
+	a.transfers = make(chan transferResult, 1)
 	a.pending = make(map[string]pendingResource)
 	a.resources = make(map[string]string)
 	a.failed = make(map[string]bool)
@@ -258,6 +263,7 @@ func (a *app) run(parent context.Context, signals <-chan os.Signal) error {
 			a.c.close()
 		}
 		a.dialWG.Wait()
+		a.transferWG.Wait()
 		if a.tabs != nil {
 			a.tabs.wg.Wait()
 		}
@@ -381,6 +387,8 @@ func (a *app) run(parent context.Context, signals <-chan os.Signal) error {
 			if err := a.resourceReady(result); err != nil {
 				return err
 			}
+		case result := <-a.transfers:
+			a.finishTransfer(result)
 		case result := <-tabResults:
 			if err := a.serviceResult(result); err != nil {
 				return err
@@ -757,11 +765,14 @@ func (a *app) drawStatus() error {
 		}
 		row++
 	}
-	text := []rune(cleanText(a.status))
-	if len(text) > a.screen.cols {
-		text = text[:a.screen.cols]
+	bar, _, _ := a.transferBar()
+	status := bar + a.status
+	if a.prompt != nil {
+		// Keep the edited tail visible even for paths wider than the screen.
+		status = a.prompt.display(a.screen.cols)
 	}
-	err := writeAll(a.out, []byte(fmt.Sprintf("\x1b7\x1b[%d;1H\x1b[0;37;44m\x1b[2K%s\x1b[0m\x1b8", row, string(text))))
+	text, _ := tabText(cleanText(status), a.screen.cols)
+	err := writeAll(a.out, []byte(fmt.Sprintf("\x1b7\x1b[%d;1H\x1b[0;37;44m\x1b[2K%s\x1b[0m\x1b8", row, text)))
 	a.statusDirty = false
 	return err
 }
@@ -770,12 +781,28 @@ func (a *app) input(e localEvent) error {
 	if e.reply != "" {
 		return a.localReply(e.reply)
 	}
+	if a.prompt != nil {
+		a.promptInput(e)
+		return nil
+	}
 	if a.prefix {
 		a.prefix = false
 		if e.escape {
 			return a.send(inputMessage{Type: "key", Key: "]", Modifiers: 4})
 		}
 		key := e.input.Key
+		if a.remote.ssh != nil {
+			switch key {
+			case "u", "d":
+				a.beginTransfer(key == "u")
+				return nil
+			case "k":
+				if a.transferCancel != nil {
+					a.transferCancel()
+				}
+				return nil
+			}
+		}
 		if key == "Tab" && e.input.Modifiers&1 != 0 {
 			key = "p"
 		}
@@ -802,6 +829,9 @@ func (a *app) input(e localEvent) error {
 		} else {
 			a.note("Client command: q detach · c copy · r reconnect · Ctrl-] literal")
 		}
+		return nil
+	}
+	if a.transferInput(e.input) {
 		return nil
 	}
 	if handled, err := a.tabInput(e.input); handled {

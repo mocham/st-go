@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -26,8 +27,9 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	title := flags.String("title", "", "remote title for new tabs")
 	reconnect := flags.Bool("reconnect", true, "reattach after a broken connection")
 	clipboardRead := flags.Bool("clipboard-read", false, "answer remote clipboard reads using local OSC 52")
+	sshHost := flags.String("ssh", "", "connect through OpenSSH to host or user@host (URL is remote; default http://127.0.0.1:8080/)")
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: st-client [options] URL\n\nConnect from st-go X11/fb. Ctrl-] then n creates a tab; 1-9 selects; x closes; q detaches.\nST_CLIENT_AUTHORIZATION supplies the complete HTTP Authorization header.")
+		fmt.Fprintln(stderr, "Usage: st-client [options] URL\n       st-client -ssh [user@]host [options] [URL]\n\nConnect from st-go X11/fb. Ctrl-] then n creates a tab; 1-9 selects; x closes; q detaches.\nSSH: Ctrl-] u uploads, d downloads, k cancels a transfer.\nST_CLIENT_AUTHORIZATION supplies the complete HTTP Authorization header.")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -36,17 +38,37 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 		}
 		return 2
 	}
-	if flags.NArg() != 1 || (*list && (*create || *id != "")) || (*create && *id != "") {
+	if flags.NArg() > 1 || (flags.NArg() == 0 && *sshHost == "") || (*list && (*create || *id != "")) || (*create && *id != "") {
 		flags.Usage()
 		return 2
 	}
-	r, err := newRemote(flags.Arg(0), os.Getenv("ST_CLIENT_AUTHORIZATION"))
+	address := flags.Arg(0)
+	if address == "" {
+		address = "http://127.0.0.1:8080/"
+	}
+	r, err := newRemote(address, os.Getenv("ST_CLIENT_AUTHORIZATION"))
 	if err != nil {
 		fmt.Fprintln(stderr, "st-client:", err)
 		return 2
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
+	if *sshHost != "" {
+		tunnel, err := newSSHTunnel(*sshHost, r)
+		if err != nil {
+			fmt.Fprintln(stderr, "st-client:", err)
+			return 1
+		}
+		defer tunnel.close()
+		defer r.http.CloseIdleConnections()
+		startup, stop := context.WithTimeout(ctx, 2*time.Minute)
+		err = tunnel.ensure(startup, in, stderr)
+		stop()
+		if err != nil {
+			fmt.Fprintln(stderr, "st-client:", err)
+			return 1
+		}
+	}
 	signals := make(chan os.Signal, 8)
 	signal.Notify(signals, syscall.SIGWINCH, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)

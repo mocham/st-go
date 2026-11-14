@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -46,16 +47,37 @@ type Options struct {
 
 func RegisterFlags(fs *flag.FlagSet) api.OpenHost {
 	o := Options{}
+	// The shared frontend removes -e and its command from os.Args while parsing.
+	// Capture the original invocation so the detached service preserves it.
+	args := append([]string(nil), os.Args[1:]...)
+	child := initDaemonChild()
+	var daemon bool
+	fs.BoolVar(&daemon, "daemon", false, "detach a persistent service; print its PID and URL after startup")
 	fs.StringVar(&o.Listen, "listen", "127.0.0.1", "web server bind IP (loopback by default)")
 	fs.IntVar(&o.Port, "port", 8080, "web server port (0 chooses an available port)")
-	fs.BoolVar(&o.Service, "service", false, "persistent shared PTY service behind an authenticating proxy")
+	fs.BoolVar(&o.Service, "service", false, "persistent shared PTY service for SSH or an authenticating proxy")
 	fs.StringVar(&o.BasePath, "base-path", "/", "service URL path prefix")
 	fs.StringVar(&o.Origin, "origin", "", "expected browser origin, e.g. https://terminal.example.com")
 	fs.DurationVar(&o.AttachmentTimeout, "attachment-timeout", 90*time.Second, "release a browser attachment after this period without contact")
 	fs.IntVar(&o.MaxPTYs, "max-ptys", 8, "maximum concurrent service PTYs")
 	return func(window api.WindowOptions) (api.Host, error) {
+		if daemon {
+			if !child {
+				pid, url, err := launchDaemon(args)
+				if err != nil {
+					return nil, err
+				}
+				fmt.Printf("Web terminal daemon: PID %d %s\n", pid, url)
+				os.Exit(0)
+			}
+			o.Service = true
+		}
 		if o.Service {
-			return NewService(window, o)
+			host, err := NewService(window, o)
+			if err != nil {
+				reportDaemon("", err)
+			}
+			return host, err
 		}
 		if o.BasePath != "/" {
 			return nil, fmt.Errorf("-base-path requires -service")

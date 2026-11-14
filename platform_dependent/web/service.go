@@ -98,7 +98,8 @@ func (s *Service) URL() string {
 	return u[:strings.Index(u, "/t/")] + s.prefix
 }
 
-func (s *Service) ServeSessions(factory api.SessionFactory, initial, defaults api.TabSpawnRequest) error {
+func (s *Service) ServeSessions(factory api.SessionFactory, initial, defaults api.TabSpawnRequest) (err error) {
+	defer func() { reportDaemon("", err) }()
 	defer s.Close()
 	if factory == nil {
 		return fmt.Errorf("session factory required")
@@ -115,6 +116,7 @@ func (s *Service) ServeSessions(factory api.SessionFactory, initial, defaults ap
 	defer stop()
 	served := make(chan error, 1)
 	go func() { served <- s.server.Serve(s.listener) }()
+	reportDaemon(s.URL(), nil)
 	fmt.Printf("Web terminal service: %s\n", s.URL())
 	select {
 	case <-s.done:

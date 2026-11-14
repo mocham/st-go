@@ -34,6 +34,51 @@ This is an independent module; its Makefile uses `GOWORK=off`. It requires Go
 1.26 and builds with `CGO_ENABLED=0`. Full native **local terminal** builds are
 needed for PDF previews; minimal terminals support text and static images.
 
+## SSH access and transfers
+
+Start a persistent background service on the remote machine:
+
+```sh
+BINARIES/st-web --daemon -listen 127.0.0.1 -port 8080 -dir /workspace
+```
+
+Connect from inside local `st` or `st-fb`:
+
+```sh
+BINARIES/st-client -ssh user@server
+# A different remote port or service prefix:
+BINARIES/st-client -ssh server-alias http://127.0.0.1:9090/terminal/
+```
+
+`-ssh` uses system OpenSSH and its host aliases, authentication agent, host-key
+verification and jump-host configuration. The optional URL is resolved **on the
+remote SSH host**; its default is `http://127.0.0.1:8080/`. HTTP, WebSocket and
+resource requests all use the same managed SSH connection through a private local
+Unix socket. Connecting directly to this loopback service requires no nginx or
+nginx authentication. An explicitly selected authenticating HTTP proxy still
+requires its usual HTTP authorization.
+
+The initial SSH connection can prompt before the terminal UI starts. Later
+connection recovery is noninteractive; agent/key-based authentication allows
+automatic recovery. Detaching closes the managed SSH connection and its local
+sockets while the remote service and PTYs continue running.
+
+SSH sessions show **[Upload] [Download]** in the bottom status row (shortened to
+**[U] [D]** on narrow terminals). Click a button or use `Ctrl-] u` / `Ctrl-] d`.
+Enter the source path, then the destination path or directory. The destination
+defaults to `.`; `Ctrl-U` clears a field, Backspace edits, and Esc/Ctrl-C cancels
+the prompt. Local `~/` expands to the local home; remote relative paths and `~/`
+are relative to the SSH account's SFTP home, independently of the selected PTY's
+working directory. Use absolute paths to select another directory.
+
+Transfers use system `sftp` over the authenticated SSH connection. Files and
+directories are supported, including names with spaces or literal wildcard
+characters. Existing destination files are replaced according to SFTP's normal
+copy behavior. Transfers run asynchronously; the status row reports completion
+or failure. `Ctrl-] k` cancels an active transfer. Interrupted transfers can leave
+partial files and are not automatically replayed. The remote SSH server must
+provide SFTP. Closing the client cancels its active transfer.
+
 ## Controls
 
 | Keys | Action |
@@ -46,6 +91,8 @@ needed for PDF previews; minimal terminals support text and static images.
 | `Ctrl-]`, then `l` | Refresh the service's terminal list |
 | `Ctrl-]`, then `r` | Reconnect immediately |
 | `Ctrl-]`, then `c` | Copy the latest remote selection through local OSC 52 |
+| `Ctrl-]`, then `u` / `d` | Upload / download through SSH |
+| `Ctrl-]`, then `k` | Cancel the active SSH transfer |
 | `Ctrl-]`, then `Ctrl-]` | Send a literal `Ctrl-]` remotely |
 
 The tab strip sits above the bottom status row. Click a title to switch, `[+]`
@@ -131,4 +178,8 @@ switching, authenticated close, last-PTY exit/recreation, stale completions,
 application-spawned tabs and narrow/wide-title mouse hit targets. `test-live`
 additionally starts an isolated real `st-web` service and checks shell I/O,
 recovery after shell exit and API deletion, and PTY survival after detach.
+SSH tests exercise managed forwarding/recovery with an isolated process fixture,
+button/prompt input through a PTY, and real SFTP copies when a local OpenSSH
+`sftp-server` is installed. `test-live` also checks daemon detachment, command
+arguments, zero-PTY persistence, and bind-failure reporting.
 Physical X11/framebuffer display testing is separate.

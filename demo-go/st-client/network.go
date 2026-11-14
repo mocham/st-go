@@ -17,6 +17,7 @@ import (
 )
 
 type remote struct {
+	ssh           *sshTunnel
 	base          *url.URL
 	authorization string
 	http          *http.Client
@@ -230,7 +231,7 @@ func (r *remote) connect(ctx context.Context, events chan<- wireEvent) (*connect
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	ws, err := config.DialContext(dialCtx)
+	ws, err := r.dialWebSocket(dialCtx, config)
 	if err != nil {
 		return nil, err
 	}

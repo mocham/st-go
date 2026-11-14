@@ -16,6 +16,31 @@ the direct-launch terminal session, including its tabs. Disconnecting leaves PTY
 running; reconnecting restores current content. Closing the last terminal exits
 the server.
 
+## Background service over SSH
+
+```sh
+./BINARIES/st-web --daemon -listen 127.0.0.1 -port 8080 -dir /absolute/project/path
+```
+
+`--daemon` implies `-service`: it starts a detached background service, waits for
+startup, then prints its PID and URL. The service and its PTYs survive the launching
+SSH session and remain available with zero terminals. Startup failures return a
+nonzero status. Stop it with `kill PID` (SIGTERM); stopping the service closes its
+PTYs. Standard input/output/error are detached to `/dev/null`; use foreground
+`-service` under a service manager when persistent logs or automatic restart are
+needed. `-port 0`, `-base-path`, and `-e PROGRAM ARGS...` also work in daemon mode.
+
+From a local st-go terminal, connect with:
+
+```sh
+./BINARIES/st-client -ssh user@server
+```
+
+The client defaults to remote `http://127.0.0.1:8080/` and manages the SSH tunnel.
+This direct loopback connection uses SSH authentication and needs no nginx
+authentication. See [st-client](../../demo-go/st-client/README.md) for other remote
+URLs and its SSH-only upload/download controls.
+
 ## Persistent shared service
 
 ```sh
