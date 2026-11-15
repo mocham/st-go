@@ -17,7 +17,7 @@ const (
 	// DefaultRenderPageBytes is the default source-size target used by
 	// PreparePages when paginating HTML views.
 	DefaultRenderPageBytes = defaultRenderPageBytes
-	pdfFormatVersion       = "latexpdf-native-v15-auxiliary-bibliography"
+	pdfFormatVersion       = "latexpdf-native-v17-flow-boxes"
 )
 
 // Document contains an expanded LaTeX source document and its PDF metadata.
@@ -171,7 +171,7 @@ func (renderer *Renderer) RenderPDF(document Document) ([]byte, error) {
 }
 
 // RenderPDFWithOptions renders document with optional page layout overrides.
-// RenderPDF remains the compatibility entry point for default A4 output.
+// RenderPDF uses the document's default page size.
 func (renderer *Renderer) RenderPDFWithOptions(document Document, options PDFOptions) ([]byte, error) {
 	result, err := renderer.RenderPDFResultWithOptions(document, options)
 	return result.PDF, err

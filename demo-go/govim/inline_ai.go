@@ -167,13 +167,11 @@ func (e *Editor) inlineRequest(id string) error {
 	if err != nil {
 		return err
 	}
-	for i, uuid := range pending {
-		if _, err := h.SubmitWith(aiharness.Request{UUID: uuid, Document: b.meta.Path, Instruction: e.inlineOptions.instruction, Context: context, CurrentDocument: text, Model: model}, client); err != nil {
-			return fmt.Errorf("queued %d of %d slots: %w", i, len(pending), err)
-		}
-		e.inlineAI.last[b] = uuid
+	if _, err := h.SubmitBatchWith(aiharness.BatchRequest{UUIDs: pending, Document: b.meta.Path, Instruction: e.inlineOptions.instruction, Context: context, CurrentDocument: text, Model: model}, client); err != nil {
+		return err
 	}
-	e.message = fmt.Sprintf("AI %d slots Processing · Ctrl-J inserts when ready", len(pending))
+	e.inlineAI.last[b] = pending[len(pending)-1]
+	e.message = fmt.Sprintf("AI 1 request · %d slots Processing · Ctrl-J inserts when ready", len(pending))
 	e.dirty = true
 	return nil
 }

@@ -8,6 +8,17 @@ selectable. Fonts are embedded and optional faces load on first use.
 ## Supported features
 
 - Headings, prose, inline/display math, colors, underline/strike, and Unicode.
+- Beamer frames (including `\frame{...}`), titles/subtitles, title pages,
+  columns, and ordinary/alert/example blocks. Frames flow as padded, bordered
+  boxes with gaps between them. PDFs stack frames on normal document pages,
+  keeping each box together and fitting oversized frames to the available
+  page height. HTML pagination and PDF navigation retain frame destinations.
+- `tcolorbox` backgrounds, borders, padding, rounded corners, titles, and text
+  colors, including `\tcbset`, `\newtcolorbox`, and box wrappers declared with
+  `\newcommand` or `\newenvironment`.
+- Scoped text sizes from `\tiny` through `\Huge` (including `\scriptsize`),
+  paragraph alignment, starred headings, and column/minipage/rule dimensions
+  such as `.47\textwidth`, `\linewidth`, and `3cm`.
 - Markdown pipe tables with column alignment, inline formatting/math, escaped
   pipes, and cell line breaks. HTML uses semantic tables; PDFs wrap cells, keep
   selectable text, and repeat headers when a table spans pages.
@@ -19,6 +30,9 @@ selectable. Fonts are embedded and optional faces load on first use.
 This is not a full TeX engine. Unsupported commands remain visible diagnostics;
 unsupported drawing source is retained in generated metadata. Callers resolve
 `\input`/`\include` because filesystem/archive lookup is application-specific.
+Beamer output is a static handout: overlay content is shown together. Theme,
+font, and template declarations are consumed; arbitrary Beamer templates and
+animations are not executed.
 
 ## API
 

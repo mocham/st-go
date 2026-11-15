@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -32,8 +33,9 @@ func TestInlineBatchDirectivesStatusAndRemoval(t *testing.T) {
 		if body.Model == nil || body.Model.ProviderID != "test" || body.Model.ID != "paragraph" || body.Model.Variant != "deep" {
 			t.Errorf("directive model: %+v", body.Model)
 		}
-		if len(aiharness.Blocks(body.Prompt)) != 2 {
-			t.Error("batch did not freeze both slots")
+		ids := inlineTargetIDs(t, body.Prompt)
+		if len(aiharness.Blocks(body.Prompt)) != 3 || len(ids) != 3 {
+			t.Error("batch did not freeze all three slots")
 		}
 		calls.Add(1)
 		select {
@@ -41,7 +43,12 @@ func TestInlineBatchDirectivesStatusAndRemoval(t *testing.T) {
 		case <-r.Context().Done():
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"text": "A paragraph."}})
+		values := make(map[string]string)
+		for i, id := range ids {
+			values[id] = fmt.Sprintf("Paragraph %d.", i+1)
+		}
+		text, _ := json.Marshal(values)
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"text": string(text)}})
 	}))
 	defer server.Close()
 	defer func() {
@@ -56,9 +63,9 @@ func TestInlineBatchDirectivesStatusAndRemoval(t *testing.T) {
 	e.inlineOptions.envServer = "http://unused.invalid"
 	e.inlineOptions.envModel = "wrong/model"
 	settlePreview(t, e)
-	editKeys(e, "GA{{{<Enter>{{{<Esc>")
+	editKeys(e, "GA{{{<Enter>{{{<Enter>{{{<Esc>")
 	blocks := aiharness.Blocks(string(e.buffer().text))
-	if len(blocks) != 2 || calls.Load() != 0 {
+	if len(blocks) != 3 || calls.Load() != 0 {
 		t.Fatalf("slots: %+v calls:%d", blocks, calls.Load())
 	}
 	check := func(want uint32, count int) {
@@ -73,18 +80,25 @@ func TestInlineBatchDirectivesStatusAndRemoval(t *testing.T) {
 			}
 		}
 	}
-	check(slotInitial, 2)
+	check(slotInitial, 3)
 	e.execute("AI")
-	check(slotProcessing, 2)
+	check(slotProcessing, 3)
 	e.execute("AI") // no duplicate dispatch, including queued work
 	close(release)
-	for _, block := range blocks {
-		waitInline(t, e, block.UUID)
+	for i, block := range blocks {
+		r := waitInline(t, e, block.UUID)
+		if r.Paragraph != fmt.Sprintf("Paragraph %d.", i+1) {
+			t.Fatal("JSON result assigned to wrong UUID")
+		}
 	}
-	if calls.Load() != 2 {
-		t.Fatal("batch was resubmitted")
+	if calls.Load() != 1 {
+		t.Fatalf("one :AI sent %d generation requests", calls.Load())
 	}
-	check(slotReady, 2)
+	check(slotReady, 3)
+	e.execute("AI")
+	if calls.Load() != 1 {
+		t.Fatal("ready batch was resubmitted")
+	}
 	out.Reset()
 	if err := e.preview.syncSlotStatus(e, time.Now()); err != nil {
 		t.Fatal(err)
@@ -95,19 +109,19 @@ func TestInlineBatchDirectivesStatusAndRemoval(t *testing.T) {
 	e.setPos(0)
 	editKeys(e, "<C-j><Esc>")
 	status := e.inlineSlotStatus(e.buffer())
-	if status.Items[0].Color != slotInserted || status.Items[1].Color != slotReady {
+	if status.Items[0].Color != slotInserted || status.Items[1].Color != slotReady || status.Items[2].Color != slotReady || !strings.Contains(string(e.buffer().text), "Paragraph 1.") {
 		t.Fatalf("acceptance status: %+v", status)
 	}
 	editKeys(e, "u")
-	check(slotReady, 2)
+	check(slotReady, 3)
 	current := aiharness.Blocks(string(e.buffer().text))
 	e.replace(current[0].Start, current[0].End, "", 0)
 	status = e.inlineSlotStatus(e.buffer())
-	if len(status.Items) != 1 || !strings.HasPrefix(status.Items[0].Text, blocks[1].UUID[:8]) {
+	if len(status.Items) != 2 || !strings.HasPrefix(status.Items[0].Text, blocks[1].UUID[:8]) {
 		t.Fatal("deleted UUID remained in status")
 	}
 	current = aiharness.Blocks(string(e.buffer().text))
-	e.replace(current[0].Start, current[0].End, "", 0)
+	e.replace(current[0].Start, current[len(current)-1].End, "", 0)
 	out.Reset()
 	if err := e.preview.syncSlotStatus(e, time.Now()); err != nil {
 		t.Fatal(err)
@@ -134,13 +148,14 @@ func TestInlineExplicitModelAndServerOverrideDirectives(t *testing.T) {
 			return
 		}
 		var body struct {
-			Model *aiharness.Model `json:"model"`
+			Prompt string           `json:"prompt"`
+			Model  *aiharness.Model `json:"model"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
 		if body.Model == nil || body.Model.ID != "override" || body.Model.Variant != "small" {
 			t.Errorf("override lost: %+v", body.Model)
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"text": "Override paragraph."}})
+		inlineTestReply(t, w, body.Prompt, "Override paragraph.")
 	}))
 	defer server.Close()
 	e := memoryEditor("%server=http://unused.invalid\n%model=other/model\n%variant=large\n")

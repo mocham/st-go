@@ -78,8 +78,8 @@ Put these optional, whole-line directives in the document, including Markdown:
   precedence. A variant needs a model from `%model` or `GOVIM_AI_MODEL`.
   An explicit `--ai-model` overrides both model and variant directives.
 - Each request freezes **instruction + context file contents + the entire current
-  unsaved document**, identifying the UUID to fill. Later edits cannot change that
-  request. Combined inputs are limited to 4 MiB.
+  unsaved document**, identifying all UUIDs to fill in document order. Later edits
+  cannot change that request. Combined inputs are limited to 4 MiB.
 - No project-directory scanning, `AGENTS.md`, earlier chat, or generated memory
   notes are added. The context file is the author's explicit, editable memory.
 
@@ -97,10 +97,27 @@ The cursor stays after the closed block so you can continue writing and add more
 slots. Pasted, register-inserted, and Ctrl-V-quoted braces remain literal.
 
 Run **`:AI`** to request every unfilled Initial slot in the current buffer, or
-`:AI UUID` to request one specific slot. Each request targets its own UUID using
-the same frozen document/context snapshot. Processing, Ready, and Inserted slots
-are skipped, so repeating `:AI` does not duplicate their requests. Failed requests
-return to Initial and may be retried explicitly with `:AI`.
+`:AI UUID` to request one specific slot. **One command sends one generation request
+for all eligible slots**, with one frozen document/context snapshot. Processing,
+Ready, and Inserted slots are skipped; with no eligible slots, no request is sent.
+Failed requests return to Initial and may be retried explicitly with `:AI`.
+
+The model plans the insertions together and returns one JSON object keyed by full
+UUID (these UUIDs are illustrative):
+
+```json
+{
+  "11111111-1111-4111-8111-111111111111": "First paragraph with \\textbf{LaTeX}.",
+  "22222222-2222-4222-8222-222222222222": "Second paragraph.\nAnother line."
+}
+```
+
+Every requested UUID must appear exactly once with a nonempty string value.
+Unknown or duplicate UUIDs, missing results, malformed JSON, and invalid insertion
+text fail the whole batch. Nothing becomes Ready until the entire reply has been
+validated and persisted. Each result can then be accepted or discarded separately.
+Even `:AI UUID` uses this JSON format. Custom instructions and context should
+describe the insertion content while preserving this response contract.
 
 **Ctrl+J**, in Normal or Insert mode, jumps to the next `<++>` stop, wrapping at
 the end of the buffer:
@@ -114,10 +131,11 @@ the end of the buffer:
 - Missing, edited, or duplicated AI anchors are not used for automatic insertion.
 
 `:UnIns` discards the block under the cursor, or the last active AI block in the
-current buffer. `:UnIns UUID` selects one explicitly. It restores `<++>`, cancels
-local in-flight work for that version, and refreshes the unsaved preview. The next
-`:AI` requests a **new version of the same UUID** using fresh inputs. Late results
-cannot replace a discarded version.
+current buffer. `:UnIns UUID` selects one explicitly. It restores `<++>`, invalidates
+any in-flight result for that version, and refreshes the unsaved
+preview. Other slots in its batch continue generating; the shared HTTP request is
+cancelled when all its slots are discarded. The next `:AI` requests a **new version
+of the same UUID** using fresh inputs. Late results cannot replace a discarded version.
 
 `u` undoes acceptance or removal as an ordinary source edit. `:w` saves normally.
 Generation, acceptance, and preview never implicitly save the document. Previews
@@ -155,12 +173,13 @@ can be inserted after restarting govim, even without a configured server.
 Normal source edits retain govim's existing swap/undo recovery.
 
 The stateless endpoint returns final text, so this workflow displays a running
-status rather than streamed reasoning. Requests are bounded to 16 outstanding
-jobs per open project harness and dispatched one at a time. A larger batch reports
-how many were queued; run `:AI` again as capacity becomes available. There is no
-automatic generation retry. A request left Processing by another editor or a
-crash must be discarded with `:UnIns` before `:AI` can retry it. Closing the editor
-cancels its HTTP requests; cancellation
-does not promise that the remote provider stops computing.
+status rather than streamed reasoning. Each batch supports up to 256 slots, with
+at most 16 outstanding batches per open project harness, dispatched one at a time.
+An over-limit batch is rejected as a whole. A JSON reply is limited to 8 MiB and
+each insertion to 512 KiB. One generation POST serves the entire batch; API route
+discovery also uses one GET. There is no automatic generation retry. A request
+left Processing by another editor or a crash must be discarded with `:UnIns`
+before `:AI` can retry it. Closing the editor cancels its HTTP requests;
+cancellation does not promise that the remote provider stops computing.
 
 The separate, session-backed workflow remains documented in [AI-WRITING.md](AI-WRITING.md).

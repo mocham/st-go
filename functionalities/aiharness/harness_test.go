@@ -107,7 +107,13 @@ func TestStatelessRequestAndVersionedDictionary(t *testing.T) {
 		if n > 1 {
 			paragraph = "Second paragraph."
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"text": paragraph}})
+		blocks := Blocks(body.Prompt)
+		if len(blocks) != 1 {
+			t.Error("expected one target document block")
+			return
+		}
+		reply, _ := json.Marshal(map[string]string{blocks[0].UUID: paragraph})
+		json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"text": string(reply)}})
 	}))
 	defer server.Close()
 	client, err := NewOpenCode(server.URL, "Bearer test")

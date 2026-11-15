@@ -7,15 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 )
 
-const DefaultInstruction = "Write the next paragraph at the specified UUID placeholder. Match the document's language, voice, and notation. Return only the paragraph's Markdown or LaTeX source, without fences, explanations, notes, or placeholder markers. Do not repeat surrounding text."
+const DefaultInstruction = "Write one insertion paragraph for each requested UUID placeholder. Plan the paragraphs together in document order. Match the document's language, voice, and notation. Do not repeat surrounding text. Follow the JSON response format below."
 
 type Request struct {
 	UUID            string
@@ -35,8 +33,9 @@ type Record struct {
 	Error     string
 }
 
-func Prompt(r Request) string {
-	return "Instruction:\n" + r.Instruction + "\n\nTarget placeholder UUID: " + r.UUID + "\n\nContext:\n" + r.Context + "\n\nCurrent document:\n" + r.CurrentDocument
+type generationTask struct {
+	cancel    context.CancelFunc
+	remaining int
 }
 
 type Harness struct {
@@ -45,7 +44,8 @@ type Harness struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	mu        sync.Mutex
-	tasks     map[string]context.CancelFunc
+	tasks     map[string]*generationTask
+	jobs      int
 	closed    bool
 	wg        sync.WaitGroup
 	serial    chan struct{}
@@ -90,7 +90,7 @@ kind TEXT NOT NULL, text TEXT NOT NULL, created INTEGER NOT NULL);`)
 		return nil, fmt.Errorf("unsupported AI project schema")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Harness{db: db, generator: generator, ctx: ctx, cancel: cancel, tasks: make(map[string]context.CancelFunc), serial: make(chan struct{}, 1), updates: make(chan Record, 32)}, nil
+	return &Harness{db: db, generator: generator, ctx: ctx, cancel: cancel, tasks: make(map[string]*generationTask), serial: make(chan struct{}, 1), updates: make(chan Record, 32)}, nil
 }
 
 func (h *Harness) Updates() <-chan Record   { return h.updates }
@@ -136,30 +136,32 @@ ON latest.uuid=v.uuid AND latest.version=v.version WHERE v.document=?`, document
 	return states, rows.Err()
 }
 
-// Submit freezes every prompt input before dispatch. No transport retry can
-// accidentally generate a second paragraph; a retry is a new dictionary version.
+// Submit is the single-slot form of SubmitBatch, using the same JSON contract.
 func (h *Harness) Submit(request Request) (Record, error) {
 	return h.SubmitWith(request, h.generator)
 }
 
-// SubmitWith freezes a backend per request, allowing documents sharing a project
-// database to select different servers without redirecting already queued work.
 func (h *Harness) SubmitWith(request Request, generator Generator) (Record, error) {
-	if request.Instruction == "" {
-		request.Instruction = DefaultInstruction
-	}
-	if !ValidUUID(request.UUID) || request.Document == "" || !utf8.ValidString(request.CurrentDocument+request.Context+request.Instruction) {
-		return Record{}, fmt.Errorf("invalid AI request")
-	}
-	if len(request.CurrentDocument)+len(request.Context)+len(request.Instruction) > MaxInput {
-		return Record{}, fmt.Errorf("AI instruction, context and document exceed %d bytes", MaxInput)
-	}
-	block, err := FindBlock(request.CurrentDocument, request.UUID)
+	records, err := h.SubmitBatchWith(singleBatch(request), generator)
 	if err != nil {
 		return Record{}, err
 	}
-	if string([]rune(request.CurrentDocument)[block.Content:block.Close]) != Slot {
-		return Record{}, fmt.Errorf("AI target must contain an empty %s slot", Slot)
+	return records[0], nil
+}
+
+func (h *Harness) SubmitBatch(request BatchRequest) ([]Record, error) {
+	return h.SubmitBatchWith(request, h.generator)
+}
+
+// SubmitBatchWith reserves all UUID versions atomically, then dispatches exactly
+// one model request. It freezes both the backend and every prompt input.
+func (h *Harness) SubmitBatchWith(request BatchRequest, generator Generator) ([]Record, error) {
+	if request.Instruction == "" {
+		request.Instruction = DefaultInstruction
+	}
+	request.UUIDs = append([]string(nil), request.UUIDs...)
+	if err := validateBatch(request); err != nil {
+		return nil, err
 	}
 	if request.Model != nil {
 		model := *request.Model
@@ -167,100 +169,152 @@ func (h *Harness) SubmitWith(request Request, generator Generator) (Record, erro
 	}
 	model, err := json.Marshal(request.Model)
 	if err != nil {
-		return Record{}, err
+		return nil, err
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
-		return Record{}, fmt.Errorf("AI harness is closed")
+		return nil, fmt.Errorf("AI harness is closed")
 	}
 	if generator == nil {
-		return Record{}, fmt.Errorf("AI generation is not configured")
+		return nil, fmt.Errorf("AI generation is not configured")
 	}
-	if len(h.tasks) >= 16 {
-		return Record{}, fmt.Errorf("AI request queue is full")
+	if h.jobs >= 16 {
+		return nil, fmt.Errorf("AI batch queue is full")
 	}
-	// This single SQL statement allocates the next version across editors too.
-	r := Record{Request: request, Prompt: Prompt(request), Status: "queued"}
+	tx, err := h.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	prompt := BatchPrompt(request)
+	records := make([]Record, 0, len(request.UUIDs))
 	now := time.Now().UnixNano()
-	err = h.db.QueryRow(`INSERT INTO govim_ai_versions
+	for _, id := range request.UUIDs {
+		r := Record{Request: Request{id, request.Document, request.Instruction, request.Context, request.CurrentDocument, request.Model}, Prompt: prompt, Status: "queued"}
+		// Version allocation and all batch entries commit together, across editors.
+		err = tx.QueryRow(`INSERT INTO govim_ai_versions
 (uuid,version,document,instruction,context,document_text,model,prompt,status,created,updated)
 SELECT ?,COALESCE(MAX(version),0)+1,?,?,?,?,?,?,?, ?,? FROM govim_ai_versions WHERE uuid=? RETURNING version`,
-		r.UUID, r.Document, r.Instruction, r.Context, r.CurrentDocument, string(model), r.Prompt, r.Status, now, now, r.UUID).Scan(&r.Version)
-	if err != nil {
-		return Record{}, err
+			r.UUID, r.Document, r.Instruction, r.Context, r.CurrentDocument, string(model), r.Prompt, r.Status, now, now, r.UUID).Scan(&r.Version)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, r)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithCancel(h.ctx)
-	h.tasks[taskKey(r.UUID, r.Version)] = cancel
-	h.wg.Add(1)
-	go h.run(ctx, r, generator)
-	if r.Model != nil {
-		model := *r.Model
-		r.Model = &model
+	task := &generationTask{cancel: cancel, remaining: len(records)}
+	for _, r := range records {
+		h.tasks[taskKey(r.UUID, r.Version)] = task
 	}
-	return r, nil
+	h.jobs++
+	h.wg.Add(1)
+	go h.runBatch(ctx, records, task, generator)
+	out := append([]Record(nil), records...)
+	for i := range out {
+		if out[i].Model != nil {
+			model := *out[i].Model
+			out[i].Model = &model
+		}
+	}
+	return out, nil
 }
 
-func (h *Harness) run(ctx context.Context, r Record, generator Generator) {
+func (h *Harness) runBatch(ctx context.Context, records []Record, task *generationTask, generator Generator) {
 	defer h.wg.Done()
 	defer func() {
 		h.mu.Lock()
-		key := taskKey(r.UUID, r.Version)
-		h.tasks[key]()
-		delete(h.tasks, key)
+		task.cancel()
+		for _, r := range records {
+			delete(h.tasks, taskKey(r.UUID, r.Version))
+		}
+		h.jobs--
 		h.mu.Unlock()
 	}()
 	select {
 	case h.serial <- struct{}{}:
 		defer func() { <-h.serial }()
 	case <-ctx.Done():
-		h.complete(r, "unknown", "", "request interrupted before completion")
+		h.completeBatch(records, "unknown", nil, "request interrupted before completion")
 		return
 	}
-	result, err := h.db.Exec("UPDATE govim_ai_versions SET status='running',updated=? WHERE uuid=? AND version=? AND status='queued'", time.Now().UnixNano(), r.UUID, r.Version)
+	started, err := h.storeBatch(records, "running", nil, "")
 	if err != nil {
-		h.complete(r, "failed", "", err.Error())
+		h.completeBatch(records, "failed", nil, err.Error())
 		return
 	}
-	if count, _ := result.RowsAffected(); count != 1 {
+	if len(started) == 0 {
 		return
 	}
 	if ctx.Err() != nil {
-		h.complete(r, "unknown", "", "request interrupted before completion")
+		h.completeBatch(records, "unknown", nil, "request interrupted before completion")
 		return
 	}
-	text, err := generator.Generate(ctx, r.Prompt, r.Model)
+	text, err := generator.Generate(ctx, records[0].Prompt, records[0].Model)
 	if ctx.Err() != nil {
-		h.complete(r, "unknown", "", "request interrupted; discard and retry explicitly")
+		h.completeBatch(records, "unknown", nil, "request interrupted; discard and retry explicitly")
 		return
 	}
 	if err != nil {
-		h.complete(r, "failed", "", err.Error())
+		h.completeBatch(records, "failed", nil, err.Error())
 		return
 	}
-	text = strings.TrimSpace(text)
-	block, blockErr := FindBlock(BlockText(r.UUID, text), r.UUID)
-	if text == "" || len(text) > MaxParagraph || !utf8.ValidString(text) || strings.Contains(text, Slot) || strings.Contains(text, "{{{%") || blockErr != nil || block.End != utf8.RuneCountInString(BlockText(r.UUID, text)) {
-		h.complete(r, "failed", "", "invalid paragraph: empty, oversized, or contains unmatched/reserved block markers")
+	ids := make([]string, len(records))
+	for i, r := range records {
+		ids[i] = r.UUID
+	}
+	paragraphs, err := ParseInsertions(text, ids)
+	if err != nil {
+		h.completeBatch(records, "failed", nil, err.Error())
 		return
 	}
-	h.complete(r, "ready", text, "")
+	h.completeBatch(records, "ready", paragraphs, "")
 }
 
-func (h *Harness) complete(r Record, status, text, failure string) {
-	result, err := h.db.Exec(`UPDATE govim_ai_versions SET status=?,paragraph=?,error=?,updated=?
-WHERE uuid=? AND version=? AND status IN ('queued','running')`, status, text, failure, time.Now().UnixNano(), r.UUID, r.Version)
+// All surviving entries reach the new state before any completion is announced.
+// Discarded entries are excluded even when their shared request returns later.
+func (h *Harness) storeBatch(records []Record, status string, paragraphs map[string]string, failure string) ([]Record, error) {
+	tx, err := h.db.Begin()
 	if err != nil {
-		r.Status, r.Error = "failed", "persist AI result: "+err.Error()
-	} else {
-		if count, _ := result.RowsAffected(); count != 1 {
-			return
-		} // discarded/superseded work
-		r.Status, r.Paragraph, r.Error = status, text, failure
+		return nil, err
 	}
-	select {
-	case h.updates <- r:
-	case <-h.ctx.Done():
+	defer tx.Rollback()
+	var updated []Record
+	for _, r := range records {
+		text := paragraphs[r.UUID]
+		result, err := tx.Exec(`UPDATE govim_ai_versions SET status=?,paragraph=?,error=?,updated=?
+WHERE uuid=? AND version=? AND status IN ('queued','running')`, status, text, failure, time.Now().UnixNano(), r.UUID, r.Version)
+		if err != nil {
+			return nil, err
+		}
+		if count, _ := result.RowsAffected(); count != 1 {
+			continue
+		}
+		r.Status, r.Paragraph, r.Error = status, text, failure
+		updated = append(updated, r)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func (h *Harness) completeBatch(records []Record, status string, paragraphs map[string]string, failure string) {
+	updated, err := h.storeBatch(records, status, paragraphs, failure)
+	if err != nil {
+		for _, r := range records {
+			r.Status, r.Error = "failed", "persist AI result: "+err.Error()
+			updated = append(updated, r)
+		}
+	}
+	for _, r := range updated {
+		select {
+		case h.updates <- r:
+		case <-h.ctx.Done():
+		}
 	}
 }
 
@@ -290,8 +344,13 @@ func (h *Harness) RecordAction(r Record, kind, text string) error {
 	}
 	if kind == "discarded" {
 		h.mu.Lock()
-		if cancel := h.tasks[taskKey(r.UUID, r.Version)]; cancel != nil {
-			cancel()
+		key := taskKey(r.UUID, r.Version)
+		if task := h.tasks[key]; task != nil {
+			delete(h.tasks, key)
+			task.remaining--
+			if task.remaining == 0 {
+				task.cancel()
+			}
 		}
 		h.mu.Unlock()
 	}

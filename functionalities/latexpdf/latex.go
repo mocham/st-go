@@ -34,6 +34,11 @@ type latexRenderContext struct {
 	flowcharts       int
 	index            *latexDocumentIndex
 	bodyOffset       int
+	textSize         float64
+	textAlign        string
+	beamer           *beamerDocument
+	frameDepth       int
+	colorBoxDefaults string
 }
 
 type mathMacro struct {
@@ -73,18 +78,22 @@ func (renderer *latexRenderer) renderPrepared(prepared, body, digest string) ren
 		body = rewriteLatexDiffCommands(body)
 	}
 	prepared, body = rewriteTableMacroDocuments(prepared, body)
+	prepared, body = rewriteColorBoxDocuments(prepared, body)
 	index := buildLatexDocumentIndex(prepared)
 	bodyOffset := strings.Index(index.body, body)
 	if bodyOffset < 0 {
 		bodyOffset = 0
 	}
 	context := &latexRenderContext{
-		renderer:        renderer,
-		macros:          extractMathMacros(prepared),
-		primitiveMacros: extractPrimitiveMacroNames(prepared),
-		colors:          extractLatexColors(prepared),
-		index:           index,
-		bodyOffset:      bodyOffset,
+		renderer:         renderer,
+		macros:           extractMathMacros(prepared),
+		primitiveMacros:  extractPrimitiveMacroNames(prepared),
+		colors:           extractLatexColors(prepared),
+		index:            index,
+		bodyOffset:       bodyOffset,
+		textSize:         1,
+		beamer:           parseBeamerDocument(prepared),
+		colorBoxDefaults: colorBoxDefaults(prepared),
 	}
 	html := context.renderBlocksAt(body, bodyOffset)
 	result := renderedLatex{
@@ -315,6 +324,9 @@ func (context *latexRenderContext) renderBlocks(source string) string {
 }
 
 func (context *latexRenderContext) renderBlocksAt(source string, sourceOffset int) string {
+	previousSize := context.textSize
+	previousAlign := context.textAlign
+	defer func() { context.textSize, context.textAlign = previousSize, previousAlign }()
 	var output strings.Builder
 	for len(source) > 0 {
 		trimmed := strings.TrimLeftFunc(source, unicode.IsSpace)
@@ -322,6 +334,44 @@ func (context *latexRenderContext) renderBlocksAt(source string, sourceOffset in
 		source = trimmed
 		if source == "" {
 			break
+		}
+		if source[0] == '\\' {
+			command, end := readTeXCommand(source, 0)
+			if size, ok := latexTextSizes[command]; ok {
+				context.textSize = size
+				source, sourceOffset = source[end:], sourceOffset+end
+				continue
+			}
+			if alignment := latexTextAlignment(command); alignment != "" {
+				context.textAlign = alignment
+				source, sourceOffset = source[end:], sourceOffset+end
+				continue
+			}
+			if command == "frame" {
+				cursor := skipOptionalArguments(source, skipOverlay(source, end))
+				if content, finish, ok := parseBraced(source, cursor); ok {
+					// Command-form frames contain a body, not a leading title argument.
+					output.WriteString(context.renderBeamerFrame(content, sourceOffset, sourceOffset+cursor+1, false))
+					source, sourceOffset = source[finish:], sourceOffset+finish
+					continue
+				}
+			}
+			if command == "titlepage" || (command == "maketitle" && context.beamer != nil) {
+				output.WriteString(context.renderBeamerTitle())
+				source, sourceOffset = source[end:], sourceOffset+end
+				continue
+			}
+			if consumed, ok := consumeNonRenderingTeXCommand(source, command, end); ok {
+				source, sourceOffset = source[consumed:], sourceOffset+consumed
+				continue
+			}
+		}
+		if source[0] == '{' {
+			if group, end, ok := parseBraced(source, 0); ok && (strings.Contains(group, "\n\n") || strings.Contains(group, `\begin{`)) {
+				output.WriteString(context.renderBlocksAt(group, sourceOffset+1))
+				source, sourceOffset = source[end:], sourceOffset+end
+				continue
+			}
 		}
 
 		if strings.HasPrefix(source, `\maketitle`) {
@@ -368,6 +418,11 @@ func (context *latexRenderContext) renderBlocksAt(source string, sourceOffset in
 				tag = "h4"
 			}
 			section, number := context.addSection(argument, map[string]int{"h2": 2, "h3": 3, "h4": 4}[tag], sourceOffset)
+			if context.beamer != nil && context.frameDepth == 0 {
+				output.WriteString(`<div class="beamer-section" id="` + section.ID + `" data-title="` + template.HTMLEscapeString(section.Title) + `" hidden></div>`)
+				source, sourceOffset = source[end:], sourceOffset+end
+				continue
+			}
 			output.WriteString("<" + tag + ` id="` + section.ID + `">`)
 			if number != "" {
 				output.WriteString(`<span class="section-number">` + template.HTMLEscapeString(number) + `</span> `)
@@ -380,7 +435,7 @@ func (context *latexRenderContext) renderBlocksAt(source string, sourceOffset in
 		}
 		if strings.HasPrefix(source, `\[`) {
 			if end := findUnescaped(source, `\]`, 2); end >= 0 {
-				output.WriteString(context.renderDisplayMath(source[2:end]))
+				output.WriteString(context.sizedBlock(context.renderDisplayMath(source[2:end])))
 				source = source[end+2:]
 				sourceOffset += end + 2
 				continue
@@ -388,7 +443,7 @@ func (context *latexRenderContext) renderBlocksAt(source string, sourceOffset in
 		}
 		if strings.HasPrefix(source, `$$`) {
 			if end := findUnescaped(source, `$$`, 2); end >= 0 {
-				output.WriteString(context.renderDisplayMath(source[2:end]))
+				output.WriteString(context.sizedBlock(context.renderDisplayMath(source[2:end])))
 				source = source[end+2:]
 				sourceOffset += end + 2
 				continue
@@ -400,7 +455,11 @@ func (context *latexRenderContext) renderBlocksAt(source string, sourceOffset in
 				content, end, found := extractEnvironment(source, environment, beginEnd)
 				if found {
 					options := environmentOptions(source, environment, beginEnd)
-					output.WriteString(context.renderEnvironment(environment, options, content, sourceOffset, sourceOffset+beginEnd))
+					rendered := context.renderEnvironment(environment, options, content, sourceOffset, sourceOffset+beginEnd)
+					if !environmentRendersTextBlocks(environment) {
+						rendered = context.sizedBlock(rendered)
+					}
+					output.WriteString(rendered)
 					source = source[end:]
 					sourceOffset += end
 					continue
@@ -421,9 +480,14 @@ func (context *latexRenderContext) renderBlocksAt(source string, sourceOffset in
 		}
 		paragraph := strings.TrimSpace(source[:end])
 		if paragraph != "" {
-			rendered := context.renderInline(paragraph)
+			size := context.textSize
+			rendered := context.renderInlineState(paragraph)
 			if strings.TrimSpace(rendered) != "" {
-				output.WriteString(`<p>`)
+				attributes := texSizeAttributes(size)
+				if context.textAlign != "" {
+					attributes += ` align="` + context.textAlign + `"`
+				}
+				output.WriteString(`<p` + attributes + `>`)
 				output.WriteString(rendered)
 				output.WriteString(`</p>`)
 			}
@@ -480,6 +544,18 @@ func (context *latexRenderContext) renderEnvironment(environment, options, conte
 		return context.renderStatement(base, options, content, contentOffset, environmentOffset, declaration.Title)
 	}
 	switch base {
+	case "tcolorbox":
+		return context.renderColorBox(options, content, environmentOffset, contentOffset)
+	case "frame":
+		return context.renderBeamerFrame(content, environmentOffset, contentOffset, true)
+	case "columns":
+		return context.renderColumns(content, options, contentOffset)
+	case "column", "minipage":
+		return context.renderColumn(content, contentOffset)
+	case "block", "alertblock", "exampleblock":
+		return context.renderBeamerBlock(base, content, contentOffset)
+	case "onlyenv", "uncoverenv", "visibleenv", "actionenv", "overprint", "overlayarea":
+		return context.renderBlocksAt(content, contentOffset)
 	case "boardnotes":
 		return `<section class="lecture-box board"><h3>板书</h3>` + context.renderBlocksAt(content, contentOffset) + `</section>`
 	case "oralnotes":
@@ -522,7 +598,11 @@ func (context *latexRenderContext) renderEnvironment(environment, options, conte
 	case "array":
 		return context.renderTabular(content, 1)
 	case "center", "flushleft", "flushright":
-		return `<div class="` + base + `">` + context.renderBlocksAt(content, contentOffset) + `</div>`
+		previous := context.textAlign
+		context.textAlign = map[string]string{"center": "center", "flushleft": "left", "flushright": "right"}[base]
+		rendered := context.renderBlocksAt(content, contentOffset)
+		context.textAlign = previous
+		return `<div class="` + base + `">` + rendered + `</div>`
 	case "abstract":
 		return `<section class="abstract"><h3>Abstract</h3>` + context.renderBlocksAt(content, contentOffset) + `</section>`
 	case "theorem", "lemma", "proposition", "corollary", "definition", "example", "remark", "proof":
@@ -931,6 +1011,10 @@ func (context *latexRenderContext) renderList(content string, ordered bool, cont
 	if len(items) == 0 {
 		return context.renderBlocksAt(content, contentOffset)
 	}
+	previousSize, previousAlign := context.textSize, context.textAlign
+	defer func() { context.textSize, context.textAlign = previousSize, previousAlign }()
+	// Declarations before the first item apply to the entire list.
+	context.renderInlineState(content[:items[0].Start])
 	tag := "ul"
 	if ordered {
 		tag = "ol"
@@ -1065,6 +1149,13 @@ func (context *latexRenderContext) renderCitation(keys, notes []string) string {
 }
 
 func (context *latexRenderContext) renderInline(source string) string {
+	previousSize := context.textSize
+	previousAlign := context.textAlign
+	defer func() { context.textSize, context.textAlign = previousSize, previousAlign }()
+	return context.renderInlineState(source)
+}
+
+func (context *latexRenderContext) renderInlineState(source string) string {
 	var output strings.Builder
 	macroExpansions := 0
 	for len(source) > 0 {
@@ -1114,6 +1205,22 @@ func (context *latexRenderContext) renderInline(source string) string {
 				continue
 			}
 			position := skipTeXSpace(source, commandEnd)
+			if alignment := latexTextAlignment(command); alignment != "" {
+				context.textAlign = alignment
+				source = source[position:]
+				continue
+			}
+			if size, ok := latexTextSizes[command]; ok {
+				previousSize := context.textSize
+				if previousSize == 0 {
+					previousSize = 1
+				}
+				context.textSize = size
+				output.WriteString(fmt.Sprintf(`<span data-tex-size="%g" style="font-size:%gem">`, size, size/previousSize))
+				output.WriteString(context.renderInlineState(source[position:]))
+				output.WriteString(`</span>`)
+				return output.String()
+			}
 			if isTextAccentCommand(command) {
 				if argument, end, ok := parseTextAccentArgument(source, position); ok {
 					output.WriteString(template.HTMLEscapeString(applyTextAccent(command, argument)))
@@ -1129,6 +1236,37 @@ func (context *latexRenderContext) renderInline(source string) string {
 				}
 			}
 			switch command {
+			case "only", "uncover", "visible", "onslide", "alert", "structure", "textnormal", "textrm", "textsf":
+				position = skipOverlay(source, position)
+				if argument, end, ok := parseBraced(source, position); ok {
+					rendered := context.renderInline(argument)
+					if command == "alert" {
+						rendered = `<strong style="color:#a83232">` + rendered + `</strong>`
+					}
+					output.WriteString(rendered)
+					source = source[end:]
+					continue
+				}
+				if command == "onslide" {
+					source = source[position:]
+					continue
+				}
+			case "pause":
+				source = source[skipOptionalArguments(source, commandEnd):]
+				continue
+			case "rule":
+				cursor := skipOptionalArguments(source, commandEnd)
+				if width, next, ok := parseBraced(source, cursor); ok {
+					if height, end, ok := parseBraced(source, skipTeXSpace(source, next)); ok {
+						w, wok := texLengthCSS(width)
+						h, hok := texLengthCSS(height)
+						if wok && hok {
+							output.WriteString(`<span class="latex-rule" style="display:inline-block;background:currentColor;width:` + w + `;height:` + h + `"></span>`)
+						}
+						source = source[end:]
+						continue
+					}
+				}
 			case "tableofcontents":
 				output.WriteString(context.renderTableOfContents())
 				source = source[commandEnd:]
@@ -1286,6 +1424,9 @@ func (context *latexRenderContext) renderInline(source string) string {
 					continue
 				}
 			case "vspace", "hspace", "vskip", "hskip":
+				if position < len(source) && source[position] == '*' {
+					position = skipTeXSpace(source, position+1)
+				}
 				if _, end, ok := parseBraced(source, position); ok {
 					source = source[end:]
 					continue
@@ -1306,7 +1447,7 @@ func (context *latexRenderContext) renderInline(source string) string {
 				output.WriteString("&emsp;")
 				source = source[commandEnd:]
 				continue
-			case "noindent", "small", "footnotesize", "large", "Large", "centering", "raggedright", "raggedleft", "clearpage", "newpage", "par", "relax":
+			case "noindent", "centering", "raggedright", "raggedleft", "clearpage", "newpage", "par", "relax", "medskip", "smallskip", "bigskip", "vfill", "leavevmode", "strut":
 				source = source[commandEnd:]
 				continue
 			}
@@ -1499,6 +1640,11 @@ func consumeNonRenderingTeXCommand(source, command string, commandEnd int) (int,
 			}
 		}
 		return cursor, true
+	case "newtcolorbox", "renewtcolorbox":
+		if end, ok := consumeBraced(consumeOptional(cursor), 2); ok {
+			return end, true
+		}
+		return cursor, true
 	case "newtheorem":
 		cursor = consumeOptional(cursor)
 		if end, ok := consumeBraced(cursor, 1); ok {
@@ -1510,13 +1656,26 @@ func consumeNonRenderingTeXCommand(source, command string, commandEnd int) (int,
 		return cursor, true
 	case "DeclareMathOperator", "DeclareMathOperatorWithLimits", "DeclarePairedDelimiter", "numberwithin",
 		"counterwithin", "PassOptionsToPackage", "setlength", "addtolength", "setcounter", "addtocounter",
-		"newcolumntype", "colorlet", "setkomafont", "addtokomafont", "DeclareUnicodeCharacter", "DeclareSymbolFontAlphabet":
+		"newcolumntype", "colorlet", "setkomafont", "addtokomafont", "DeclareUnicodeCharacter", "DeclareSymbolFontAlphabet",
+		"setbeamercolor", "setbeamerfont":
 		cursor = consumeOptional(cursor)
 		if end, ok := consumeBraced(cursor, 2); ok {
 			return end, true
 		}
 		return cursor, true
-	case "definecolor", "providecolor", "DeclarePairedDelimiterX":
+	case "setbeamertemplate":
+		if end, ok := consumeBraced(cursor, 1); ok {
+			cursor = skipTeXSpace(source, end)
+			if cursor < len(source) && source[cursor] == '[' {
+				return consumeOptional(cursor), true
+			}
+			if _, end, ok := parseBraced(source, cursor); ok {
+				return end, true
+			}
+			return cursor, true
+		}
+		return cursor, true
+	case "definecolor", "providecolor", "DeclarePairedDelimiterX", "addtobeamertemplate":
 		cursor = consumeOptional(cursor)
 		if end, ok := consumeBraced(cursor, 3); ok {
 			return end, true
@@ -1539,7 +1698,10 @@ func consumeNonRenderingTeXCommand(source, command string, commandEnd int) (int,
 		"thispagestyle", "bibliography", "bibliographystyle", "graphicspath", "theoremstyle",
 		"AtBeginDocument", "AtEndDocument", "includeonly", "setlist", "tikzset", "pgfplotsset",
 		"mathtoolsset", "sisetup", "lstset", "captionsetup", "microtypesetup", "usetikzlibrary",
-		"usepgfplotslibrary", "pdfstringdefDisableCommands", "setstretch", "linespread":
+		"usepgfplotslibrary", "pdfstringdefDisableCommands", "setstretch", "linespread",
+		"usetheme", "usecolortheme", "usefonttheme", "useinnertheme", "useoutertheme",
+		"AtBeginSection", "AtBeginSubsection", "AtBeginPart", "logo", "note", "transduration", "transdissolve",
+		"tcbset", "tcbuselibrary":
 		cursor = consumeOptional(cursor)
 		if end, ok := consumeBraced(cursor, 1); ok {
 			return end, true
@@ -1788,6 +1950,15 @@ func optionalHeadingArgument(source string, commandEnd int) (string, bool) {
 func paragraphBoundary(source string) int {
 	inMath := false
 	for i := 0; i < len(source); i++ {
+		if !inMath && source[i] == '{' && !isEscaped(source, i) {
+			if _, end, ok := parseBraced(source, i); ok {
+				i = end - 1
+				continue
+			}
+		}
+		if !inMath && i > 0 && !isEscaped(source, i) && isBlockStart(source[i:]) {
+			return i
+		}
 		if source[i] == '$' && !isEscaped(source, i) {
 			inMath = !inMath
 			if i+1 < len(source) && source[i+1] == '$' {
@@ -1833,6 +2004,12 @@ func isBlockStart(source string) bool {
 		strings.HasPrefix(source, `\appendix`) {
 		return true
 	}
+	if strings.HasPrefix(source, `\`) {
+		command, _ := readTeXCommand(source, 0)
+		if command == "frame" || command == "titlepage" {
+			return true
+		}
+	}
 	_, _, _, ok := parseHeading(source)
 	return ok
 }
@@ -1846,6 +2023,7 @@ func parseEnvironmentStart(source string) (string, int, bool) {
 		return "", 0, false
 	}
 	end = skipTeXSpace(source, end)
+	end = skipOverlay(source, end)
 	if end < len(source) && source[end] == '[' {
 		if _, optionalEnd, optionalOK := parseDelimited(source, end, '[', ']'); optionalOK {
 			end = optionalEnd
@@ -1856,7 +2034,7 @@ func parseEnvironmentStart(source string) (string, int, bool) {
 
 func environmentOptions(source, environment string, contentStart int) string {
 	position := len(`\begin{`) + len(environment) + len(`}`)
-	position = skipTeXSpace(source, position)
+	position = skipOverlay(source, position)
 	if position >= contentStart || position >= len(source) || source[position] != '[' {
 		return ""
 	}
@@ -1917,6 +2095,7 @@ type listItem struct {
 	Label   string
 	Content string
 	Offset  int
+	Start   int
 }
 
 func splitListItems(content string) []listItem {
@@ -1946,7 +2125,7 @@ func splitListItems(content string) []listItem {
 			}
 		}
 		if depth == 0 && strings.HasPrefix(content[i:], `\item`) && commandBoundary(content, i+len(`\item`)) {
-			position := skipTeXSpace(content, i+len(`\item`))
+			position := skipOverlay(content, i+len(`\item`))
 			label := ""
 			if position < len(content) && content[position] == '[' {
 				if value, end, ok := parseDelimited(content, position, '[', ']'); ok {
@@ -1975,6 +2154,7 @@ func splitListItems(content string) []listItem {
 		items = append(items, listItem{
 			Label: marker.label, Content: strings.TrimSpace(raw),
 			Offset: marker.content + len(raw) - len(trimmedLeft),
+			Start:  marker.start,
 		})
 	}
 	return items
@@ -2234,6 +2414,15 @@ func texFragmentToPlainText(source string) string {
 						i = argumentEnd
 						continue
 					}
+				}
+			}
+			if isSectioningCommand(command) {
+				if title, finish, _, ok := parseHeadingArguments(source, end); ok {
+					output.WriteByte(' ')
+					output.WriteString(texFragmentToPlainText(title))
+					output.WriteByte(' ')
+					i = finish
+					continue
 				}
 			}
 			if command == "color" || command == "textcolor" {

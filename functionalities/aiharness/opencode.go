@@ -31,7 +31,8 @@ func ParseModel(value string) (*Model, error) {
 }
 
 // Generator must honor context cancellation. Prompt and model are read-only;
-// implementations return one paragraph without adding ambient document context.
+// implementations return the requested UUID-to-insertion JSON object without
+// adding ambient document context.
 type Generator interface {
 	Generate(context.Context, string, *Model) (string, error)
 }
@@ -149,7 +150,9 @@ func (c *OpenCode) Generate(ctx context.Context, prompt string, model *Model) (s
 		return "", err
 	}
 	defer response.Body.Close()
-	data, err := readOpenCodeResponse(response, 4*MaxParagraph)
+	// The server envelope JSON-encodes the model's JSON text again. Allow its
+	// worst-case escaping overhead while keeping the decoded batch bounded.
+	data, err := readOpenCodeResponse(response, 6*MaxBatchResponse+1024)
 	if err != nil {
 		return "", err
 	}

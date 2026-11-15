@@ -54,7 +54,7 @@ func (layout *pdfDocumentLayout) renderTable(table *html.Node, indent float64) {
 				if cell.Type != html.ElementNode || cell.Data != "td" && cell.Data != "th" {
 					continue
 				}
-				style := bodyPDFStyle()
+				style := layout.bodyStyle()
 				if cell.Data == "th" {
 					style.bold = true
 					row.header = true

@@ -133,6 +133,15 @@ type pdfDocumentLayout struct {
 	links                                            map[string]int
 	tocEntries                                       []pdfTOCEntry
 	pageEnds                                         map[int]float64 // compact preview crop heights
+	textSize                                         float64
+	textAlign                                        string
+	textColor                                        *renderColor
+	inFlowBox                                        bool
+	measuredBoxes                                    map[string]float64
+	boxHeights                                       map[string]float64
+	boxScale                                         float64
+	boxTop, boxCenterX                               float64
+	pendingSections                                  []documentSection
 }
 
 type pdfAnchor struct {
@@ -162,6 +171,11 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 		}
 		return append([]byte(nil), cached.data...), pages, nil
 	}
+	return renderer.renderPass(document, body, sections, cacheKey, options, nil)
+}
+
+func (renderer *pdfRenderer) renderPass(document Document, body template.HTML, sections []Section, cacheKey string, options PDFOptions, measuredBoxes map[string]float64) ([]byte, map[string]int, error) {
+	beamer := parseBeamerDocument(document.Source)
 
 	pageWidth, pageHeight, err := pdfPageSize(options)
 	if err != nil {
@@ -217,7 +231,9 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 	layout := &pdfDocumentLayout{
 		renderer: renderer, pdf: pdf, title: document.Title,
 		pageWidth: pageWidth, pageHeight: pageHeight,
-		fontScale:  fontScale,
+		fontScale:     fontScale,
+		textSize:      1,
+		measuredBoxes: measuredBoxes, boxHeights: make(map[string]float64),
 		marginLeft: left, marginRight: right, marginTop: top, marginBottom: bottom,
 		anchors: make(map[string]pdfAnchor), links: make(map[string]int),
 	}
@@ -225,7 +241,7 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 		layout.pageEnds = make(map[int]float64)
 	}
 	layout.addPage()
-	if !options.Compact {
+	if !options.Compact && beamer == nil {
 		titleStyle := pdfTextStyle{size: 22, bold: true, red: 23, green: 32, blue: 51}
 		layout.drawParagraph([]pdfInline{{text: document.Title, style: titleStyle}}, 0, 0, 4)
 		if document.Author != "" {
@@ -247,6 +263,11 @@ func (renderer *pdfRenderer) render(document Document, body template.HTML, secti
 		return nil, nil, errors.New("rendered document has no body")
 	}
 	layout.renderChildren(bodyNode, 0)
+	if measuredBoxes == nil && len(layout.boxHeights) > 0 {
+		// Measure complete boxes before placing them in the document
+		// flow. The first pass is never emitted or cached.
+		return renderer.renderPass(document, body, sections, cacheKey, options, layout.boxHeights)
+	}
 	layout.drawTOCPageNumbers()
 	if options.Compact {
 		layout.recordPageEnd()
@@ -336,6 +357,9 @@ func (layout *pdfDocumentLayout) recordPageEnd() {
 }
 
 func (layout *pdfDocumentLayout) ensureSpace(height float64) {
+	if layout.inFlowBox {
+		return
+	}
 	if layout.y+height <= layout.pageHeight-layout.marginBottom {
 		return
 	}
@@ -346,7 +370,7 @@ func (layout *pdfDocumentLayout) verticalSpace(height float64) {
 	if height <= 0 {
 		return
 	}
-	if layout.y+height > layout.pageHeight-layout.marginBottom {
+	if !layout.inFlowBox && layout.y+height > layout.pageHeight-layout.marginBottom {
 		layout.addPage()
 		return
 	}
@@ -361,6 +385,7 @@ func (layout *pdfDocumentLayout) registerAnchor(anchor string, y float64) {
 	if layout.anchors == nil {
 		layout.anchors = make(map[string]pdfAnchor)
 	}
+	y = layout.flowBoxY(y)
 	destination := pdfAnchor{page: layout.pdf.PageNo(), y: y}
 	layout.anchors[anchor] = destination
 	if link, ok := layout.links[anchor]; ok {
@@ -397,7 +422,7 @@ func (layout *pdfDocumentLayout) renderNode(node *html.Node, indent float64) {
 	if node.Type == html.TextNode {
 		text := collapseWhitespace(node.Data)
 		if text != "" {
-			style := bodyPDFStyle()
+			style := layout.bodyStyle()
 			layout.drawParagraph([]pdfInline{{text: text, style: style}}, indent, 0, 2)
 		}
 		return
@@ -405,6 +430,26 @@ func (layout *pdfDocumentLayout) renderNode(node *html.Node, indent float64) {
 	if node.Type != html.ElementNode {
 		return
 	}
+	previousSize := layout.textSize
+	previousAlign := layout.textAlign
+	previousColor := layout.textColor
+	if value, ok := htmlStyleProperty(node, "color"); ok {
+		if color, valid := parseCSSColor(value); valid {
+			layout.textColor = &color
+		}
+	}
+	if size, err := strconv.ParseFloat(htmlAttribute(node, "data-tex-size"), 64); err == nil && size > 0 && size <= 10 {
+		layout.textSize = size
+	}
+	if align := htmlAttribute(node, "align"); align == "left" || align == "center" || align == "right" {
+		layout.textAlign = align
+	}
+	if align, ok := htmlStyleProperty(node, "text-align"); ok {
+		layout.textAlign = align
+	}
+	defer func() {
+		layout.textSize, layout.textAlign, layout.textColor = previousSize, previousAlign, previousColor
+	}()
 	if anchor := htmlAttribute(node, "id"); anchor != "" {
 		layout.registerAnchor(anchor, layout.y)
 	}
@@ -432,11 +477,11 @@ func (layout *pdfDocumentLayout) renderNode(node *html.Node, indent float64) {
 			outlineLevel = 2
 		}
 		if title := collapseWhitespace(htmlText(node)); title != "" {
-			layout.pdf.Bookmark(title, outlineLevel, layout.y)
+			layout.pdf.Bookmark(title, outlineLevel, layout.flowBoxY(layout.y))
 		}
 		layout.drawParagraph(layout.collectInlineChildren(node, style), indent, 0, after)
 	case "p":
-		layout.drawParagraph(layout.collectInlineChildren(node, bodyPDFStyle()), indent, 0, 2.5)
+		layout.drawParagraph(layout.collectInlineChildren(node, layout.bodyStyle()), indent, 0, 2.5)
 	case "pre":
 		layout.drawPreformatted(htmlText(node), indent)
 	case "table":
@@ -450,9 +495,36 @@ func (layout *pdfDocumentLayout) renderNode(node *html.Node, indent float64) {
 			layout.drawDisplayFormula(node, indent)
 			return
 		}
-		style := bodyPDFStyle()
+		style := layout.bodyStyle()
 		layout.drawParagraph(layout.collectInline(node, style), indent, 0, 2)
 	case "section", "article", "main", "body", "div", "details":
+		if classes["beamer-section"] {
+			layout.pendingSections = append(layout.pendingSections, documentSection{ID: htmlAttribute(node, "id"), Title: htmlAttribute(node, "data-title")})
+			return
+		}
+		if classes["beamer-frame"] || classes["tcolorbox"] || classes["tcolorbox-title"] {
+			layout.renderFlowBox(node, indent)
+			return
+		}
+		if classes["beamer-columns"] {
+			layout.renderBeamerColumns(node, indent)
+			return
+		}
+		if classes["beamer-column"] {
+			previousInset := layout.rightInset
+			css, _ := htmlStyleProperty(node, "width")
+			available := layout.availableWidth(indent)
+			if width := pdfCSSLength(css, available, 11.2*layout.fontScale); width > 0 && width < available {
+				layout.rightInset += available - width
+			}
+			layout.renderChildren(node, indent)
+			layout.rightInset = previousInset
+			return
+		}
+		if classes["beamer-block"] {
+			layout.renderBeamerBlock(node, indent)
+			return
+		}
 		if classes["numbered-equation"] {
 			layout.renderNumberedEquation(node, indent)
 			return
@@ -752,7 +824,7 @@ func (layout *pdfDocumentLayout) renderList(list *html.Node, indent float64, ord
 }
 
 func (layout *pdfDocumentLayout) renderListItem(item *html.Node, indent float64, marker string) {
-	markerStyle := bodyPDFStyle()
+	markerStyle := layout.bodyStyle()
 	markerStyle.bold = true
 	markerRun := pdfInline{text: marker + " ", style: markerStyle}
 	firstBlock := true
@@ -764,13 +836,17 @@ func (layout *pdfDocumentLayout) renderListItem(item *html.Node, indent float64,
 			continue
 		}
 		if firstBlock && child.Type == html.ElementNode && child.Data == "p" {
-			runs := append([]pdfInline{markerRun}, layout.collectInlineChildren(child, bodyPDFStyle())...)
+			content := layout.collectInline(child, layout.bodyStyle())
+			if len(content) > 0 {
+				markerRun.style.size = content[0].style.size
+			}
+			runs := append([]pdfInline{markerRun}, content...)
 			layout.drawParagraph(runs, indent+5, 0, 1.5)
 			firstBlock = false
 			continue
 		}
 		if firstBlock && isHTMLInline(child) {
-			runs := append([]pdfInline{markerRun}, layout.collectInline(child, bodyPDFStyle())...)
+			runs := append([]pdfInline{markerRun}, layout.collectInline(child, layout.bodyStyle())...)
 			layout.drawParagraph(runs, indent+5, 0, 1.5)
 			firstBlock = false
 			continue
@@ -803,7 +879,7 @@ func (layout *pdfDocumentLayout) drawDisplayFormula(wrapper *html.Node, indent f
 		layout.drawParagraph([]pdfInline{{text: fallback, style: style}}, indent, 0, 2)
 		return
 	}
-	fontMM := 12.0 * layout.fontScale * 25.4 / 72.0
+	fontMM := 12.0 * layout.fontScale * layout.resolvedTextSize() * 25.4 / 72.0
 	exMM := fontMM * 0.5
 	width := formula.widthEx * exMM
 	if width <= 0 {
@@ -824,7 +900,11 @@ func (layout *pdfDocumentLayout) drawDisplayFormula(wrapper *html.Node, indent f
 	}
 	layout.ensureSpace(height + 5)
 	x := layout.marginLeft + indent + (available-width)/2
-	layout.drawFormula(formula, x, layout.y+2, width, renderColor{23, 32, 51})
+	color := renderColor{23, 32, 51}
+	if layout.textColor != nil {
+		color = *layout.textColor
+	}
+	layout.drawFormula(formula, x, layout.y+2, width, color)
 	layout.y += height + 5
 }
 
@@ -834,7 +914,19 @@ func (layout *pdfDocumentLayout) drawParagraph(runs []pdfInline, indent, before,
 	}
 	layout.verticalSpace(before)
 	for _, line := range layout.wrapInlineItems(layout.breakInlineRuns(runs), layout.availableWidth(indent)) {
-		layout.drawLine(line, layout.marginLeft+indent)
+		x := layout.marginLeft + indent
+		if layout.textAlign == "center" || layout.textAlign == "right" {
+			width := 0.0
+			for _, item := range line {
+				width += item.width
+			}
+			remaining := math.Max(0, layout.availableWidth(indent)-width)
+			if layout.textAlign == "center" {
+				remaining /= 2
+			}
+			x += remaining
+		}
+		layout.drawLine(line, x)
 	}
 	layout.verticalSpace(after)
 }
@@ -986,7 +1078,7 @@ func (layout *pdfDocumentLayout) drawLine(line []pdfLineItem, x float64) {
 		}
 		if link, ok := layout.linkForAnchor(item.inline.linkTarget); ok && item.width > 0 {
 			linkHeight := math.Max(item.ascent+item.descent, largestFontMM)
-			layout.pdf.Link(x, baseline-item.ascent, item.width, linkHeight, link)
+			layout.addLinkRegion(x, baseline-item.ascent, item.width, linkHeight, link)
 		}
 		x += item.width
 	}
@@ -1004,7 +1096,7 @@ func (layout *pdfDocumentLayout) breakInlineRuns(runs []pdfInline) []pdfLineItem
 	for _, run := range runs {
 		// Scale once, before measuring/wrapping. Line items retain the resolved
 		// size so text, inline math, baselines, links and decorations agree.
-		run.style.size *= layout.fontScale
+		run.style.size *= layout.fontScale * layout.resolvedTextSize()
 		if run.lineBreak || run.formula != nil {
 			items = append(items, layout.measureInline(run))
 			continue
@@ -1188,6 +1280,12 @@ func (layout *pdfDocumentLayout) collectInline(node *html.Node, style pdfTextSty
 		return nil
 	}
 	classes := htmlClasses(node)
+	if classes["latex-rule"] {
+		if formula := layout.ruleFormula(node, style); formula != nil {
+			return []pdfInline{{formula: formula, style: style}}
+		}
+		return nil
+	}
 	if classes["math-inline"] || classes["math-display"] {
 		formula, err := layout.renderer.formulaFromWrapper(node)
 		if err != nil {
@@ -1202,6 +1300,9 @@ func (layout *pdfDocumentLayout) collectInline(node *html.Node, style pdfTextSty
 		return nil
 	}
 	nextStyle := style
+	if size, err := strconv.ParseFloat(htmlAttribute(node, "data-tex-size"), 64); err == nil && size > 0 && size <= 10 {
+		nextStyle.size = bodyPDFStyle().size * size / layout.resolvedTextSize()
+	}
 	switch node.Data {
 	case "strong", "b":
 		nextStyle.bold = true

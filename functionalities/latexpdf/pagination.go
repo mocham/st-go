@@ -14,23 +14,33 @@ const defaultRenderPageBytes = 8 << 10
 
 func latexDocumentSections(pages []latexSourcePage) []documentSection {
 	var sections []documentSection
+	bodyOffset := 0
+	sectionSerial := 0
 	for pageIndex, page := range pages {
 		if page.Oversized {
+			bodyOffset += len(page.Source)
 			continue
 		}
 		pageSections := extractLatexSections(page.Source)
 		for index := range pageSections {
-			pageSections[index].ID = "section-" + strconv.Itoa(len(sections)+index+1)
+			if strings.HasPrefix(pageSections[index].ID, "frame-") {
+				offset, _ := strconv.Atoi(strings.TrimPrefix(pageSections[index].ID, "frame-"))
+				pageSections[index].ID = "frame-" + strconv.Itoa(bodyOffset+offset)
+			} else {
+				sectionSerial++
+				pageSections[index].ID = "section-" + strconv.Itoa(sectionSerial)
+			}
 			pageSections[index].Page = pageIndex + 1
 		}
 		sections = append(sections, pageSections...)
+		bodyOffset += len(page.Source)
 	}
 	return sections
 }
 
 func extractLatexSections(source string) []documentSection {
 	var sections []documentSection
-	var scan func(string)
+	var scan func(string, int)
 	add := func(titleSource string, level int) {
 		title := collapseWhitespace(texFragmentToPlainText(titleSource))
 		if title == "" {
@@ -40,7 +50,8 @@ func extractLatexSections(source string) []documentSection {
 			ID: "section-" + strconv.Itoa(len(sections)+1), Title: title, Level: level,
 		})
 	}
-	scan = func(fragment string) {
+	scan = func(fragment string, offset int) {
+		originalLength := len(fragment)
 		for len(fragment) > 0 {
 			fragment = strings.TrimLeftFunc(fragment, unicode.IsSpace)
 			if fragment == "" {
@@ -75,12 +86,35 @@ func extractLatexSections(source string) []documentSection {
 			if strings.HasPrefix(fragment, `\begin{`) {
 				if environment, beginEnd, ok := parseEnvironmentStart(fragment); ok {
 					if content, end, found := extractEnvironment(fragment, environment, beginEnd); found {
-						if environmentRendersTextBlocks(environment) {
-							scan(content)
+						position := offset + originalLength - len(fragment)
+						if environment == "frame" {
+							title, _, body, consumed := beamerFrameHeading(content, true)
+							if strings.TrimSpace(title) == "" {
+								title = "Slide"
+							}
+							add(title, 2)
+							sections[len(sections)-1].ID = "frame-" + strconv.Itoa(position)
+							scan(body, position+beginEnd+consumed)
+						} else if environmentRendersTextBlocks(environment) {
+							scan(content, position+beginEnd)
 						}
 						fragment = fragment[end:]
 						continue
 					}
+				}
+			}
+			if command, commandEnd := readTeXCommand(fragment, 0); command == "frame" {
+				cursor := skipOptionalArguments(fragment, skipOverlay(fragment, commandEnd))
+				if content, end, ok := parseBraced(fragment, cursor); ok {
+					title, _, body, consumed := beamerFrameHeading(content, false)
+					if strings.TrimSpace(title) == "" {
+						title = "Slide"
+					}
+					add(title, 2)
+					sections[len(sections)-1].ID = "frame-" + strconv.Itoa(offset+originalLength-len(fragment))
+					scan(body, offset+originalLength-len(fragment)+cursor+1+consumed)
+					fragment = fragment[end:]
+					continue
 				}
 			}
 			end := latexRenderBlockEnd(fragment)
@@ -93,7 +127,7 @@ func extractLatexSections(source string) []documentSection {
 			fragment = fragment[end:]
 		}
 	}
-	scan(source)
+	scan(source, 0)
 	return sections
 }
 
@@ -111,6 +145,7 @@ func environmentRendersTextBlocks(environment string) bool {
 func prepareLatexPages(source string, byteLimit int) (string, []latexSourcePage) {
 	documentType := latexDocumentType(source)
 	prepared := preprocessKnownConditionals(stripLatexComments(source))
+	prepared, _ = rewriteColorBoxDocuments(prepared, "")
 	body := documentBody(prepared)
 	if documentType == "flowchart" {
 		return prepared, []latexSourcePage{{Source: body}}
@@ -213,6 +248,12 @@ func splitLatexRenderBlocks(source string) []string {
 }
 
 func latexRenderBlockEnd(source string) int {
+	if command, commandEnd := readTeXCommand(source, 0); command == "frame" {
+		cursor := skipOptionalArguments(source, skipOverlay(source, commandEnd))
+		if _, end, ok := parseBraced(source, cursor); ok {
+			return end
+		}
+	}
 	if strings.HasPrefix(source, `\maketitle`) {
 		return len(`\maketitle`)
 	}

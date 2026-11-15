@@ -32,6 +32,30 @@ func inlineAPIDiscovery(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func inlineTargetIDs(t *testing.T, prompt string) []string {
+	t.Helper()
+	_, tail, ok := strings.Cut(prompt, "Target placeholder UUIDs (document order):\n")
+	if !ok {
+		t.Error("missing batch target list")
+		return nil
+	}
+	var ids []string
+	if err := json.NewDecoder(strings.NewReader(tail)).Decode(&ids); err != nil {
+		t.Error(err)
+	}
+	return ids
+}
+
+func inlineTestReply(t *testing.T, w http.ResponseWriter, prompt, paragraph string) {
+	t.Helper()
+	values := make(map[string]string)
+	for _, id := range inlineTargetIDs(t, prompt) {
+		values[id] = paragraph
+	}
+	text, _ := json.Marshal(values)
+	json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"text": string(text)}})
+}
+
 func waitInline(t *testing.T, e *Editor, id string) aiharness.Record {
 	t.Helper()
 	h, _, err := e.inlineProject(e.buffer())
@@ -106,7 +130,7 @@ func TestInlineAIIMAPAcceptUninsertAndVersions(t *testing.T) {
 		if n > 1 {
 			text = "Revised paragraph."
 		}
-		json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"text": text}})
+		inlineTestReply(t, w, body.Prompt, text)
 	}))
 	t.Cleanup(server.Close)
 	e.inlineOptions.server = server.URL
@@ -270,7 +294,12 @@ func testPTYInlineAIAuthentication(t *testing.T, inherited bool) {
 			return
 		}
 		calls.Add(1)
-		json.NewEncoder(w).Encode(map[string]any{"data": map[string]string{"text": "PTY generated paragraph."}})
+		var body struct{ Prompt string }
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			return
+		}
+		inlineTestReply(t, w, body.Prompt, "PTY generated paragraph.")
 	}))
 	defer server.Close()
 	args := []string{"--no-preview"}
