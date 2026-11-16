@@ -7,11 +7,13 @@ make govim
 ./BINARIES/govim paper.tex
 ```
 
-The document can set `%server=`, `%model=`, and `%variant=` (see below).
-`--ai-server` and `--ai-model provider/model[#variant]` override those directives;
-`GOVIM_AI_SERVER` and `GOVIM_AI_MODEL` provide fallbacks when the directives are absent.
+The document can set `%server=`, `%server-ssh=`, `%model=`, and `%variant=` (see below).
+`--ai-server`, `--ai-server-ssh`, and `--ai-model provider/model[#variant]` override
+the corresponding directives; `GOVIM_AI_SERVER`, `GOVIM_AI_SERVER_SSH`, and
+`GOVIM_AI_MODEL` provide fallbacks when the directives are absent.
 Without a selected model, the server's default applies.
-When no server URL is configured, govim discovers the registered local service.
+When neither a server URL nor SSH destination is configured, govim discovers the
+registered local service.
 For a specific server, use `--ai-server http://127.0.0.1:4096` or `%server=`.
 An explicit URL is honored even if the normal service uses another port.
 `--ai-instruction '...'` replaces the built-in paragraph instruction.
@@ -53,6 +55,44 @@ If the normal service has a different port than `%server=`, remove that directiv
 to use automatic discovery, or correct it. After fixing authentication, `:AI`
 explicitly retries failed slots.
 
+### Remote server through SSH
+
+For OpenCode running on a remote machine's loopback interface, add:
+
+```text
+%server-ssh=writer@my-server
+%server=http://127.0.0.1:4096
+```
+
+`%server=` is the address **on the remote machine**. With SSH enabled it defaults
+to `http://127.0.0.1:4096`; change its port to the remote OpenCode listener's port.
+It must use `127.0.0.1`, `localhost`, or `[::1]`. The remote HTTP port can remain
+bound to loopback; only SSH access is needed from your machine.
+
+The equivalent launch options are:
+
+```sh
+./BINARIES/govim --ai-server-ssh writer@my-server --ai-server http://127.0.0.1:4096 paper.tex
+```
+
+`--ai-server-ssh` overrides `%server-ssh=`; `GOVIM_AI_SERVER_SSH` is the fallback
+when both are absent. Server URL and SSH destination have independent precedence:
+flag, then document directive, then environment. The destination accepts
+`[user@]host` or an SSH config alias. Configure custom SSH ports, identity files,
+and jump hosts in `~/.ssh/config`.
+
+Govim starts `ssh -N -L 127.0.0.1:<local-port>:127.0.0.1:<remote-port> …` in the
+background for each AI batch, choosing a free local port. It uses noninteractive
+SSH authentication (keys/agent), so first establish a working ordinary SSH login
+and known-host entry. The tunnel closes when the batch finishes, is cancelled,
+or the editor exits. SSH startup errors appear as AI failures; generation is not
+retried automatically.
+
+If the remote OpenCode server requires authentication, export its
+`OPENCODE_PASSWORD` or one of the Authorization/TUI variables described above in
+govim's launch environment. SSH mode never reads the local OpenCode service
+registration or reuses its password, even when the local and remote ports match.
+
 ## Document directives
 
 Put these optional, whole-line directives in the document, including Markdown:
@@ -73,6 +113,7 @@ Put these optional, whole-line directives in the document, including Markdown:
   directives resolve beside the document, independent of `:cd` or the shell's
   working directory. A missing context file reports an error.
 - `%server=` selects the OpenCode V2 server when `--ai-server` is absent.
+- `%server-ssh=[user@]host` reaches that server through a managed SSH tunnel.
 - `%model=provider/model` selects the generation model; `%variant=NAME` selects
   its variant. `%model=provider/model#variant` also works, with `%variant=` taking
   precedence. A variant needs a model from `%model` or `GOVIM_AI_MODEL`.
@@ -139,7 +180,7 @@ of the same UUID** using fresh inputs. Late results cannot replace a discarded v
 
 `u` undoes acceptance or removal as an ordinary source edit. `:w` saves normally.
 Generation, acceptance, and preview never implicitly save the document. Previews
-hide UUID/bracket bookkeeping and all five AI directives.
+hide UUID/bracket bookkeeping and all AI directives.
 
 ## Preview slot status
 

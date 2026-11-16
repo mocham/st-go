@@ -35,28 +35,28 @@ func TestProjectDirectivesAndBlockProjection(t *testing.T) {
 	root := t.TempDir()
 	document := filepath.Join(root, "paper.tex")
 	t.Chdir(t.TempDir())
-	p, err := Resolve(document, "%project=history/shared.db\n%context=notes.txt\nDocument")
-	if err != nil || p.Database != filepath.Join(root, "history/shared.db") || p.ContextFile != filepath.Join(root, "notes.txt") {
+	p, err := Resolve(document, "%project=history/shared.db\n%context=notes.txt\n%server-ssh=writer@remote\nDocument")
+	if err != nil || p.Database != filepath.Join(root, "history/shared.db") || p.ContextFile != filepath.Join(root, "notes.txt") || p.ServerSSH != "writer@remote" {
 		t.Fatalf("resolution: %+v %v", p, err)
 	}
 	p, err = Resolve(document, "Document")
 	if err != nil || p.Database != document+".db" {
 		t.Fatalf("default: %+v %v", p, err)
 	}
-	for _, text := range []string{"%project=\n", "%context=a\n%context=b", "%project=paper.tex", "%project=x\n%context=x"} {
+	for _, text := range []string{"%project=\n", "%context=a\n%context=b", "%project=paper.tex", "%project=x\n%context=x", "%server-ssh=\n", "%server-ssh=one\n%server-ssh=two"} {
 		if _, err := Resolve(document, text); err == nil {
 			t.Fatalf("accepted %q", text)
 		}
 	}
 	id := UUID()
 	body := `Unicode 文 and \textbf{\emph{nested}} plus \{literal\}.`
-	text := "%project=x.db\n%context=notes.txt\n前文 " + BlockText(id, body) + "\nAfter"
+	text := "%project=x.db\n%context=notes.txt\n%server-ssh=writer@remote\n前文 " + BlockText(id, body) + "\nAfter"
 	b, err := FindBlock(text, id)
 	if err != nil || string([]rune(text)[b.Content:b.Close]) != body {
 		t.Fatalf("block: %+v %v", b, err)
 	}
 	projected := ProjectText(text)
-	if !strings.Contains(projected, body) || strings.Contains(projected, id) || strings.Contains(projected, "%project") || strings.Count(projected, "\n") != strings.Count(text, "\n") {
+	if !strings.Contains(projected, body) || strings.Contains(projected, id) || strings.Contains(projected, "%project") || strings.Contains(projected, "%server-ssh") || strings.Count(projected, "\n") != strings.Count(text, "\n") {
 		t.Fatalf("projection: %s", projected)
 	}
 	if _, err := FindBlock(text+BlockText(id, Slot), id); err == nil {

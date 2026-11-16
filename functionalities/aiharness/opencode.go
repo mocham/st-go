@@ -50,14 +50,18 @@ type OpenCode struct {
 // service when server is empty. A matching local service authenticates using
 // its private registration. authorization overrides this server authentication.
 func NewOpenCode(server, authorization string) (*OpenCode, error) {
-	server, authorization, err := openCodeConnection(server, authorization)
+	server, authorization, err := openCodeConnection(server, authorization, true)
 	if err != nil {
 		return nil, err
 	}
+	return newOpenCode(server, authorization), nil
+}
+
+func newOpenCode(server, authorization string) *OpenCode {
 	return &OpenCode{baseURL: server, authorization: authorization, client: &http.Client{
 		Timeout:       20 * time.Minute,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}, nil
+	}}
 }
 
 const generateTextPath = "/api/experimental/generate/text"

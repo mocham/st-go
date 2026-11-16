@@ -54,6 +54,8 @@ a ready paragraph and refreshes the unsaved preview; `:UnIns` discards it.
 project dictionary and `%context=notes.txt` supplies explicit extra context.
 Use `%server=http://127.0.0.1:4096`, `%model=provider/model`, and `%variant=NAME`
 in the document, or override with `--ai-server` and `--ai-model`.
+For a remote loopback server, add `%server-ssh=user@host` (or `--ai-server-ssh`);
+govim manages an `ssh -N -L` tunnel to the remote `%server=` address.
 The preview footer tracks each slot: gray Initial, yellow Processing, green Ready,
 white Inserted. Removing a UUID from source removes its footer entry.
 

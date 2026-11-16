@@ -3,7 +3,7 @@
 `st-go/aiharness` is a terminal-independent Go module for explicit-context
 paragraph generation. Govim's adapter is `demo-go/govim/inline_ai.go`.
 
-- `Resolve` reads project database, context file, server, model, and variant directives.
+- `Resolve` reads project database, context file, server, SSH destination, model, and variant directives.
 - `Blocks` / `FindBlock` locate UUID anchors using rune offsets.
 - `ProjectText` removes bookkeeping for preview without changing source files.
 - `Open`, `SubmitBatch`, `Latest`, `States`, `RecordAction`, and `Updates` provide a persistent,
@@ -23,6 +23,12 @@ paragraph generation. Govim's adapter is `demo-go/govim/inline_ai.go`.
   servers can use `OPENCODE_PASSWORD`, inherited `OPENCODE_TUI_*` authentication,
   or an explicit Authorization header.
   Provider credentials and subscription OAuth remain owned by OpenCode.
+- `NewOpenCodeSSH(server, "user@host", authorization)` reaches a remote loopback
+  server through `ssh -N -L`. The default remote URL is `http://127.0.0.1:4096`.
+  Each generation owns a loopback-only local forward and reaps its SSH process on
+  completion or cancellation. SSH config aliases, keys and agents are supported;
+  authentication is noninteractive. Remote server authentication uses the same
+  explicit/environment options, without reading the local service registration.
 
 Model calls receive only the assembled instruction, explicit context, and frozen
 current document, plus the target list and JSON output instructions. All paragraphs

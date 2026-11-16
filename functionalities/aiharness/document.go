@@ -20,12 +20,13 @@ type Project struct {
 	Database    string
 	ContextFile string
 	Server      string
+	ServerSSH   string
 	Model       string
 	Variant     string
 }
 
 func projectDirective(key string) bool {
-	return key == "%project" || key == "%context" || key == "%server" || key == "%model" || key == "%variant"
+	return key == "%project" || key == "%context" || key == "%server" || key == "%server-ssh" || key == "%model" || key == "%variant"
 }
 
 // Resolve reads explicit, whole-line directives from the current buffer.
@@ -54,6 +55,9 @@ func Resolve(document, text string) (Project, error) {
 		switch key {
 		case "%server":
 			p.Server = value
+			continue
+		case "%server-ssh":
+			p.ServerSSH = value
 			continue
 		case "%model":
 			p.Model = value

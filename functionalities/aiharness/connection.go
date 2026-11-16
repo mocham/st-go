@@ -71,7 +71,7 @@ func sameLocalServer(a, b *url.URL) bool {
 	return local(a.Hostname()) && local(b.Hostname()) && a.Scheme == b.Scheme && port(a) == port(b) && a.EscapedPath() == b.EscapedPath()
 }
 
-func openCodeConnection(server, authorization string) (string, string, error) {
+func openCodeConnection(server, authorization string, useLocalService bool) (string, string, error) {
 	server = strings.TrimSpace(server)
 	if authorization == "" {
 		authorization = os.Getenv("OPENCODE_TUI_AUTHORIZATION")
@@ -79,7 +79,7 @@ func openCodeConnection(server, authorization string) (string, string, error) {
 	var service serviceRegistration
 	// Explicit authorization is authoritative; a server still needs discovering
 	// when its URL was omitted. Unrelated explicit servers ignore stale records.
-	if server == "" || authorization == "" {
+	if useLocalService && (server == "" || authorization == "") {
 		var err error
 		service, err = localService()
 		if server == "" && err != nil {

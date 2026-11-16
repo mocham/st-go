@@ -35,6 +35,7 @@ func run(args []string) (code int) {
 	readonly := flags.Bool("R", false, "open readonly (explicit :w! can write)")
 	noPreview := flags.Bool("no-preview", false, "disable automatic document preview")
 	aiServer := flags.String("ai-server", "", "OpenCode V2 server (overrides %server and GOVIM_AI_SERVER; default: local service)")
+	aiServerSSH := flags.String("ai-server-ssh", "", "SSH tunnel destination: [user@]host (overrides %server-ssh and GOVIM_AI_SERVER_SSH)")
 	aiModel := flags.String("ai-model", "", "paragraph model: provider/model[#variant] (overrides document and GOVIM_AI_MODEL)")
 	aiInstruction := flags.String("ai-instruction", aiharness.DefaultInstruction, "paragraph generation instruction")
 	flags.BoolVar(&previewOptions.web, "web", false, "send HTML previews to st-web (reserve a blank preview pane on fb/X11)")
@@ -93,7 +94,7 @@ func run(args []string) (code int) {
 		fmt.Fprintln(os.Stderr, "govim:", modelErr)
 		return 2
 	}
-	e.inlineOptions = inlineAIOptions{server: *aiServer, authorization: os.Getenv("GOVIM_AI_AUTHORIZATION"), instruction: *aiInstruction, model: model, envServer: os.Getenv("GOVIM_AI_SERVER"), envModel: os.Getenv("GOVIM_AI_MODEL")}
+	e.inlineOptions = inlineAIOptions{server: *aiServer, serverSSH: *aiServerSSH, authorization: os.Getenv("GOVIM_AI_AUTHORIZATION"), instruction: *aiInstruction, model: model, envServer: os.Getenv("GOVIM_AI_SERVER"), envServerSSH: os.Getenv("GOVIM_AI_SERVER_SSH"), envModel: os.Getenv("GOVIM_AI_MODEL")}
 	e.arguments = append([]string(nil), paths...)
 	var restore func()
 	defer func() {
@@ -379,14 +380,17 @@ Save to refresh; %cursor wins, otherwise follow the cursor saved with :w.
 :Preview [LINE] / :PreviewScroll COUNT navigate manually. --no-preview disables.
 
 BUILT-IN AI: --ai-server URL, --ai-model provider/model[#variant].
+--ai-server-ssh [user@]host tunnels to the remote loopback server with ssh -N -L.
 In Markdown/LaTeX Insert mode, {{{ creates {{{%UUID\n<++>}}} without a request.
 :AI requests all unfilled Initial slots; :AI UUID requests a specific slot.
 Ctrl-J jumps to the next <++>, inserts its ready paragraph, and triggers :toggle!.
 :UnIns [UUID] discards that insertion and restores its slot; :AI regenerates.
 %project=PATH selects a database (default: FILENAME.db); %context=PATH adds text.
 %server=URL, %model=provider/model, %variant=NAME configure requests.
+%server-ssh=[user@]host enables SSH; %server defaults to http://127.0.0.1:4096.
 Explicit flags override directives, then GOVIM_AI_SERVER / GOVIM_AI_MODEL apply.
-Without a server URL, use the normal local OpenCode service and its authentication.
+GOVIM_AI_SERVER_SSH supplies the SSH destination when its flag/directive is absent.
+Without SSH or a server URL, use the normal local OpenCode service and its login.
 Provider subscription login stays in OpenCode; no provider API key is needed here.
 Preview slots: Initial gray / Processing yellow / Ready green / Inserted white.
 Paths are relative to the document. Inputs and UUID versions are stored locally.

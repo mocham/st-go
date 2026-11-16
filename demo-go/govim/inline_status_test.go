@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -168,5 +170,45 @@ func TestInlineExplicitModelAndServerOverrideDirectives(t *testing.T) {
 	r := waitInline(t, e, id)
 	if r.Model.ID != "override" || r.Model.Variant != "small" {
 		t.Fatal("request did not freeze effective model")
+	}
+}
+
+func TestInlineSSHSelectionPrecedence(t *testing.T) {
+	isolateInlineAI(t)
+	dir := t.TempDir()
+	// A failed SSH command identifies the chosen destination without requiring
+	// an SSH server. Generate must report it rather than contacting HTTP directly.
+	script := "#!/bin/sh\nfor arg do destination=\"$arg\"; done\nprintf 'SSH_TARGET=%s\\n' \"$destination\" >&2\nexit 255\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, test := range []struct{ flag, directive, environment, want string }{
+		{"flag-host", "document-host", "env-host", "flag-host"},
+		{"", "document-host", "env-host", "document-host"},
+		{"", "", "env-host", "env-host"},
+	} {
+		t.Run(test.want, func(t *testing.T) {
+			text := "%model=test/paragraph\n"
+			if test.directive != "" {
+				text += "%server-ssh=" + test.directive + "\n"
+			}
+			project, err := aiharness.Resolve(filepath.Join(dir, "paper.md"), text)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := memoryEditor(text)
+			defer e.close(false)
+			e.inlineOptions = inlineAIOptions{serverSSH: test.flag, envServerSSH: test.environment}
+			backend, model, err := e.inlineBackend(project)
+			if err != nil || model == nil || model.ID != "paragraph" {
+				t.Fatalf("SSH backend: %v %+v", err, model)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := backend.Generate(ctx, "test", model); err == nil || !strings.Contains(err.Error(), "SSH_TARGET="+test.want) {
+				t.Fatalf("wrong SSH selection: %v", err)
+			}
+		})
 	}
 }

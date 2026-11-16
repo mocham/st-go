@@ -14,8 +14,9 @@ import (
 
 type inlineAIOptions struct {
 	server, authorization, instruction string
+	serverSSH                          string
 	model                              *aiharness.Model
-	envServer, envModel                string
+	envServer, envServerSSH, envModel  string
 }
 
 type inlineAI struct {
@@ -84,6 +85,13 @@ func (e *Editor) inlineBackend(project aiharness.Project) (aiharness.Generator, 
 	if server == "" {
 		server = e.inlineOptions.envServer
 	}
+	serverSSH := e.inlineOptions.serverSSH
+	if serverSSH == "" {
+		serverSSH = project.ServerSSH
+	}
+	if serverSSH == "" {
+		serverSSH = e.inlineOptions.envServerSSH
+	}
 	model := e.inlineOptions.model
 	if model == nil {
 		value := project.Model
@@ -101,6 +109,10 @@ func (e *Editor) inlineBackend(project aiharness.Project) (aiharness.Generator, 
 			}
 			model.Variant = project.Variant
 		}
+	}
+	if serverSSH != "" {
+		client, err := aiharness.NewOpenCodeSSH(server, serverSSH, e.inlineOptions.authorization)
+		return client, model, err
 	}
 	client, err := aiharness.NewOpenCode(server, e.inlineOptions.authorization)
 	return client, model, err
