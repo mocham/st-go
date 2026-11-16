@@ -32,6 +32,9 @@ func rewriteBraceScripts(source string) string {
 			position = commandEnd
 			continue
 		}
+		if name, next := readTeXCommand(source, skipTeXSpace(source, end)); name == "limits" {
+			end = next
+		}
 		var sub, sup string
 		var hasSub, hasSup bool
 		for {
@@ -55,14 +58,11 @@ func rewriteBraceScripts(source string) string {
 			end = labelEnd
 		}
 		base = `\` + command + `{` + rewriteBraceScripts(base) + `}`
-		switch {
-		case hasSub && hasSup:
+		if hasSub || hasSup {
+			// Unlike the engine's overset/underset macros, this primitive
+			// keeps labels centred even in inline and script styles.
 			output.WriteString(`\overunderset{` + sup + `}{` + sub + `}{` + base + `}`)
-		case hasSub:
-			output.WriteString(`\underset{` + sub + `}{` + base + `}`)
-		case hasSup:
-			output.WriteString(`\overset{` + sup + `}{` + base + `}`)
-		default:
+		} else {
 			output.WriteString(base)
 		}
 		position = end

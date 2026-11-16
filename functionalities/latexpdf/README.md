@@ -10,6 +10,8 @@ selectable. Fonts are embedded and optional faces load on first use.
 - Headings, prose, inline/display math, colors, underline/strike, and Unicode.
 - Nested text/math switching with `\text{...}`, `\mbox{...}`, `$...$`,
   `\(...\)`, and `\begin{math}...\end{math}`, including multiline formulas.
+- Nested `\underbrace`/`\overbrace` with centered text/math labels in inline
+  and display math, and continuous stretched brace outlines in PDFs.
 - Beamer frames (including `\frame{...}`), titles/subtitles, title pages,
   columns, and ordinary/alert/example blocks. Frames flow as padded, bordered
   boxes with gaps between them. PDFs stack frames on normal document pages,

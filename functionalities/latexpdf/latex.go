@@ -1711,7 +1711,9 @@ func (context *latexRenderContext) renderMath(expression string, display bool) s
 	expanded = rewriteMathStrikes(expanded)
 	expanded = rewriteMathColors(expanded, context.colors)
 	diagnosticExpression := expanded
-	keyBytes := sha256.Sum256([]byte(fmt.Sprintf("%t\x00%s", display, expanded)))
+	// Cached wrappers retain data-tex (and error fallbacks) from the original
+	// expression, even when different source spellings normalize identically.
+	keyBytes := sha256.Sum256([]byte(fmt.Sprintf("%t\x00%s\x00%s", display, expression, expanded)))
 	key := hex.EncodeToString(keyBytes[:])
 	if cached, ok := context.renderer.formulae.Load(key); ok {
 		formula := cached
@@ -2642,7 +2644,8 @@ func normalizeMathForEngineProtected(source string, protected map[string]bool) s
 	// single script token preserves TeX semantics and avoids a false double-
 	// subscript error without changing the archived source. Its frozen parser
 	// also treats a label attached directly to an under/overbrace as a second
-	// script; expressing that label with \underset/\overset is equivalent.
+	// script; stack labels around the complete brace with \overunderset.
+	source = rewriteMathText(source)
 	source = normalizeXYMatrices(source)
 	source = tableRulePattern.ReplaceAllString(source, "")
 	source = normalizeNestedAligned(source)
