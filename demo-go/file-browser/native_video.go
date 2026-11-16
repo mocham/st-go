@@ -58,8 +58,7 @@ func runNativeVideoHelper(path string) int {
 	return 0
 }
 
-// Volume is an mpv option only. Do not change global ALSA controls or the
-// MP3 open/send path while preparing a different player.
+// Initial player volume is independent of global ALSA controls.
 func playbackVolume(value string) (int, error) {
 	if value == "" {
 		return 33, nil

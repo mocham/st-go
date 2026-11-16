@@ -51,7 +51,7 @@ func openScanout(device string, connector uint32) (scanout, error) {
 func (d *nativeScanout) back() ([]uint32, int, int, int, error) {
 	var w, h, stride, code C.int
 	p := C.gov_drm_back(d.handle, &w, &h, &stride, &code)
-	if err := drmError("retire page flip", code); err != nil {
+	if err := drmError("render buffer", code); err != nil {
 		return nil, 0, 0, 0, err
 	}
 	return unsafe.Slice((*uint32)(unsafe.Pointer(p)), int(stride)*int(h)), int(w), int(h), int(stride), nil

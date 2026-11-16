@@ -79,6 +79,7 @@ func TestInputFragmentationAndBounds(t *testing.T) {
 
 type fakeScanout struct {
 	buffers          [2][]uint32
+	shadow           []uint32
 	front, flips     int
 	events           []string
 	flipErr          error
@@ -87,7 +88,7 @@ type fakeScanout struct {
 }
 
 func newFakeScanout() *fakeScanout {
-	d := &fakeScanout{}
+	d := &fakeScanout{shadow: make([]uint32, 336*180+16)}
 	for i := range d.buffers {
 		d.buffers[i] = make([]uint32, 336*180+16)
 		for j := range d.buffers[i] {
@@ -97,7 +98,7 @@ func newFakeScanout() *fakeScanout {
 	return d
 }
 func (d *fakeScanout) back() ([]uint32, int, int, int, error) {
-	return d.buffers[1-d.front][:336*180], 320, 180, 336, d.backErr
+	return d.shadow[:336*180], 320, 180, 336, d.backErr
 }
 func (d *fakeScanout) flip() error {
 	if d.started != nil {
@@ -106,6 +107,9 @@ func (d *fakeScanout) flip() error {
 	}
 	if d.flipErr != nil {
 		return d.flipErr
+	}
+	for y := range 180 {
+		copy(d.buffers[1-d.front][y*336:y*336+320], d.shadow[y*336:y*336+320])
 	}
 	d.flips++
 	d.front = 1 - d.front
@@ -116,15 +120,15 @@ func (d *fakeScanout) suspend() error { d.events = append(d.events, "suspend"); 
 func (d *fakeScanout) resume() error  { d.events = append(d.events, "resume"); return nil }
 func (d *fakeScanout) close() error   { d.events = append(d.events, "close"); return nil }
 
-func TestDirectBufferOwnershipAndVTSerialization(t *testing.T) {
+func TestShadowBufferOwnershipAndVTSerialization(t *testing.T) {
 	native := newFakeScanout()
 	native.started, native.release = make(chan struct{}), make(chan struct{})
 	d := &display{device: native, active: true}
 	painted := make(chan error, 1)
 	go func() {
 		painted <- d.Present(func(p []uint32, w, h, stride int) error {
-			if &p[0] != &native.buffers[1][topHeight*336] || w != 320 || h != 120 || stride != 336 {
-				return errors.New("renderer did not receive the pitched scanout buffer")
+			if &p[0] != &native.shadow[topHeight*336] || w != 320 || h != 120 || stride != 336 {
+				return errors.New("renderer did not receive the cacheable RAM buffer")
 			}
 			for y := range h {
 				for x := range w {
@@ -135,6 +139,13 @@ func TestDirectBufferOwnershipAndVTSerialization(t *testing.T) {
 		}, api.VideoStatus{State: "playing", Speed: 1, DurationMS: 2000, PositionMS: 1000})
 	}()
 	<-native.started
+	for _, pixels := range native.buffers {
+		for _, pixel := range pixels {
+			if pixel != 0xdeadbeef {
+				t.Fatal("rendering touched scanout before upload")
+			}
+		}
+	}
 	suspended := make(chan error, 1)
 	go func() { suspended <- d.suspend() }()
 	close(native.release)
@@ -186,10 +197,10 @@ func TestFailedRenderingDoesNotSubmitFrame(t *testing.T) {
 	}
 	native.backErr = failure
 	if err := d.Present(func([]uint32, int, int, int) error {
-		t.Fatal("rendered into an unretired buffer")
+		t.Fatal("rendered after buffer acquisition failed")
 		return nil
 	}, api.VideoStatus{}); !errors.Is(err, failure) {
-		t.Fatal("lost flip completion error", err)
+		t.Fatal("lost buffer acquisition error", err)
 	}
 	native.backErr = nil
 	native.flipErr = failure

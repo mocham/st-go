@@ -3,9 +3,31 @@ package main
 import "st-go/platform_neutral/api"
 
 type controls struct {
-	volume int
-	muted  bool
-	speed  float64
+	volume  int
+	muted   bool
+	speed   float64
+	pending []api.VideoRequest
+}
+
+func (c *controls) queue(r api.VideoRequest) {
+	if r.Action == "" {
+		return
+	}
+	// Keep only the latest absolute adjustment, but preserve pause transitions.
+	if r.Action != "toggle" {
+		for i := len(c.pending) - 1; i >= 0; i-- {
+			if c.pending[i].Action == "toggle" {
+				break
+			}
+			if c.pending[i].Action == r.Action {
+				c.pending[i] = r
+				return
+			}
+		}
+	}
+	if len(c.pending) < 64 {
+		c.pending = append(c.pending, r)
+	}
 }
 
 // Keep adjustments cumulative even while the decoder is applying earlier keys.

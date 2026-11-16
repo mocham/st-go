@@ -61,7 +61,7 @@ Put `BINARIES/` on `PATH` to enable built-in tools:
 - PDF: **zat**; DjVu: **zat-djvu**.
 - Text/source/configuration: **govim**, with `--web` on web hosts.
 
-Framebuffer videos use **gov** in the same terminal; `q` returns to the browser.
+Framebuffer videos use **gov2** through st-fb's real-TTY handoff; `q` returns to the browser.
 
 The Go browser opens these in focused terminal tabs when supported. Otherwise
 it runs them in the same terminal and restores the browser on exit.
@@ -99,16 +99,20 @@ The Go browser reads MP3 metadata locally and requests playback from st-go;
 
 ### Framebuffer video
 
-In the Go browser, **Enter**, **o**, or **double-click** opens videos in
-[`gov`](../gov/README.md). Build `make st-fb gov file-browser` and put `BINARIES/`
-on `PATH`. Playback requires the full `st-fb`; gov supports MP4/MOV containers
+In both Go and Bash browsers, **Enter**, **o**, or **double-click** opens videos in
+[`gov2`](../gov2/README.md). Build `make st-fb gov2 file-browser` and put `BINARIES/`
+on `PATH`. Keep `gov2` beside `st-fb` (or `st-fb-min`) for the authenticated real-TTY
+handoff. It supports MP4/MOV containers
 with H.264, HEVC, or MPEG-4 video, and AAC/MP3 audio.
 
-Use `[` / `]` for speed, `-` / `+` for volume, and click the progress bar to seek.
+Use `[` / `]` for speed, `-` / `+` for volume, or click/tap the status-bar controls.
+Click or drag the progress bar to seek; mouse wheels and two-finger scrolling
+adjust the timeline, speed, or volume under the cursor.
 `q` returns to the same browser selection. `ST_FILE_BROWSER_VOLUME=0..100` sets
-the initial player volume (default 33). Audio uses st-fb's direct ALSA output;
-screenshots, recording, and terminal controls remain available during playback.
+the initial player volume (default 33). gov2 owns the real VT, DRM output, and
+direct ALSA audio until it exits. The host then restores its display and input.
 Matching custom openers take precedence. X11/web have no default video player.
+The original composited player remains available as `gov movie.mp4`.
 
 ## Build and test
 

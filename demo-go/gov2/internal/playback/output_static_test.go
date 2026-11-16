@@ -1,6 +1,6 @@
 //go:build linux && ffmpeg_static && cgo && !purego
 
-package video
+package playback
 
 import (
 	"context"

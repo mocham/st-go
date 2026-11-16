@@ -69,6 +69,7 @@ type pdfFormulaPath struct {
 	dash        []float64
 	fillPaint   pdfFormulaPaint
 	strokePaint pdfFormulaPaint
+	clips       []pdfFormulaClip
 }
 
 type pdfFormulaText struct {
@@ -76,6 +77,7 @@ type pdfFormulaText struct {
 	x, y     float64
 	fontSize float64
 	paint    pdfFormulaPaint
+	clips    []pdfFormulaClip
 }
 
 type pdfFormulaPaint struct {
@@ -1189,6 +1191,7 @@ func (layout *pdfDocumentLayout) drawFormula(formula *pdfFormula, x, y, width fl
 		return origin + value*scale
 	}
 	for _, path := range formula.paths {
+		layout.clipFormula(path.clips, originX, originY, scale)
 		drawn := false
 		for _, segment := range path.Segments {
 			switch segment.Cmd {
@@ -1248,6 +1251,9 @@ func (layout *pdfDocumentLayout) drawFormula(formula *pdfFormula, x, y, width fl
 				layout.pdf.DrawPath(style)
 			}
 		}
+		for range path.clips {
+			layout.pdf.ClipEnd()
+		}
 	}
 	layout.pdf.SetDashPattern(nil, 0)
 	for _, text := range formula.texts {
@@ -1260,7 +1266,11 @@ func (layout *pdfDocumentLayout) drawFormula(formula *pdfFormula, x, y, width fl
 			color = currentColor
 		}
 		layout.setStyle(pdfTextStyle{size: fontSize, red: color.red, green: color.green, blue: color.blue}, text.text)
+		layout.clipFormula(text.clips, originX, originY, scale)
 		layout.pdf.Text(coordinate(text.x, originX), coordinate(text.y, originY), text.text)
+		for range text.clips {
+			layout.pdf.ClipEnd()
+		}
 	}
 }
 
@@ -1459,6 +1469,10 @@ func initialSVGPaintStyle() svgPaintStyle {
 }
 
 func collectSVGPaths(node *html.Node, parent svgAffine, inherited svgPaintStyle, formula *pdfFormula) error {
+	return collectSVGPathsClipped(node, parent, inherited, formula, nil, true)
+}
+
+func collectSVGPathsClipped(node *html.Node, parent svgAffine, inherited svgPaintStyle, formula *pdfFormula, clips []pdfFormulaClip, root bool) error {
 	if node.Type != html.ElementNode {
 		return nil
 	}
@@ -1469,6 +1483,17 @@ func collectSVGPaths(node *html.Node, parent svgAffine, inherited svgPaintStyle,
 			return err
 		}
 		matrix = parent.multiply(local)
+	}
+	if node.Data == "svg" && !root {
+		viewport, clip, visible := svgNestedViewport(node, matrix)
+		if !visible {
+			return nil
+		}
+		matrix = viewport
+		if clip != nil {
+			// Descendants may append clips, but must not overwrite siblings'.
+			clips = append(clips[:len(clips):len(clips)], *clip)
+		}
 	}
 	paintStyle := svgPaintStyleForNode(node, inherited)
 	switch node.Data {
@@ -1493,6 +1518,7 @@ func collectSVGPaths(node *html.Node, parent svgAffine, inherited svgPaintStyle,
 				dash:         svgDashArray(node, matrix),
 				fillPaint:    fillPaint,
 				strokePaint:  strokePaint,
+				clips:        clips,
 			})
 		}
 	case "rect":
@@ -1535,6 +1561,7 @@ func collectSVGPaths(node *html.Node, parent svgAffine, inherited svgPaintStyle,
 				strokeWidth:  strokeWidth * math.Hypot(matrix.a, matrix.b),
 				fillPaint:    fillPaint,
 				strokePaint:  strokePaint,
+				clips:        clips,
 			})
 		}
 	case "line":
@@ -1558,6 +1585,7 @@ func collectSVGPaths(node *html.Node, parent svgAffine, inherited svgPaintStyle,
 				strokeWidth: strokeWidth * math.Hypot(matrix.a, matrix.b),
 				dash:        svgDashArray(node, matrix),
 				strokePaint: strokePaint,
+				clips:       clips,
 			})
 		}
 	case "text":
@@ -1572,12 +1600,12 @@ func collectSVGPaths(node *html.Node, parent svgAffine, inherited svgPaintStyle,
 			// its vertical basis length so scripts retain their MathJax size.
 			fontSize *= math.Hypot(matrix.c, matrix.d)
 			formula.texts = append(formula.texts, pdfFormulaText{
-				text: text, x: x, y: y, fontSize: fontSize, paint: paintStyle.fill,
+				text: text, x: x, y: y, fontSize: fontSize, paint: paintStyle.fill, clips: clips,
 			})
 		}
 	}
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		if err := collectSVGPaths(child, matrix, paintStyle, formula); err != nil {
+		if err := collectSVGPathsClipped(child, matrix, paintStyle, formula, clips, false); err != nil {
 			return err
 		}
 	}

@@ -65,7 +65,7 @@ These tools use this terminal; exiting returns to the browser. Otherwise the
 external fallbacks are used on X11 only. Matching explicit openers take precedence.
 ST_FILE_BROWSER_OPEN_X11, _FB, _WEB, or _ALL register environment openers.
 Legacy ST_FILE_BROWSER_OPEN is X11-only. ST_GO_BACKEND identifies the terminal.
-Framebuffer video uses mpv --vo=drm with --audio-device=alsa/plughw:1,0 by default.
+Framebuffer video uses gov2 through st-fb's real-TTY handoff by default.
 There is no default X11/web video player; matching custom openers still override.
 
 Keys: arrows navigate, Enter opens/enters, Backspace goes up, PgUp/PgDn
@@ -885,14 +885,18 @@ open_path() {
 		if ((!CUSTOM_OPEN)); then
 			if is_video_file "$path"; then
 				if [[ $BACKEND == fb ]]; then
-					if executable=$(type -P -- mpv) && [[ -x $executable && ! -d $executable ]]; then
-						if native_video_helper; then
-							run_terminal_tool "$REPLY" "$path" --native-video
+					if executable=$(type -P -- gov2) && [[ -x $executable && ! -d $executable ]]; then
+						local volume=${ST_FILE_BROWSER_VOLUME:-33}
+						if [[ -z ${ST_GO_NATIVE_VIDEO_TOKEN:-} ]]; then
+							STATUS='Restart st-fb for video playback'
+						elif [[ ! $volume =~ ^[0-9]{1,3}$ ]] || ((10#$volume > 100)); then
+							STATUS='ST_FILE_BROWSER_VOLUME must be 0..100'
+						else
+							run_terminal_tool "$executable" "$path" -volume "$((10#$volume))"
 							return
 						fi
-						STATUS='Native video helper unavailable'
 					else
-						STATUS='mpv not found'
+						STATUS='gov2 not found'
 					fi
 				else
 					STATUS="No video player for $BACKEND"
@@ -934,11 +938,6 @@ is_video_file() {
 	[[ $mime == video/* ]]
 }
 
-native_video_helper() {
-	[[ ${ST_GO_NATIVE_VIDEO:-} == 1 && -n ${ST_GO_NATIVE_VIDEO_TOKEN:-} ]] || return 1
-	browser_helper
-}
-
 browser_helper() {
 	local beside=${ST_GO_EXECUTABLE:-}
 	if [[ $beside == */* ]]; then
@@ -952,7 +951,6 @@ run_terminal_tool() {
 	local executable=$1 path=$2 mode result selected= i
 	shift 2
 	local label=${executable##*/}
-	[[ ${1:-} != --native-video ]] || label=mpv
 	((IDX >= 0)) && selected=${FILES[$IDX]}
 	# Resolve relative PATH entries before changing the child's directory.
 	[[ $executable == /* ]] || executable=$PWD/$executable
@@ -1486,10 +1484,9 @@ HINTS
   fallbacks are X11-only. Register custom code with --open-for PLATFORM CODE
   or ST_FILE_BROWSER_OPEN_X11 / _FB / _WEB / _ALL. Matching empty values
   disable opening. Legacy --open and ST_FILE_BROWSER_OPEN are X11-only.
-  Framebuffer videos hand the real VT to mpv --vo=drm via the native helper.
-  Video defaults to alsa/plughw:1,0; ALSA_PCM_CARD / ALSA_PCM_DEVICE
-  override video. ST_FILE_BROWSER_VOLUME sets mpv's volume (default 33, 0..100).
-  MP3's working PCM output/config and global mixer levels are left unchanged.
+  Framebuffer videos hand the real VT to gov2 for direct DRM playback.
+  ST_FILE_BROWSER_VOLUME sets the player volume (default 33, 0..100).
+  Click/tap the player's controls or drag the timeline; q returns here.
   X11/web have no default video player. Custom platform handlers still win.
   Double-clicking an externally opened file collapses the terminal
   to a bottom strip; clicking the strip restores it. Filenames are sanitized before

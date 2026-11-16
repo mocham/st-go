@@ -12,7 +12,7 @@ clipboard, and tabs. Each is a separate Go module; builds go to `BINARIES/`.
 | [zat-djvu](zat-djvu/README.md) | DjVu viewer with outline, text, and search |
 | [goiv](goiv/README.md) | Image fit, zoom, pan, and sibling navigation |
 | [gov](gov/README.md) | MP4 playback through st-fb's bundled decoder; pause, seek, and audio controls |
-| [gov2](gov2/README.md) | Experimental fullscreen DRM/KMS variant with its own bundled decoder |
+| [gov2](gov2/README.md) | Default framebuffer video launcher; standalone DRM/KMS playback and mouse/touchpad controls |
 | [gols](gols/README.md) | Read-only SQLite corpus browser |
 
 ```sh

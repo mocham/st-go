@@ -23,6 +23,8 @@ struct gov_drm {
     drmModeCrtc *saved;
     uint32_t *connectors;
     int connector_count;
+    void *shadow;
+    int shadow_stride;
     struct buffer buffers[2];
 };
 
@@ -72,15 +74,14 @@ out:
 }
 
 static int create_buffer(gov_drm *d, struct buffer *b) {
-    /* Extra row supplies padding for vectorized swscale stores at the end. */
     struct drm_mode_create_dumb create = { .width = d->saved->mode.hdisplay,
-        .height = d->saved->mode.vdisplay + 1, .bpp = 32 };
+        .height = d->saved->mode.vdisplay, .bpp = 32 };
     if (drmIoctl(d->fd, DRM_IOCTL_MODE_CREATE_DUMB, &create)) return failure();
     b->handle = create.handle; b->pitch = create.pitch; b->size = create.size;
     if (b->pitch % 4 || b->pitch < create.width * 4 || b->size < (uint64_t)b->pitch * create.height ||
         b->size > 128ULL * 1024 * 1024) return -EINVAL;
     uint32_t handles[4] = {b->handle}, pitches[4] = {b->pitch}, offsets[4] = {0};
-    if (drmModeAddFB2(d->fd, create.width, create.height - 1, DRM_FORMAT_XRGB8888,
+    if (drmModeAddFB2(d->fd, create.width, create.height, DRM_FORMAT_XRGB8888,
                       handles, pitches, offsets, &b->fb, 0)) return failure();
     struct drm_mode_map_dumb map = { .handle = b->handle };
     if (drmIoctl(d->fd, DRM_IOCTL_MODE_MAP_DUMB, &map)) return failure();
@@ -129,6 +130,15 @@ gov_drm *gov_drm_open(const char *path, uint32_t connector, int *error) {
     if (drmSetMaster(d->fd)) { *error = failure(); goto bad; }
     d->active = 1;
     if ((*error = select_output(d, connector)) < 0) goto bad;
+    /* Dumb-buffer mappings can be uncached/write-combined. Scaling and OSD
+       blending in them turns otherwise cheap CPU work into slow device-memory
+       accesses. Keep all rendering in cacheable, aligned RAM; scanout receives
+       only a sequential write-only upload. An extra row pads SIMD stores. */
+    d->shadow_stride = (d->saved->mode.hdisplay + 15) & ~15;
+    size_t shadow_size = (size_t)d->shadow_stride * (d->saved->mode.vdisplay + 1) * 4;
+    int allocation = posix_memalign(&d->shadow, 64, shadow_size);
+    if (allocation) { *error = -allocation; goto bad; }
+    memset(d->shadow, 0, shadow_size);
     for (int i = 0; i < 2; i++) if ((*error = create_buffer(d, &d->buffers[i])) < 0) goto bad;
     if ((*error = gov_drm_resume(d)) < 0) goto bad;
     return d;
@@ -138,18 +148,27 @@ bad:
 }
 
 uint32_t *gov_drm_back(gov_drm *d, int *width, int *height, int *stride, int *error) {
-    /* Retire the previous flip before reusing its old front buffer. Waiting
-       here lets decode/audio proceed while scanout completes asynchronously. */
-    if ((*error = wait_flip(d)) < 0) return NULL;
+    *error = 0;
+    if (!d->active) { *error = -EACCES; return NULL; }
+    /* This RAM buffer is independent of both scanout buffers, so the CPU can
+       prepare the next picture even while the previous flip is pending. */
     *width = d->saved->mode.hdisplay; *height = d->saved->mode.vdisplay;
-    struct buffer *b = &d->buffers[1-d->front];
-    *stride = b->pitch / 4;
-    return b->map;
+    *stride = d->shadow_stride;
+    return d->shadow;
 }
 int gov_drm_flip(gov_drm *d) {
-    if (!d->active || d->pending) return -EBUSY;
+    if (!d->active) return -EBUSY;
+    /* Wait only when the completed RAM frame is ready to upload. Never write
+       the visible buffer or a buffer whose page flip has not retired. */
+    int error = wait_flip(d);
+    if (error) return error;
     d->queued = 1-d->front;
-    if (drmModePageFlip(d->fd, d->saved->crtc_id, d->buffers[d->queued].fb, DRM_MODE_PAGE_FLIP_EVENT, d)) return failure();
+    struct buffer *b = &d->buffers[d->queued];
+    size_t row_bytes = (size_t)d->saved->mode.hdisplay * 4;
+    for (int y = 0; y < d->saved->mode.vdisplay; y++)
+        memcpy((uint8_t *)b->map + (size_t)y * b->pitch,
+               (uint8_t *)d->shadow + (size_t)y * d->shadow_stride * 4, row_bytes);
+    if (drmModePageFlip(d->fd, d->saved->crtc_id, b->fb, DRM_MODE_PAGE_FLIP_EVENT, d)) return failure();
     d->pending = 1;
     return 0;
 }
@@ -195,6 +214,7 @@ int gov_drm_close(gov_drm *d) {
     if (d->active) drmDropMaster(d->fd);
     if (d->fd >= 0) close(d->fd);
     if (d->saved) drmModeFreeCrtc(d->saved);
+    free(d->shadow);
     free(d->connectors);
     free(d);
     return error;

@@ -28,193 +28,139 @@ func TestVideoClassification(t *testing.T) {
 	}
 }
 
-func TestFramebufferVideoPlayerPTY(t *testing.T) {
+func TestLegacyNativeVideoHelperPTY(t *testing.T) {
+	// The explicit mpv helper remains available, independently of the default.
+	for _, failed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "done", true: "failed"}[failed], func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "movie ';--.MKV")
+			writeFiles(t, dir, filepath.Base(path))
+			config := filepath.Join(dir, "alsa.conf")
+			if err := os.WriteFile(config, alsaConfData, 0600); err != nil {
+				t.Fatal(err)
+			}
+			token := "00112233445566778899aabbccddeeff"
+			env := testEnv("ST_GO_BACKEND=fb", "ST_GO_NATIVE_VIDEO=1", "ST_GO_NATIVE_VIDEO_TOKEN="+token, "ST_FILE_BROWSER_VOLUME=33", "ALSA_CONFIG_PATH="+config)
+			for _, key := range []string{"ST_FILE_BROWSER_ALSA_DEVICE", "ALSA_CARD", "ALSA_PCM_CARD", "ALSA_PCM_DEVICE"} {
+				env = envWithout(env, key)
+			}
+			f := startBrowserCommand(t, env, browserBin, "--native-video", path)
+			var id string
+			var request api.NativeVideoRequest
+			waitFor(t, f, func() bool {
+				out := f.output()
+				start := strings.Index(out, "\x1bPnative-video auth ")
+				if start < 0 {
+					return false
+				}
+				end := strings.Index(out[start:], "\x1b\\")
+				if end < 0 {
+					return false
+				}
+				fields := strings.Fields(out[start+2 : start+end])
+				if len(fields) != 5 || fields[2] != token {
+					t.Fatal("invalid handoff", fields)
+				}
+				id = fields[3]
+				data, err := base64.RawStdEncoding.DecodeString(fields[4])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(data, &request); err != nil {
+					t.Fatal(err)
+				}
+				return true
+			}, "authenticated legacy handoff")
+			if request.File != path || request.AudioDevice != "alsa/plughw:1,0" || request.Volume != 33 || request.ALSAConfig != config {
+				t.Fatal(request)
+			}
+			data, err := os.ReadFile(request.ALSAConfig)
+			if err != nil || !bytes.Equal(data, alsaConfData) {
+				t.Fatal("lost supplied ALSA config", err)
+			}
+			f.send("\x1bPnative-video " + id + " accepted\x1b\\")
+			if failed {
+				f.send("\x1bPnative-video " + id + " error " + base64.RawStdEncoding.EncodeToString([]byte("synthetic player failure")) + "\x1b\\")
+				waitContains(t, f, "synthetic player failure", "helper reports failure")
+			} else {
+				f.send("\x1bPnative-video " + id + " done\x1b\\")
+			}
+		})
+	}
+}
+
+func TestGov2VideoOpenerPTY(t *testing.T) {
 	for implementation, program := range documentBrowserCommands(t) {
-		// The Bash browser still uses the legacy helper; the Go browser's
-		// composited gov route is exercised separately below.
-		if implementation != "bash" {
-			continue
-		}
 		for _, backend := range []string{"fb", "x11", "web"} {
-			for _, mode := range []string{"default", "missing", "custom", "failed"} {
-				if mode == "failed" && backend != "fb" {
+			for _, mode := range []string{"enter", "open", "double", "missing", "custom", "failed"} {
+				if backend != "fb" && (mode == "open" || mode == "double" || mode == "failed") {
 					continue
 				}
 				t.Run(implementation+"/"+backend+"/"+mode, func(t *testing.T) {
 					dir, tools := t.TempDir(), documentToolTestPath(t)
-					name := "movie ';--.MKV"
+					name := "movie ';--.MP4"
 					writeFiles(t, dir, name)
 					marker := filepath.Join(tools, "args")
-					providedConfig := filepath.Join(tools, "provided-alsa.conf")
-					configData := append(append([]byte(nil), alsaConfData...), []byte("\n# working inherited configuration\n")...)
-					if err := os.WriteFile(providedConfig, configData, 0600); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.Symlink(browserBin, filepath.Join(tools, "file-browser")); err != nil {
-						t.Fatal(err)
-					}
 					if mode != "missing" {
-						writeDocumentTool(t, tools, "mpv", `printf 'FORBIDDEN_PTY_MPV' > "$MARKER"`)
+						writeDocumentTool(t, tools, "gov2", `
+[[ -t 0 && -t 1 && -t 2 ]] || exit 81
+printf '%s|%s|%s|%s|%s' "$#" "$1" "$2" "$3" "$PWD" > "$MARKER"
+stty -echo -icanon min 1 time 0
+printf 'GOV2_READY'
+IFS= read -rsn1 key
+[[ $key == q ]] || exit 82
+exit "${TOOL_EXIT:-0}"
+`)
 					}
-					for _, desktop := range []string{"bar", "xdg-open", "st"} {
-						writeDocumentTool(t, tools, desktop, `printf 'FORBIDDEN_DESKTOP_FALLBACK' > "$MARKER"`)
+					for _, other := range []string{"gov", "mpv", "bar", "xdg-open", "st"} {
+						writeDocumentTool(t, tools, other, `printf 'WRONG_PLAYER' > "$MARKER"`)
 					}
-					token := "00112233445566778899aabbccddeeff"
-					env := envWithout(testEnv("PATH="+tools, "MARKER="+marker, "ST_GO_EXECUTABLE="+filepath.Join(tools, "st-fb"),
-						"ST_GO_BACKEND="+backend, "ST_GO_NATIVE_VIDEO=1", "ST_GO_NATIVE_VIDEO_TOKEN="+token,
-						"ST_FILE_BROWSER_VOLUME=33", "ALSA_CONFIG_PATH="+providedConfig), "ST_FILE_BROWSER_OPEN")
-					for _, key := range []string{"ST_FILE_BROWSER_ALSA_DEVICE", "ALSA_CARD", "ALSA_PCM_CARD", "ALSA_PCM_DEVICE"} {
-						env = envWithout(env, key)
-					}
+					env := envWithout(testEnv("PATH="+tools, "MARKER="+marker, "ST_GO_BACKEND="+backend, "ST_GO_NATIVE_VIDEO_TOKEN=secret", "ST_FILE_BROWSER_VOLUME=75"), "ST_FILE_BROWSER_OPEN")
 					args := append([]string{}, program...)
 					if mode == "custom" {
 						args = append(args, "--open-for", backend, `printf 'custom' > "$MARKER"`)
 					}
+					if mode == "failed" {
+						env = append(env, "TOOL_EXIT=7")
+					}
 					f := startBrowserCommand(t, env, append(args, dir)...)
-					before := len(f.output())
-					f.send("\x1b[<0;60;9M\x1b[<0;60;9M")
+					if mode == "double" {
+						f.send("\x1b[<0;60;9M\x1b[<0;60;9M")
+					} else if mode == "open" {
+						f.send("\x1b[Bo")
+					} else {
+						f.send("\x1b[B\r")
+					}
 					if mode == "custom" {
 						waitFileContent(t, marker, "custom")
-						if strings.Contains(f.output(), "native-video auth") {
-							t.Fatal("mpv overrode explicit platform registration")
-						}
 						return
 					}
 					if backend != "fb" || mode == "missing" {
 						message := "No video"
 						if backend == "fb" {
-							message = "mpv not found"
+							message = "gov2 not found"
 						}
-						waitContains(t, f, message, "no default video player/fallback")
+						waitContains(t, f, message, "video opener availability")
 						if _, err := os.Stat(marker); !os.IsNotExist(err) {
-							t.Fatal("non-framebuffer/missing video player launched an opener")
+							t.Fatal("unexpected fallback player")
 						}
 						return
 					}
-					var id string
-					var request api.NativeVideoRequest
-					waitFor(t, f, func() bool {
-						out := f.output()[before:]
-						start := strings.Index(out, "\x1bPnative-video auth ")
-						if start < 0 {
-							return false
-						}
-						end := strings.Index(out[start:], "\x1b\\")
-						if end < 0 {
-							return false
-						}
-						fields := strings.Fields(out[start+2 : start+end])
-						if len(fields) != 5 || fields[2] != token {
-							t.Fatal("invalid native handoff frame", fields)
-						}
-						id = fields[3]
-						data, err := base64.RawStdEncoding.DecodeString(fields[4])
-						if err != nil {
-							t.Fatal(err)
-						}
-						if err := json.Unmarshal(data, &request); err != nil {
-							t.Fatal(err)
-						}
-						return true
-					}, "authenticated native VT handoff")
-					if request.File != filepath.Join(dir, name) || request.AudioDevice != "alsa/plughw:1,0" || request.Volume != 33 || request.ALSAConfig != providedConfig {
-						t.Fatal("incorrect media/audio selection", request)
-					}
-					data, err := os.ReadFile(request.ALSAConfig)
-					if err != nil || !bytes.Equal(data, configData) {
-						t.Fatal("mpv did not receive the supplied ALSA config", err)
-					}
-					if strings.Contains(f.output()[before:], "place bottom-left") {
-						t.Fatal("foreground DRM video collapsed the terminal")
-					}
-					if _, err := os.Stat(marker); !os.IsNotExist(err) {
-						t.Fatal("client launched mpv on a PTY")
-					}
-					f.send("\x1bPnative-video " + id + " accepted\x1b\\")
-					if strings.Contains(f.output()[before:], "region reset") {
-						t.Fatal("browser resumed before native player finished")
-					}
+					waitFileContent(t, marker, "3|-volume|75|"+filepath.Join(dir, name)+"|"+dir)
+					waitContains(t, f, "GOV2_READY", "gov2 client owns the PTY")
+					f.send("q")
+					result := "gov2 finished"
 					if mode == "failed" {
-						f.send("\x1bPnative-video " + id + " error " + base64.RawStdEncoding.EncodeToString([]byte("synthetic player failure")) + "\x1b\\")
-					} else {
-						f.send("\x1bPnative-video " + id + " done\x1b\\")
+						result = "gov2: exit" // The status line quotes/truncates the error.
+						if implementation == "bash" {
+							result = "gov2 exited"
+						}
 					}
-					waitContains(t, f, "region reset", "browser restoration after mpv exit/failure")
+					waitContains(t, f, result, "browser restored after gov2")
 					f.send("r")
-					waitContains(t, f, "Refreshed", "browser input restored after mpv")
+					waitContains(t, f, "Refreshed", "browser input restored")
 				})
 			}
-		}
-	}
-}
-
-func TestGovVideoOpenerPTY(t *testing.T) {
-	for _, backend := range []string{"fb", "x11", "web"} {
-		for _, mode := range []string{"enter", "open", "double", "missing", "custom", "failed"} {
-			if backend != "fb" && (mode == "open" || mode == "double" || mode == "failed") {
-				continue
-			}
-			t.Run(backend+"/"+mode, func(t *testing.T) {
-				dir, tools := t.TempDir(), documentToolTestPath(t)
-				name := "movie ';--.MP4"
-				writeFiles(t, dir, name)
-				marker := filepath.Join(tools, "args")
-				if mode != "missing" {
-					writeDocumentTool(t, tools, "gov", `
-[[ -t 0 && -t 1 && -t 2 ]] || exit 81
-printf '%s|%s|%s|%s|%s' "$#" "$1" "$2" "$3" "$PWD" > "$MARKER"
-stty -echo -icanon min 1 time 0
-printf 'GOV_READY'
-IFS= read -rsn1 key
-[[ $key == q ]] || exit 82
-exit "${TOOL_EXIT:-0}"
-`)
-				}
-				for _, other := range []string{"mpv", "bar", "xdg-open", "st"} {
-					writeDocumentTool(t, tools, other, `printf 'WRONG_PLAYER' > "$MARKER"`)
-				}
-				env := envWithout(testEnv("PATH="+tools, "MARKER="+marker, "ST_GO_BACKEND="+backend, "ST_GO_NATIVE_VIDEO_TOKEN=secret", "ST_FILE_BROWSER_VOLUME=75"), "ST_FILE_BROWSER_OPEN")
-				args := []string{browserBin}
-				if mode == "custom" {
-					args = append(args, "--open-for", backend, `printf 'custom' > "$MARKER"`)
-				}
-				if mode == "failed" {
-					env = append(env, "TOOL_EXIT=7")
-				}
-				f := startBrowserCommand(t, env, append(args, dir)...)
-				if mode == "double" {
-					f.send("\x1b[<0;60;9M\x1b[<0;60;9M")
-				} else if mode == "open" {
-					f.send("\x1b[Bo")
-				} else {
-					f.send("\x1b[B\r")
-				}
-				if mode == "custom" {
-					waitFileContent(t, marker, "custom")
-					return
-				}
-				if backend != "fb" || mode == "missing" {
-					message := "No video"
-					if backend == "fb" {
-						message = "gov not found"
-					}
-					waitContains(t, f, message, "video opener availability")
-					if _, err := os.Stat(marker); !os.IsNotExist(err) {
-						t.Fatal("unexpected fallback player")
-					}
-					return
-				}
-				waitFileContent(t, marker, "3|-volume|75|"+filepath.Join(dir, name)+"|"+dir)
-				waitContains(t, f, "GOV_READY", "gov owns the PTY")
-				f.send("q")
-				result := "gov finished"
-				if mode == "failed" {
-					result = "gov: exit" // The status line quotes/truncates the error.
-				}
-				waitContains(t, f, result, "browser restored after gov")
-				f.send("r")
-				waitContains(t, f, "Refreshed", "browser input restored")
-			})
 		}
 	}
 }

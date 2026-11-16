@@ -3430,54 +3430,6 @@ func braceAccentArguments(source string) string {
 	return output.String()
 }
 
-func rewriteBraceScripts(source string) string {
-	var output strings.Builder
-	for position := 0; position < len(source); {
-		command := ""
-		script := byte(0)
-		wrapper := ""
-		switch {
-		case strings.HasPrefix(source[position:], `\underbrace`):
-			command, script, wrapper = `\underbrace`, '_', `\underset`
-		case strings.HasPrefix(source[position:], `\overbrace`):
-			command, script, wrapper = `\overbrace`, '^', `\overset`
-		}
-		if command != "" {
-			argumentStart := skipTeXSpace(source, position+len(command))
-			base, baseEnd, baseOK := parseBraced(source, argumentStart)
-			scriptStart := skipTeXSpace(source, baseEnd)
-			if baseOK && scriptStart < len(source) && source[scriptStart] == script {
-				valueStart := skipTeXSpace(source, scriptStart+1)
-				value, valueEnd, valueOK := parseBraced(source, valueStart)
-				if !valueOK && valueStart < len(source) {
-					if source[valueStart] == '\\' {
-						_, valueEnd = readTeXCommand(source, valueStart)
-						value = source[valueStart:valueEnd]
-						valueOK = valueEnd > valueStart
-					} else {
-						_, size := utf8.DecodeRuneInString(source[valueStart:])
-						if size > 0 {
-							value, valueEnd, valueOK = source[valueStart:valueStart+size], valueStart+size, true
-						}
-					}
-				}
-				if valueOK {
-					output.WriteString(wrapper + `{` + value + `}{` + command + `{` + base + `}}`)
-					position = valueEnd
-					continue
-				}
-			}
-		}
-		_, size := utf8.DecodeRuneInString(source[position:])
-		if size <= 0 {
-			break
-		}
-		output.WriteString(source[position : position+size])
-		position += size
-	}
-	return output.String()
-}
-
 func nextMacroCommand(source string, start int) (int, string) {
 	commands := []string{"newcommand", "renewcommand", "providecommand", "DeclareMathOperator"}
 	best := -1

@@ -1,0 +1,30 @@
+// Package playback is gov2's private decoder and playback loop. Experimental
+// DRM output and timing changes must stay independent of st-fb's video engine.
+package playback
+
+import (
+	"context"
+	"time"
+)
+
+type metadata struct {
+	width, height int
+	audio         bool
+	duration      time.Duration
+}
+type decoder interface {
+	info() metadata
+	next() (kind int, pts time.Duration, err error)
+	seek(time.Duration) error
+	pixels(width, height int) ([]uint32, error)
+	draw(pixels []uint32, width, height, stride int) error
+	// Audio outputs stereo S16 at rate, time-stretched by speed. Flush drains
+	// delayed samples at EOF instead of feeding the current decoded frame.
+	audio(rate int, speed float64, flush bool) ([]byte, error)
+	resetAudio()
+	close()
+}
+
+var openDecoder func(context.Context, string) (decoder, error)
+
+func Supported() bool { return openDecoder != nil }

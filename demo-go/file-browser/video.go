@@ -24,8 +24,8 @@ func videoFile(path string) bool {
 	return fileCommandAvailable && strings.HasPrefix(fileMime(path), "video/")
 }
 
-// gov uses the terminal's bundled decoder and retained surface. Give it the
-// foreground PTY using the same handoff/restoration as other terminal viewers.
+// gov2 requests the real-TTY handoff from st-fb. The browser gives its client
+// the foreground PTY and restores the browser after the native player exits.
 func (b *Browser) openDefaultVideo(path string) bool {
 	if !videoFile(path) {
 		return false
@@ -33,16 +33,16 @@ func (b *Browser) openDefaultVideo(path string) bool {
 	backend := browserBackend()
 	b.status = "No video player for " + backend
 	if backend == "fb" {
-		tool, err := exec.LookPath("gov")
+		tool, err := exec.LookPath("gov2")
 		if err != nil {
-			b.status = "gov not found"
+			b.status = "gov2 not found"
 		} else if os.Getenv("ST_GO_NATIVE_VIDEO_TOKEN") == "" {
 			b.status = "Restart st-fb for video playback"
 		} else {
 			tool, err = filepath.Abs(tool)
 			volume, volumeErr := playbackVolume(os.Getenv("ST_FILE_BROWSER_VOLUME"))
 			if err != nil {
-				b.status = "gov: " + displayText(err.Error())
+				b.status = "gov2: " + displayText(err.Error())
 			} else if volumeErr != nil {
 				b.status = displayText(volumeErr.Error())
 			} else {

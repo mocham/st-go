@@ -10,7 +10,7 @@
 #   - libjpeg-turbo: poppler's JPEG/DCT image decoder
 #   - DjVuLibre  : static DjVu decoding for zat-djvu
 #   - FFmpeg/x264: MP4 recording and playback in st-fb
-#   - libdrm     : direct KMS presentation in optional gov2
+#   - libdrm     : direct KMS presentation in gov2
 # SQLite uses the pure-Go modernc.org/sqlite driver on every backend.
 #
 # Full terminal profiles also use libpng and libjpeg-turbo for accelerated PNG
@@ -35,9 +35,8 @@ FT_A        = $(FT_DIR)/libfreetype.a
 OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
-BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv gov govim opencode-tui gxw
-OPTIONAL_BINARY_NAMES = gov2
-BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES) $(OPTIONAL_BINARY_NAMES))
+BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv gov gov2 govim opencode-tui gxw
+BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 FUNCTIONAL_MODULES = $(addprefix functionalities/,aiharness audio brightness config googlepinyin latexpdf limits pdfmeta ptyutil semhtml sshtunnel terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
@@ -78,7 +77,7 @@ ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat
 	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
 GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
 GOV_GO_SRC = $(wildcard demo-go/gov/*.go functionalities/tui/video/*.go platform_neutral/api/*.go)
-GOV2_SRC = $(wildcard demo-go/gov2/*.go demo-go/gov2/*.c demo-go/gov2/*.h platform_neutral/video/*.go platform_neutral/api/*.go functionalities/audio/*.go)
+GOV2_SRC = $(wildcard demo-go/gov2/*.go demo-go/gov2/*.c demo-go/gov2/*.h demo-go/gov2/internal/playback/*.go demo-go/gov2/internal/playback/*.c demo-go/gov2/internal/playback/*.h platform_neutral/api/*.go functionalities/audio/*.go)
 SSH_TUNNEL_SRC = $(wildcard functionalities/sshtunnel/*.go functionalities/sshtunnel/go.*)
 GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/go.* demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json functionalities/aiharness/*.go functionalities/aiharness/go.*) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(SSH_TUNNEL_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 OPENCODE_TUI_GO_SRC = $(wildcard demo-go/opencode-tui/*.go demo-go/opencode-tui/go.* functionalities/tui/preview/*.go platform_neutral/api/*.go) $(TUI_READLINE_SRC) $(SSH_TUNNEL_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
@@ -150,6 +149,7 @@ FFMPEG_LIBS = $(addprefix $(FFMPEG_DIR)/lib/,libavformat.a libavfilter.a libavco
 FFMPEG_BRIDGE = third_party/recording_ffmpeg.o
 VIDEO_BRIDGE = third_party/video_ffmpeg.o
 FFMPEG_STAMP = $(FFMPEG_DIR)/include/st_go_ffmpeg_static.h
+GOV2_FFMPEG_STAMP = $(FFMPEG_DIR)/include/st_go_gov2_ffmpeg_static.h
 
 # gov2 uses only libdrm's core KMS API, without vendor helper libraries.
 DRM_VERSION = 2.4.133
@@ -405,6 +405,13 @@ $(FFMPEG_STAMP): $(FFMPEG_BRIDGE) $(VIDEO_BRIDGE) $(FFMPEG_LIBS) $(X264_LIB)
 		printf '#define ST_GO_FFMPEG_STATIC_SHA256 "%s"\n' "$$hash" > "$@.tmp"; \
 		mv "$@.tmp" "$@"
 
+# gov2 compiles its private decoder bridge inside its own cgo package. Only
+# immutable codec archives are shared; its build never links st-fb's bridge.
+$(GOV2_FFMPEG_STAMP): $(FFMPEG_LIBS) $(X264_LIB)
+	@hash=$$(cat $(FFMPEG_LIBS) $(X264_LIB) | sha256sum | cut -d' ' -f1); \
+		printf '#define ST_GO_GOV2_FFMPEG_STATIC_SHA256 "%s"\n' "$$hash" > "$@.tmp"; \
+		mv "$@.tmp" "$@"
+
 # --- static DRM/KMS for gov2 ----------------------------------------------
 $(DRM_TAR):
 	@mkdir -p third_party
@@ -479,7 +486,7 @@ $(OUTPUT_DIR):
 	mkdir -p $@
 
 # Keep familiar make target names, but never create executables in the root.
-$(BINARY_NAMES) $(OPTIONAL_BINARY_NAMES): %: $(OUTPUT_DIR)/%
+$(BINARY_NAMES): %: $(OUTPUT_DIR)/%
 
 $(OUTPUT_DIR)/st: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(GO_SRC)
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
@@ -536,7 +543,7 @@ $(OUTPUT_DIR)/gov: $(GOV_GO_SRC)
 
 # Optional native DRM experiment, with bundled FFmpeg and libdrm. Like the
 # terminal binaries, the distribution executable has no shared-library deps.
-$(OUTPUT_DIR)/gov2: $(GOV2_SRC) $(FFMPEG_STAMP) $(DRM_STAMP)
+$(OUTPUT_DIR)/gov2: $(GOV2_SRC) $(GOV2_FFMPEG_STAMP) $(DRM_STAMP)
 	CGO_ENABLED=1 go -C demo-go/gov2 build -trimpath -tags 'ffmpeg_static netgo osusergo' -o $(abspath $@) \
 		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' .
 
@@ -638,7 +645,6 @@ test-gov: st-fb gov
 
 test-gov2: gov2
 	GOWORK=off go -C demo-go/gov2 test -race -tags ffmpeg_static ./...
-	go test -race -tags ffmpeg_static ./platform_neutral/video
 	CGO_ENABLED=0 go test ./platform_dependent/fb -run '^TestNative'
 	GOWORK=off go -C platform_neutral/api test ./...
 	GOWORK=off go -C platform_neutral/stterminal test -run '^TestNativeVideo' ./...
@@ -654,4 +660,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu test-fb-recording test-gov test-gov2 $(BINARY_NAMES) $(OPTIONAL_BINARY_NAMES) terminal-profile-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu test-fb-recording test-gov test-gov2 $(BINARY_NAMES) terminal-profile-force
