@@ -9,7 +9,9 @@ Run commands from the repository root. Executables are written to `BINARIES/`.
   `tar`, and `cmake`. Make downloads and builds the required native libraries.
 - `st-fb` also requires `pkg-config` and, on x86, NASM to build its bundled
   FFmpeg/x264 recording and playback components. These are build-time tools only.
-- `st-min`, `st-fb-min`, `st-web`, and the other Go applications build with
+- Optional `gov2`: cgo, static libc, the bundled FFmpeg build tools, Meson and
+  Ninja. Make downloads and statically builds its pinned libdrm core.
+- `st-min`, `st-fb-min`, `st-web`, and most Go applications build with
   `CGO_ENABLED=0`. Minimal targets require no C compiler or `third_party/` assets.
 
 ## Targets
@@ -22,6 +24,7 @@ Run commands from the repository root. Executables are written to `BINARIES/`.
 | `make st-fb` | Full native renderer on Linux framebuffer |
 | `make st-fb-min` | CGO-free minimal Linux framebuffer terminal |
 | `make st-web` | CGO-free HTTP server and embedded browser client |
+| `make gov2` | Optional fully static direct DRM player with bundled FFmpeg/libdrm |
 | `make file-browser govim` | Build named applications; see the [application index](../demo-go/README.md) |
 | `make install` | Install `st`, `st.json`, and terminfo under `PREFIX` (default `/usr/local`) |
 | `make clean` | Remove built binaries |
@@ -42,6 +45,8 @@ when tab spawning is disabled. X11 is the default backend; select only one of
 ## Standalone binaries
 
 Make's binaries are statically linked and embed their default fonts/configuration.
+The optional [`gov2`](../demo-go/gov2/README.md) experiment also bundles a
+checksum-pinned static libdrm core, with vendor helpers and tests disabled.
 X11 uses pure-Go XGB, without libX11, Xft, or fontconfig. Full native profiles use
 FreeType C, accelerated PNG/JPEG/WebP decoding, animated WebP,
 and Poppler PDF rendering.
@@ -98,6 +103,7 @@ make test-web-browser     # direct + shared-service Chromium checks; Node >=22, 
 make test-zat-djvu        # bundled static DjVuLibre profile
 make test-fb-recording    # external and bundled-static framebuffer recording
 make test-gov             # bundled MP4 playback and terminal/client lifecycle
+make test-gov2            # optional direct DRM buffers, handoff and lifecycle
 go test -race ./platform_neutral/fontraster
 ```
 

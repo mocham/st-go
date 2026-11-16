@@ -143,3 +143,33 @@ func TestNativePlayerCommandUsesDetectedConsoleNotPTY(t *testing.T) {
 		t.Fatal("player stdio was not attached to the physical console")
 	}
 }
+
+func TestNativeGov2CommandUsesSiblingAndRealConsole(t *testing.T) {
+	tty, err := os.CreateTemp(t.TempDir(), "fake-console")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tty.Close()
+	host, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := api.NativeVideoRequest{Player: "gov2", File: "/media/movie ';\n.mp4", Volume: 40, Muted: true, DRMDevice: "/dev/dri/card1", Connector: 54}
+	cmd := nativePlayerCommand(r, tty)
+	want := []string{filepath.Join(filepath.Dir(host), "gov2"), "-direct", "-volume=40", "-mute", "-drm-device=/dev/dri/card1", "-connector=54", "--", r.File}
+	if !reflect.DeepEqual(cmd.Args, want) || cmd.Err != nil {
+		t.Fatal(cmd.Args, cmd.Err)
+	}
+	if cmd.Stdin != tty || cmd.Stdout != tty || cmd.Stderr != tty || !cmd.SysProcAttr.Foreground || cmd.SysProcAttr.Ctty != int(tty.Fd()) || cmd.SysProcAttr.Setsid {
+		t.Fatal("gov2 would not own the host VT")
+	}
+	d := memoryDriver(t, 40, 40)
+	media := filepath.Join(t.TempDir(), "movie.mp4")
+	if err := os.WriteFile(media, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.File = media
+	if err := d.StartNativeVideo(r, func(error) {}); err != nil {
+		t.Fatal("gov2 incorrectly requires an ALSA config", err)
+	}
+}

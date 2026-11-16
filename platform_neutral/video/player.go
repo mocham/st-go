@@ -22,11 +22,34 @@ type Player struct {
 	cancel        context.CancelFunc
 	done          chan struct{}
 	present       func([]uint32, int, int)
+	output        Output
+	suspended     bool
+}
+
+// FrameRenderer scales the current picture into caller-owned RGB32 storage.
+// Stride is in pixels. The buffer must cover stride*height pixels and is only
+// borrowed for the call; render itself must not be retained or called later.
+// Reserve another 16 pixels after the last row for native scaler padding.
+type FrameRenderer func(pixels []uint32, width, height, stride int) error
+
+// Output owns presentation buffers. Present runs on the decoder worker, outside
+// Player.mu. It must finish using render before returning and bound device waits.
+type Output interface {
+	Present(render FrameRenderer, status api.VideoStatus) error
+}
+
+// StartOutput uses a caller-owned presentation target, such as DRM scanout.
+// The caller must wait for Done before destroying the output's resources.
+func StartOutput(path string, volume int, muted bool, output Output) *Player {
+	return start(path, 0, 0, volume, muted, nil, output)
 }
 
 func Start(path string, width, height, volume int, muted bool, present func([]uint32, int, int)) *Player {
+	return start(path, width, height, volume, muted, present, nil)
+}
+func start(path string, width, height, volume int, muted bool, present func([]uint32, int, int), output Output) *Player {
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &Player{width: width, height: height, commands: make(chan api.VideoRequest, 16), wake: make(chan struct{}, 1), cancel: cancel, done: make(chan struct{}), present: present,
+	p := &Player{width: width, height: height, commands: make(chan api.VideoRequest, 16), wake: make(chan struct{}, 1), cancel: cancel, done: make(chan struct{}), present: present, output: output,
 		status: api.VideoStatus{Supported: Supported(), State: "loading", Volume: volume, Muted: muted, Speed: 1}}
 	go func() {
 		defer close(p.done)
@@ -45,6 +68,18 @@ func Start(path string, width, height, volume int, muted bool, present func([]ui
 func (p *Player) Status() api.VideoStatus { p.mu.Lock(); defer p.mu.Unlock(); return p.status }
 func (p *Player) Close()                  { p.cancel() }
 func (p *Player) Done() <-chan struct{}   { return p.done }
+
+// Suspend freezes playback during loss of display ownership, preserving the
+// user's pause state. Resuming reanchors the clock and reopens audio on demand.
+func (p *Player) Suspend(suspended bool) {
+	p.mu.Lock()
+	p.suspended = suspended
+	p.mu.Unlock()
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
 func (p *Player) Resize(w, h int) {
 	p.mu.Lock()
 	p.width, p.height = w, h
@@ -122,6 +157,9 @@ func (p *Player) run(ctx context.Context, path string) error {
 		return nil
 	}
 	render := func() error {
+		if p.output != nil {
+			return p.output.Present(d.draw, p.Status())
+		}
 		p.mu.Lock()
 		w, h := p.width, p.height
 		p.mu.Unlock()
@@ -135,6 +173,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 		return err
 	}
 	paused, ended, pending, preview := false, false, false, false
+	suspended, refreshOutput := false, false
 	var kind int
 	var pts, position, skipTo time.Duration
 	var lastPresentation time.Time
@@ -154,6 +193,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 		return nil
 	}
 	handle := func(r api.VideoRequest) error {
+		refreshOutput = p.output != nil && r.Action != "seek"
 		switch r.Action {
 		case "toggle":
 			if ended {
@@ -175,7 +215,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 		case "speed":
 			now := time.Now()
 			anchor := position
-			if !paused && !ended && !preview {
+			if !paused && !suspended && !ended && !preview {
 				anchor = clock.position(now)
 			}
 			clock.reset(now, anchor)
@@ -190,7 +230,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 	}
 	publish := func() {
 		state := "playing"
-		if paused {
+		if paused || suspended {
 			state = "paused"
 		}
 		if ended {
@@ -205,7 +245,21 @@ func (p *Player) run(ctx context.Context, path string) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		p.mu.Lock()
+		suspend := p.suspended
+		p.mu.Unlock()
+		if suspended != suspend {
+			suspended = suspend
+			clock.reset(time.Now(), position)
+			dropAudio()
+		}
 		publish()
+		if refreshOutput {
+			refreshOutput = false
+			if err := render(); err != nil {
+				return err
+			}
+		}
 		// Always service control input before decoding another packet.
 		select {
 		case r := <-p.commands:
@@ -217,9 +271,10 @@ func (p *Player) run(ctx context.Context, path string) error {
 			if err := render(); err != nil {
 				return err
 			}
+			continue // Recheck suspension even when this wake consumed a resume.
 		default:
 		}
-		if (paused && !preview) || ended {
+		if suspended || (paused && !preview) || ended {
 			select {
 			case <-ctx.Done():
 				return nil
@@ -241,6 +296,7 @@ func (p *Player) run(ctx context.Context, path string) error {
 			}
 			if kind == 0 {
 				ended = true
+				refreshOutput = p.output != nil
 				if preview {
 					// An end-of-track seek can fall after the final timestamp.
 					// Show the last decoded picture rather than the old seek origin.
@@ -297,6 +353,9 @@ func (p *Player) run(ctx context.Context, path string) error {
 		pending = false
 		if kind == 1 {
 			position = pts
+			if p.output != nil {
+				publish()
+			}
 			// Decode reference pictures even when late. Still display occasional
 			// frames if the machine cannot decode at the source frame rate.
 			if preview || time.Since(clock.deadline(pts)) < 150*time.Millisecond || time.Since(lastPresentation) >= 250*time.Millisecond {

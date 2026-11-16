@@ -10,6 +10,7 @@
 #   - libjpeg-turbo: poppler's JPEG/DCT image decoder
 #   - DjVuLibre  : static DjVu decoding for zat-djvu
 #   - FFmpeg/x264: MP4 recording and playback in st-fb
+#   - libdrm     : direct KMS presentation in optional gov2
 # SQLite uses the pure-Go modernc.org/sqlite driver on every backend.
 #
 # Full terminal profiles also use libpng and libjpeg-turbo for accelerated PNG
@@ -35,12 +36,13 @@ OUTPUT_DIR  = BINARIES
 BIN         = $(OUTPUT_DIR)/st
 DJVU_SYSTEM_AVAILABLE := $(shell pkg-config --exists ddjvuapi 2>/dev/null && echo 1)
 BINARY_NAMES = st st-min st-web st-fb st-fb-min file-browser gols zat zat-djvu goiv gov govim opencode-tui gxw
-BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
-FUNCTIONAL_MODULES = $(addprefix functionalities/,aiharness audio brightness config googlepinyin latexpdf limits pdfmeta ptyutil semhtml terminfo tui widgets)
+OPTIONAL_BINARY_NAMES = gov2
+BINARY_PATHS = $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES) $(OPTIONAL_BINARY_NAMES))
+FUNCTIONAL_MODULES = $(addprefix functionalities/,aiharness audio brightness config googlepinyin latexpdf limits pdfmeta ptyutil semhtml sshtunnel terminfo tui widgets)
 SHARED_MODULES = $(FUNCTIONAL_MODULES) platform_neutral/api platform_neutral/stterminal term
 # Standalone, asset-free module tests use the system API when available. The
 # distribution target below never does: it always uses the pinned static build.
-DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gov demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat demo-go/gxw $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
+DEMO_MODULES = demo-go demo-go/file-browser demo-go/goiv demo-go/gov demo-go/gov2 demo-go/gols demo-go/govim demo-go/opencode-tui demo-go/zat demo-go/gxw $(if $(DJVU_SYSTEM_AVAILABLE),demo-go/zat-djvu)
 GO_MODULES = $(SHARED_MODULES) $(DEMO_MODULES)
 MODULE_META = $(wildcard go.work go.work.sum) $(foreach dir,. $(GO_MODULES),$(wildcard $(dir)/go.mod $(dir)/go.sum))
 CFG         = functionalities/config/config.json
@@ -76,8 +78,10 @@ ZAT_DJVU_SRC = $(wildcard demo-go/zat-djvu/*.go demo-go/zat-djvu/*.c demo-go/zat
 	       $(STTERMINAL_SRC) $(wildcard functionalities/config/*.go functionalities/config/*.json) $(TUI_NAV_SRC) $(TUI_SEARCH_SRC) $(TUI_READLINE_SRC) go.mod go.sum
 GOIV_GO_SRC = $(wildcard demo-go/goiv/*.go) go.mod go.sum
 GOV_GO_SRC = $(wildcard demo-go/gov/*.go functionalities/tui/video/*.go platform_neutral/api/*.go)
-GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/go.* demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json functionalities/aiharness/*.go functionalities/aiharness/go.*) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
-OPENCODE_TUI_GO_SRC = $(wildcard demo-go/opencode-tui/*.go demo-go/opencode-tui/go.* functionalities/tui/preview/*.go platform_neutral/api/*.go) $(TUI_READLINE_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
+GOV2_SRC = $(wildcard demo-go/gov2/*.go demo-go/gov2/*.c demo-go/gov2/*.h platform_neutral/video/*.go platform_neutral/api/*.go functionalities/audio/*.go)
+SSH_TUNNEL_SRC = $(wildcard functionalities/sshtunnel/*.go functionalities/sshtunnel/go.*)
+GOVIM_GO_SRC = $(wildcard demo-go/govim/*.go demo-go/govim/go.* demo-go/govim/syntax/* demo-go/govim/imap/* functionalities/tui/imap/*.go functionalities/tui/preview/*.go functionalities/tui/outline/*.go functionalities/config/*.go functionalities/config/*.json functionalities/aiharness/*.go functionalities/aiharness/go.*) $(STTERMINAL_SRC) $(TUI_READLINE_SRC) $(SSH_TUNNEL_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
+OPENCODE_TUI_GO_SRC = $(wildcard demo-go/opencode-tui/*.go demo-go/opencode-tui/go.* functionalities/tui/preview/*.go platform_neutral/api/*.go) $(TUI_READLINE_SRC) $(SSH_TUNNEL_SRC) $(LATEXPDF_SRC) $(wildcard functionalities/limits/*.go) go.mod go.sum
 
 # --- poppler (PDF rendering) ---------------------------------------------
 # Static C++/Splash rendering, including embedded JPEG images through libjpeg.
@@ -147,8 +151,19 @@ FFMPEG_BRIDGE = third_party/recording_ffmpeg.o
 VIDEO_BRIDGE = third_party/video_ffmpeg.o
 FFMPEG_STAMP = $(FFMPEG_DIR)/include/st_go_ffmpeg_static.h
 
+# gov2 uses only libdrm's core KMS API, without vendor helper libraries.
+DRM_VERSION = 2.4.133
+DRM_URL = https://dri.freedesktop.org/libdrm/libdrm-$(DRM_VERSION).tar.xz
+DRM_SHA256 = fc68f9d0ba2ea63c9432a299e14fea09fad7a8a66e8039fcd7802ca59f77b4f5
+DRM_TAR = third_party/libdrm-$(DRM_VERSION).tar.xz
+DRM_SRC = third_party/libdrm-src
+DRM_BUILD = third_party/libdrm-build
+DRM_DIR = third_party/libdrm
+DRM_LIB = $(DRM_DIR)/lib/libdrm.a
+DRM_STAMP = $(DRM_DIR)/include/st_go_drm_static.h
+
 # Build every terminal profile/backend, demo, and helper.
-all: $(BINARY_PATHS)
+all: $(addprefix $(OUTPUT_DIR)/,$(BINARY_NAMES))
 
 # --- FreeType2 static archive ------------------------------------------
 # Fetched only when missing. Configured WITHOUT zlib/libpng/brotli/bzip2 so
@@ -390,6 +405,28 @@ $(FFMPEG_STAMP): $(FFMPEG_BRIDGE) $(VIDEO_BRIDGE) $(FFMPEG_LIBS) $(X264_LIB)
 		printf '#define ST_GO_FFMPEG_STATIC_SHA256 "%s"\n' "$$hash" > "$@.tmp"; \
 		mv "$@.tmp" "$@"
 
+# --- static DRM/KMS for gov2 ----------------------------------------------
+$(DRM_TAR):
+	@mkdir -p third_party
+	curl --fail --location --retry 3 --output "$@.tmp" "$(DRM_URL)"
+	printf '%s  %s\n' '$(DRM_SHA256)' '$@.tmp' | sha256sum -c -
+	mv "$@.tmp" "$@"
+
+$(DRM_LIB): $(DRM_TAR) third_party_wrapper/libdrm-configure.sh
+	printf '%s  %s\n' '$(DRM_SHA256)' '$(DRM_TAR)' | sha256sum -c -
+	rm -rf "$(DRM_SRC)" "$(DRM_BUILD)" "$(DRM_DIR)"
+	mkdir -p "$(DRM_SRC)"
+	tar -xJf "$(DRM_TAR)" -C "$(DRM_SRC)" --strip-components=1
+	CC="$(CC)" sh third_party_wrapper/libdrm-configure.sh \
+		"$(abspath $(DRM_BUILD))" "$(abspath $(DRM_SRC))" "$(abspath $(DRM_DIR))"
+	meson compile -C "$(DRM_BUILD)"
+	meson install -C "$(DRM_BUILD)" --no-rebuild
+
+$(DRM_STAMP): $(DRM_LIB)
+	@hash=$$(sha256sum "$(DRM_LIB)" | cut -d' ' -f1); \
+		printf '#define ST_GO_DRM_STATIC_SHA256 "%s"\n' "$$hash" > "$@.tmp"; \
+		mv "$@.tmp" "$@"
+
 # --- st targets ------------------------------------------------------------
 # Full and minimal native profiles for X11 and Linux framebuffer. Every profile
 # decodes ordinary raster images with Go; full profiles prefer libpng,
@@ -442,7 +479,7 @@ $(OUTPUT_DIR):
 	mkdir -p $@
 
 # Keep familiar make target names, but never create executables in the root.
-$(BINARY_NAMES): %: $(OUTPUT_DIR)/%
+$(BINARY_NAMES) $(OPTIONAL_BINARY_NAMES): %: $(OUTPUT_DIR)/%
 
 $(OUTPUT_DIR)/st: $(FT_A) $(POPPLER_LIB) $(WEBP_LIB) $(WEBP_DEMUX) $(WEBP_ANIM_O) $(PDF_BRIDGE_O) $(IMAGE_DECODE_O) $(GO_SRC)
 	go build -trimpath -tags '$(FULL_GO_TAGS)' -o $@ -ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' .
@@ -496,6 +533,12 @@ $(OUTPUT_DIR)/goiv: $(GOIV_GO_SRC)
 
 $(OUTPUT_DIR)/gov: $(GOV_GO_SRC)
 	CGO_ENABLED=0 go -C demo-go/gov build -trimpath -o $(abspath $@) .
+
+# Optional native DRM experiment, with bundled FFmpeg and libdrm. Like the
+# terminal binaries, the distribution executable has no shared-library deps.
+$(OUTPUT_DIR)/gov2: $(GOV2_SRC) $(FFMPEG_STAMP) $(DRM_STAMP)
+	CGO_ENABLED=1 go -C demo-go/gov2 build -trimpath -tags 'ffmpeg_static netgo osusergo' -o $(abspath $@) \
+		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA)"' .
 
 # Standalone X11 WM: native Go FreeType rasterization and X protocol.
 demo-go/gxw/Monaco_Linux.ttf: Monaco_Linux.ttf
@@ -593,6 +636,13 @@ test-gov: st-fb gov
 	go test -tags 'ffmpeg_static netgo osusergo $(FULL_GO_TAGS)' ./platform_neutral/frontend \
 		-ldflags '-linkmode external -extldflags "-static $(GC_EXTRA) $(FULL_EXTRA)"' -run '^TestCompositedVideo'
 
+test-gov2: gov2
+	GOWORK=off go -C demo-go/gov2 test -race -tags ffmpeg_static ./...
+	go test -race -tags ffmpeg_static ./platform_neutral/video
+	CGO_ENABLED=0 go test ./platform_dependent/fb -run '^TestNative'
+	GOWORK=off go -C platform_neutral/api test ./...
+	GOWORK=off go -C platform_neutral/stterminal test -run '^TestNativeVideo' ./...
+
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/st" "$(DESTDIR)$(BINDIR)/st.json"
 	rm -f "$(DESTDIR)$(TERMINFO_DIR)/s/st-256color" \
@@ -604,4 +654,4 @@ clean:
 distclean: clean
 	rm -rf third_party
 
-.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu test-fb-recording test-gov $(BINARY_NAMES) terminal-profile-force
+.PHONY: all install uninstall clean distclean test test-modules test-tui test-web test-web-browser test-webp-x11 test-zat-x11 test-zat-djvu test-fb-recording test-gov test-gov2 $(BINARY_NAMES) $(OPTIONAL_BINARY_NAMES) terminal-profile-force

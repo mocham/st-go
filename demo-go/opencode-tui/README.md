@@ -18,7 +18,8 @@ Exiting detaches; server execution continues independently.
 
 Environment settings:
 
-- `OPENCODE_TUI_SERVER`: default endpoint; otherwise `--server` is required.
+- `OPENCODE_TUI_SERVER`: default endpoint; otherwise `--server` is required unless SSH is enabled.
+- `OPENCODE_TUI_SERVER_SSH`: SSH destination, overridden by `--server-ssh`.
 - `OPENCODE_TUI_PASSWORD`: HTTP Basic password, with username `opencode` by default.
 - `OPENCODE_TUI_USERNAME`: override the Basic username.
 - `OPENCODE_TUI_AUTHORIZATION`: complete authorization header; overrides Basic settings.
@@ -27,6 +28,31 @@ Use the server operator's authentication settings. A `401` means credentials are
 needed; EOF before a response usually indicates an address, port, or HTTP/HTTPS
 mismatch. Browser sign-in is not inherited by this client. For containers, use
 a reachable server address rather than another container's loopback address.
+
+### Remote loopback server through SSH
+
+Use a managed SSH tunnel when OpenCode listens only on the remote host's loopback:
+
+```sh
+./BINARIES/opencode-tui --server-ssh user@remote-host \
+  --server http://127.0.0.1:4096 /absolute/project/path/on/remote
+```
+
+`--server` is the address **on the remote machine**, defaulting to
+`http://127.0.0.1:4096` in SSH mode. It must use `127.0.0.1`, `localhost`, or `[::1]`.
+The remote HTTP port can remain bound to loopback. `--server-ssh` accepts
+`[user@]host` or an SSH config alias; configure custom SSH ports, identity files,
+and jump hosts in `~/.ssh/config`.
+
+The client runs `ssh -N -L` with an automatically selected local loopback port.
+SSH uses noninteractive keys/agent authentication, so establish an ordinary SSH
+login and known-host entry first. All API requests, live events, downloads, and
+exports use this tunnel. Existing `OPENCODE_TUI_PASSWORD`/`OPENCODE_TUI_AUTHORIZATION`
+settings authenticate to the remote OpenCode server.
+
+One tunnel lasts for the whole TUI session and closes on exit or startup failure.
+If SSH disconnects, the TUI exits with the SSH diagnostic; reconnect with
+`--session ses_...` to resume the server-side session. Prompts are not replayed.
 
 ## Rich responses
 

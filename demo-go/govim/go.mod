@@ -34,6 +34,7 @@ require (
 	st-go/googlepinyin v0.0.0 // indirect
 	st-go/pdfmeta v0.0.0 // indirect
 	st-go/platform_neutral/stterminal v0.0.0 // indirect
+	st-go/sshtunnel v0.0.0 // indirect
 )
 
 replace (
@@ -46,6 +47,7 @@ replace (
 	st-go/platform_neutral/api => ../../platform_neutral/api
 	st-go/platform_neutral/stterminal => ../../platform_neutral/stterminal
 	st-go/ptyutil => ../../functionalities/ptyutil
+	st-go/sshtunnel => ../../functionalities/sshtunnel
 	st-go/term => ../../term
 	st-go/tui => ../../functionalities/tui
 )

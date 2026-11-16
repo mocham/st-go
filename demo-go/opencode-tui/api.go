@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"st-go/sshtunnel"
 )
 
 const maxAPIResponse = 16 << 20
@@ -178,6 +180,7 @@ type apiClient struct {
 	streams              *http.Client
 	streamConnectTimeout time.Duration
 	streamIdleTimeout    time.Duration
+	tunnel               *sshtunnel.Tunnel
 }
 
 func newAPIClient(baseURL, authorization string) (*apiClient, error) {
@@ -204,6 +207,34 @@ func newAPIClient(baseURL, authorization string) (*apiClient, error) {
 		streams:              &http.Client{Transport: transport},
 		streamConnectTimeout: 10 * time.Second, streamIdleTimeout: 45 * time.Second,
 	}, nil
+}
+
+// All API calls, file downloads and live SSE connections share one forward for
+// this client's lifetime. Preserve the remote Host/TLS name and URL base path.
+func (client *apiClient) openSSH(ctx context.Context, destination string) error {
+	target, err := sshtunnel.New(client.base.String(), destination)
+	if err != nil {
+		return err
+	}
+	tunnel, err := target.Open(ctx)
+	if err != nil {
+		return err
+	}
+	client.tunnel = tunnel
+	transport := client.requests.Transport.(*http.Transport)
+	transport.Proxy = nil
+	transport.DialContext = tunnel.DialContext
+	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client.requests.CheckRedirect, client.streams.CheckRedirect = noRedirect, noRedirect
+	return nil
+}
+
+func (client *apiClient) close() {
+	client.requests.CloseIdleConnections()
+	client.streams.CloseIdleConnections()
+	if client.tunnel != nil {
+		client.tunnel.Close()
+	}
 }
 
 type apiError struct {

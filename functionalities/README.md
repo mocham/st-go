@@ -6,6 +6,7 @@ directories; each consumer also supports standalone **`GOWORK=off`** builds.
 | Directory | Module | Responsibility |
 | --- | --- | --- |
 | [`aiharness/`](aiharness/README.md) | `st-go/aiharness` | Explicit-context paragraph generation and versioned project insertion dictionaries |
+| [`sshtunnel/`](sshtunnel/README.md) | `st-go/sshtunnel` | Managed SSH forwards to remote loopback HTTP servers |
 | `tui/` | `st-go/tui` | Line editing with in-process Pinyin, navigation, search, outlines, input mappings, document preview, audio and tab-spawn protocol clients |
 | `googlepinyin/` | `st-go/googlepinyin` | Bounded pure-Go Pinyin dictionary builder, parser, segmentation, ranking, and candidate lookup |
 | `latexpdf/` | `github.com/mocham/GoLS/latexpdf` | Native-Go selectable-text/vector-math PDF generation |

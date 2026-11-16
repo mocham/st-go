@@ -12,6 +12,7 @@ clipboard, and tabs. Each is a separate Go module; builds go to `BINARIES/`.
 | [zat-djvu](zat-djvu/README.md) | DjVu viewer with outline, text, and search |
 | [goiv](goiv/README.md) | Image fit, zoom, pan, and sibling navigation |
 | [gov](gov/README.md) | MP4 playback through st-fb's bundled decoder; pause, seek, and audio controls |
+| [gov2](gov2/README.md) | Experimental fullscreen DRM/KMS variant with its own bundled decoder |
 | [gols](gols/README.md) | Read-only SQLite corpus browser |
 
 ```sh
@@ -23,8 +24,9 @@ export PATH="$PWD/BINARIES:$PATH"
 
 `--web` in file-browser, govim, and opencode-tui enables browser-native HTML/SVG
 previews. Otherwise document generation uses the shared Go PDF renderer.
-Media presentation belongs to the host; applications do not open display
-connections. On web, applications and audio still run on the Linux server.
+Media presentation normally belongs to the host. The optional gov2 experiment
+takes over the physical VT for direct DRM playback. On web, applications and
+audio still run on the Linux server.
 
 ## Presentation scheduling and document caching
 
@@ -43,7 +45,8 @@ presentation; PTY input, protocol replies, and app jobs continue running.
 ## Building and testing
 
 File-browser and GoLS use pure-Go SQLite. These applications build without cgo
-except `zat-djvu`, which statically links its DjVu decoder. Shared components
+except `zat-djvu`, which statically links its DjVu decoder, and optional `gov2`,
+which statically links the bundled FFmpeg decoder and libdrm. Shared components
 live in [`functionalities/`](../functionalities/README.md).
 
 ```sh

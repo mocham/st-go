@@ -213,15 +213,33 @@ int st_video_seek(st_video *v, int64_t pts) {
     v->eof = v->flushing = 0;
     return 0;
 }
+static void black_rect(uint8_t *pixels, int stride, int x, int y, int w, int h) {
+    for (int row = y; row < y + h; row++) {
+        uint32_t *p = (uint32_t *)(pixels + row * stride) + x;
+        for (int col = 0; col < w; col++) p[col] = 0xff000000;
+    }
+}
 int st_video_pixels(st_video *v, uint8_t *pixels, int width, int height, int stride) {
+    if (!pixels || width < 1 || height < 1 || (int64_t)width * height > 4096LL * 2160 ||
+        stride < (int64_t)width * 4 || stride % 4) return AVERROR(EINVAL);
     AVFrame *f = v->picture;
-    if (!f->data[0]) return 0;
+    if (!f->data[0]) {
+        black_rect(pixels, stride, 0, 0, width, height);
+        return 0;
+    }
     AVRational sar = f->sample_aspect_ratio;
     double aspect = (double)f->width / f->height;
     if (sar.num > 0 && sar.den > 0) aspect *= av_q2d(sar);
     int w = width, h = (int)(width / aspect + 0.5);
     if (h > height) { h = height; w = (int)(height * aspect + 0.5); }
     w = FFMAX(1, FFMIN(w, width)); h = FFMAX(1, FFMIN(h, height));
+    int x = (width-w)/2, y = (height-h)/2;
+    /* Only clear borders. The scaler overwrites the picture, including when
+       writing directly into a pitched DRM dumb buffer owned by gov2. */
+    black_rect(pixels, stride, 0, 0, width, y);
+    black_rect(pixels, stride, 0, y+h, width, height-y-h);
+    black_rect(pixels, stride, 0, y, x, h);
+    black_rect(pixels, stride, x+w, y, width-x-w, h);
     v->scale = sws_getCachedContext(v->scale, f->width, f->height, f->format,
                                    w, h, AV_PIX_FMT_RGB32, SWS_BILINEAR, NULL, NULL, NULL);
     if (!v->scale) return AVERROR(ENOMEM);

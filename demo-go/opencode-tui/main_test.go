@@ -11,6 +11,7 @@ import (
 // Attachment failures must not wait for a locally managed server to start,
 // create a session, or enter raw terminal mode.
 func TestAttachFailureStopsBeforeSessionCreation(t *testing.T) {
+	t.Setenv("OPENCODE_TUI_SERVER_SSH", "")
 	for _, status := range []int{http.StatusUnauthorized, http.StatusServiceUnavailable} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			var calls atomic.Int32
@@ -40,6 +41,7 @@ func TestAttachFailureStopsBeforeSessionCreation(t *testing.T) {
 }
 
 func TestWebPreviewOptionCanBeDisabled(t *testing.T) {
+	t.Setenv("OPENCODE_TUI_SERVER_SSH", "")
 	for _, disable := range []bool{false, true} {
 		args := []string{"--server", "127.0.0.1:4096", "--web"}
 		if disable {

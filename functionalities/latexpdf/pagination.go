@@ -133,7 +133,7 @@ func extractLatexSections(source string) []documentSection {
 
 func environmentRendersTextBlocks(environment string) bool {
 	switch strings.TrimSuffix(environment, "*") {
-	case "equation", "displaymath", "align", "alignat", "flalign", "split",
+	case "math", "equation", "displaymath", "align", "alignat", "flalign", "split",
 		"gather", "multline", "CD", "verbatim", "lstlisting", "minted",
 		"tikzpicture", "flowchart", "tabular", "tabularx", "array", "markdowntable":
 		return false
@@ -269,17 +269,10 @@ func latexRenderBlockEnd(source string) int {
 	if _, _, end, ok := parseHeading(source); ok {
 		return end
 	}
-	if strings.HasPrefix(source, `\[`) {
-		if end := findUnescaped(source, `\]`, 2); end >= 0 {
-			return end + len(`\]`)
-		}
+	if span, ok := parseLatexMathSpan(source, 0); ok && span.display {
+		return span.end
 	}
-	if strings.HasPrefix(source, `$$`) {
-		if end := findUnescaped(source, `$$`, 2); end >= 0 {
-			return end + len(`$$`)
-		}
-	}
-	if strings.HasPrefix(source, `\begin{`) {
+	if strings.HasPrefix(source, `\begin{`) && !strings.HasPrefix(source, `\begin{math}`) {
 		if environment, beginEnd, ok := parseEnvironmentStart(source); ok {
 			if _, end, found := extractEnvironment(source, environment, beginEnd); found {
 				return end

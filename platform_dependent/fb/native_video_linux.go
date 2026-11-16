@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -33,6 +34,9 @@ func (d *Driver) StartNativeVideo(request api.NativeVideoRequest, done func(erro
 		return err
 	}
 	for _, path := range []string{request.File, request.ALSAConfig} {
+		if path == "" {
+			continue
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return err
@@ -202,8 +206,29 @@ func (d *Driver) resumeNativeVideo() error {
 }
 
 func nativePlayerCommand(request api.NativeVideoRequest, tty *os.File) *exec.Cmd {
-	cmd := exec.Command("mpv", "--vo=drm", "--hwdec=auto-copy", "--ao=alsa", "--audio-device="+request.AudioDevice, "--volume="+strconv.Itoa(request.Volume), "--", request.File)
-	cmd.Env = append(os.Environ(), "ALSA_CONFIG_PATH="+request.ALSAConfig)
+	var cmd *exec.Cmd
+	if request.Player == "gov2" {
+		// Resolve only next to the host executable, never from a client-supplied
+		// executable path or the PTY's working directory/PATH.
+		host, err := os.Executable()
+		args := []string{"-direct", "-volume=" + strconv.Itoa(request.Volume)}
+		if request.Muted {
+			args = append(args, "-mute")
+		}
+		if request.DRMDevice != "" {
+			args = append(args, "-drm-device="+request.DRMDevice)
+		}
+		if request.Connector != 0 {
+			args = append(args, "-connector="+strconv.FormatUint(uint64(request.Connector), 10))
+		}
+		cmd = exec.Command(filepath.Join(filepath.Dir(host), "gov2"), append(args, "--", request.File)...)
+		if err != nil {
+			cmd.Err = err
+		}
+	} else {
+		cmd = exec.Command("mpv", "--vo=drm", "--hwdec=auto-copy", "--ao=alsa", "--audio-device="+request.AudioDevice, "--volume="+strconv.Itoa(request.Volume), "--", request.File)
+		cmd.Env = append(os.Environ(), "ALSA_CONFIG_PATH="+request.ALSAConfig)
+	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
 	// Inherit st-fb's real controlling terminal/session, but give the player
 	// its own foreground group. Do not create a PTY or a new session here.

@@ -7,6 +7,8 @@ require (
 	modernc.org/sqlite v1.62.0
 	st-go/limits v0.0.0
 	st-go/platform_neutral/api v0.0.0
+	st-go/ptyutil v0.0.0
+	st-go/sshtunnel v0.0.0
 	st-go/tui v0.0.0
 )
 
@@ -33,5 +35,7 @@ replace (
 	st-go/googlepinyin => ../../functionalities/googlepinyin
 	st-go/limits => ../../functionalities/limits
 	st-go/platform_neutral/api => ../../platform_neutral/api
+	st-go/ptyutil => ../../functionalities/ptyutil
+	st-go/sshtunnel => ../../functionalities/sshtunnel
 	st-go/tui => ../../functionalities/tui
 )

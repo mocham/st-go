@@ -50,3 +50,19 @@ func TestNativeVideoRequiresCapabilityAndBoundedData(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeGov2HandoffRoundTrip(t *testing.T) {
+	r := api.NativeVideoRequest{Player: "gov2", File: "/media/movie ';\n世界.mp4", Volume: 35, Muted: true, DRMDevice: "/dev/dri/card1", Connector: 42}
+	data, _ := json.Marshal(r)
+	cfg := config.Default()
+	cfg.NativeVideoToken = "secret"
+	h := &nativeVideoTestHooks{}
+	core := NewTerm(cfg, h)
+	frame := "\x1bPnative-video auth secret 00112233445566778899aabbccddeeff " + base64.RawStdEncoding.EncodeToString(data) + "\x1b\\"
+	for _, b := range []byte(frame) {
+		core.Twrite([]byte{b}, false)
+	}
+	if len(h.requests) != 1 || h.requests[0] != r {
+		t.Fatal(h.requests)
+	}
+}

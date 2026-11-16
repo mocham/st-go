@@ -7,12 +7,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+
+	"st-go/sshtunnel"
 )
 
 type options struct {
 	server       string
+	serverSSH    string
 	session      string
 	previewWidth int
 	noPreview    bool
@@ -25,14 +30,16 @@ func parseOptions(args []string) (options, error) {
 	flags := flag.NewFlagSet("opencode-tui", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	flags.StringVar(&result.server, "server", os.Getenv("OPENCODE_TUI_SERVER"), "running OpenCode V2 URL or host:port (or set OPENCODE_TUI_SERVER); bare addresses use HTTP")
+	flags.StringVar(&result.serverSSH, "server-ssh", os.Getenv("OPENCODE_TUI_SERVER_SSH"), "SSH tunnel destination: [user@]host or SSH config alias (or set OPENCODE_TUI_SERVER_SSH)")
 	flags.StringVar(&result.session, "session", "", "resume an existing session ID")
 	flags.IntVar(&result.previewWidth, "preview-width", 58, "rich response pane width percent")
 	flags.BoolVar(&result.noPreview, "no-preview", false, "disable the st-go rich response pane")
 	flags.BoolVar(&result.web, "web", false, "render rich responses as browser-native HTML in st-web")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: opencode-tui --server URL [options] [DIRECTORY]")
+		fmt.Fprintln(flags.Output(), "Usage: opencode-tui [--server URL] [--server-ssh USER@HOST] [options] [DIRECTORY]")
 		fmt.Fprintln(flags.Output(), "\nMinimal OpenCode V2 TUI with an st-go Markdown/LaTeX response pane.")
 		fmt.Fprintln(flags.Output(), "Connect to a running server with --server or OPENCODE_TUI_SERVER.")
+		fmt.Fprintln(flags.Output(), "With --server-ssh, --server is remote loopback (default: http://127.0.0.1:4096).")
 		fmt.Fprintln(flags.Output(), "DIRECTORY is a project path on the server; it defaults to the current directory.")
 		fmt.Fprintln(flags.Output(), "For Basic auth, set OPENCODE_TUI_PASSWORD (username defaults to opencode).")
 		fmt.Fprintln(flags.Output(), "OPENCODE_TUI_AUTHORIZATION overrides password auth with a complete Authorization header.")
@@ -43,7 +50,14 @@ func parseOptions(args []string) (options, error) {
 		return result, err
 	}
 	result.server = strings.TrimSpace(result.server)
-	if result.server == "" {
+	result.serverSSH = strings.TrimSpace(result.serverSSH)
+	if result.serverSSH != "" {
+		target, err := sshtunnel.New(result.server, result.serverSSH)
+		if err != nil {
+			return result, err
+		}
+		result.server = target.ServerURL()
+	} else if result.server == "" {
 		return result, fmt.Errorf("server URL required: use --server URL or set OPENCODE_TUI_SERVER")
 	}
 	if flags.NArg() > 1 {
@@ -93,11 +107,25 @@ func run(args []string) int {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if configuration.serverSSH != "" {
+		// Catch shutdown during SSH/API startup too, before the TUI installs its
+		// own signal handlers. Raw-mode Ctrl-C remains an ordinary input key.
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+	}
 	authorization := serverAuthorization()
 	client, err := newAPIClient(configuration.server, authorization)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "opencode-tui:", err)
 		return 2
+	}
+	defer client.close()
+	if configuration.serverSSH != "" {
+		if err := client.openSSH(ctx, configuration.serverSSH); err != nil {
+			fmt.Fprintln(os.Stderr, "opencode-tui:", err)
+			return 1
+		}
 	}
 	if err := client.info(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "opencode-tui: connect to OpenCode server:", err)

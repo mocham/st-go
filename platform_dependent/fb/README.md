@@ -179,6 +179,11 @@ It does not launch DRM playback on the browser's PTY. Defaults use DRM output,
 `auto-copy` hardware decoding, ALSA `plughw:1,0`, and 33% mpv volume.
 See [video configuration](../../demo-go/file-browser/README.md#framebuffer-video).
 
+The optional [`gov2`](../../demo-go/gov2/README.md) experiment uses the same VT
+handoff with its own bundled decoder and direct DRM page flips. Build `make gov2`
+and keep it beside the rebuilt host executable. Its libdrm is bundled and
+statically linked into gov2 only.
+
 ## Testing
 
 ```sh

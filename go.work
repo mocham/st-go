@@ -6,6 +6,7 @@ use (
 	./demo-go/file-browser
 	./demo-go/goiv
 	./demo-go/gov
+	./demo-go/gov2
 	./demo-go/gols
 	./demo-go/govim
 	./demo-go/gxw
@@ -22,6 +23,7 @@ use (
 	./functionalities/pdfmeta
 	./functionalities/ptyutil
 	./functionalities/semhtml
+	./functionalities/sshtunnel
 	./functionalities/terminfo
 	./functionalities/tui
 	./functionalities/widgets

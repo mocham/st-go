@@ -433,23 +433,12 @@ func (context *latexRenderContext) renderBlocksAt(source string, sourceOffset in
 			sourceOffset += end
 			continue
 		}
-		if strings.HasPrefix(source, `\[`) {
-			if end := findUnescaped(source, `\]`, 2); end >= 0 {
-				output.WriteString(context.sizedBlock(context.renderDisplayMath(source[2:end])))
-				source = source[end+2:]
-				sourceOffset += end + 2
-				continue
-			}
+		if span, ok := parseLatexMathSpan(source, 0); ok && span.display {
+			output.WriteString(context.sizedBlock(context.renderDisplayMath(source[span.contentStart:span.contentEnd])))
+			source, sourceOffset = source[span.end:], sourceOffset+span.end
+			continue
 		}
-		if strings.HasPrefix(source, `$$`) {
-			if end := findUnescaped(source, `$$`, 2); end >= 0 {
-				output.WriteString(context.sizedBlock(context.renderDisplayMath(source[2:end])))
-				source = source[end+2:]
-				sourceOffset += end + 2
-				continue
-			}
-		}
-		if strings.HasPrefix(source, `\begin{`) {
+		if strings.HasPrefix(source, `\begin{`) && !strings.HasPrefix(source, `\begin{math}`) {
 			environment, beginEnd, ok := parseEnvironmentStart(source)
 			if ok {
 				content, end, found := extractEnvironment(source, environment, beginEnd)
@@ -544,6 +533,8 @@ func (context *latexRenderContext) renderEnvironment(environment, options, conte
 		return context.renderStatement(base, options, content, contentOffset, environmentOffset, declaration.Title)
 	}
 	switch base {
+	case "math":
+		return context.renderMath(content, false)
 	case "tcolorbox":
 		return context.renderColorBox(options, content, environmentOffset, contentOffset)
 	case "frame":
@@ -1159,31 +1150,16 @@ func (context *latexRenderContext) renderInlineState(source string) string {
 	var output strings.Builder
 	macroExpansions := 0
 	for len(source) > 0 {
+		if span, ok := parseLatexMathSpan(source, 0); ok {
+			if span.display {
+				output.WriteString(context.renderDisplayMath(source[span.contentStart:span.contentEnd]))
+			} else {
+				output.WriteString(context.renderMath(source[span.contentStart:span.contentEnd], false))
+			}
+			source = source[span.end:]
+			continue
+		}
 		switch {
-		case strings.HasPrefix(source, `$$`):
-			if end := findUnescaped(source, `$$`, 2); end >= 0 {
-				output.WriteString(context.renderDisplayMath(source[2:end]))
-				source = source[end+2:]
-				continue
-			}
-		case source[0] == '$' && !isEscaped(source, 0):
-			if end := findMathDollar(source, 1); end >= 0 {
-				output.WriteString(context.renderMath(source[1:end], false))
-				source = source[end+1:]
-				continue
-			}
-		case strings.HasPrefix(source, `\(`):
-			if end := findUnescaped(source, `\)`, 2); end >= 0 {
-				output.WriteString(context.renderMath(source[2:end], false))
-				source = source[end+2:]
-				continue
-			}
-		case strings.HasPrefix(source, `\[`):
-			if end := findUnescaped(source, `\]`, 2); end >= 0 {
-				output.WriteString(context.renderDisplayMath(source[2:end]))
-				source = source[end+2:]
-				continue
-			}
 		case strings.HasPrefix(source, `\\`):
 			output.WriteString(`<br>`)
 			source = source[2:]
@@ -1236,6 +1212,12 @@ func (context *latexRenderContext) renderInlineState(source string) string {
 				}
 			}
 			switch command {
+			case "text", "mbox":
+				if argument, end, ok := parseBraced(source, position); ok {
+					output.WriteString(context.renderInline(argument))
+					source = source[end:]
+					continue
+				}
 			case "only", "uncover", "visible", "onslide", "alert", "structure", "textnormal", "textrm", "textsf":
 				position = skipOverlay(source, position)
 				if argument, end, ok := parseBraced(source, position); ok {
@@ -1948,38 +1930,29 @@ func optionalHeadingArgument(source string, commandEnd int) (string, bool) {
 }
 
 func paragraphBoundary(source string) int {
-	inMath := false
 	for i := 0; i < len(source); i++ {
-		if !inMath && source[i] == '{' && !isEscaped(source, i) {
+		if isEscaped(source, i) {
+			continue
+		}
+		if source[i] == '{' {
 			if _, end, ok := parseBraced(source, i); ok {
 				i = end - 1
 				continue
 			}
 		}
-		if !inMath && i > 0 && !isEscaped(source, i) && isBlockStart(source[i:]) {
+		if i > 0 && isBlockStart(source[i:]) {
 			return i
 		}
-		if source[i] == '$' && !isEscaped(source, i) {
-			inMath = !inMath
-			if i+1 < len(source) && source[i+1] == '$' {
-				i++
-			}
+		if span, ok := parseLatexMathSpan(source, i); ok {
+			i = span.end - 1
 			continue
 		}
-		if strings.HasPrefix(source[i:], `\(`) && !isEscaped(source, i) {
-			inMath = true
-			i++
-			continue
-		}
-		if strings.HasPrefix(source[i:], `\)`) && !isEscaped(source, i) {
-			inMath = false
-			i++
-			continue
+		if source[i] == '$' || strings.HasPrefix(source[i:], `\(`) || strings.HasPrefix(source[i:], `\begin{math}`) {
+			// An unfinished inline formula is one editing fragment, not a set
+			// of independent blocks split at its inner environments/newlines.
+			return len(source)
 		}
 		if source[i] != '\n' {
-			continue
-		}
-		if inMath {
 			continue
 		}
 		lineStart := i + 1
@@ -1998,6 +1971,9 @@ func paragraphBoundary(source string) int {
 }
 
 func isBlockStart(source string) bool {
+	if strings.HasPrefix(source, `\begin{math}`) {
+		return false
+	}
 	if strings.HasPrefix(source, `\begin{`) || strings.HasPrefix(source, `\attentionwindow`) ||
 		strings.HasPrefix(source, `\[`) || strings.HasPrefix(source, `$$`) ||
 		strings.HasPrefix(source, `\maketitle`) || strings.HasPrefix(source, `\tableofcontents`) ||
@@ -2220,43 +2196,6 @@ func isEscaped(source string, position int) bool {
 		position--
 	}
 	return backslashes%2 == 1
-}
-
-func findUnescaped(source, needle string, start int) int {
-	for position := start; position < len(source); {
-		next := strings.Index(source[position:], needle)
-		if next < 0 {
-			return -1
-		}
-		next += position
-		if !isEscaped(source, next) {
-			return next
-		}
-		position = next + len(needle)
-	}
-	return -1
-}
-
-func findMathDollar(source string, start int) int {
-	depth := 0
-	for i := start; i < len(source); i++ {
-		if isEscaped(source, i) {
-			continue
-		}
-		switch source[i] {
-		case '{':
-			depth++
-		case '}':
-			if depth > 0 {
-				depth--
-			}
-		case '$':
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
 }
 
 func readTeXCommand(source string, start int) (string, int) {

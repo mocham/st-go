@@ -76,11 +76,13 @@ func (d *nativeDecoder) pixels(w, h int) ([]uint32, error) {
 		d.buffer = make([]uint32, size+16)
 	}
 	p := d.buffer[:size]
-	for i := range p {
-		p[i] = 0xff000000
+	return p, d.draw(p, w, h, w)
+}
+func (d *nativeDecoder) draw(p []uint32, w, h, stride int) error {
+	if w < 1 || h < 1 || int64(w)*int64(h) > 4096*2160 || stride < w || stride > 1<<20 || int64(stride)*int64(h) > int64(len(p)) {
+		return fmt.Errorf("invalid video output buffer")
 	}
-	err := nativeError(C.st_video_pixels(d.handle, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.int(w), C.int(h), C.int(w*4)))
-	return p, err
+	return nativeError(C.st_video_pixels(d.handle, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.int(w), C.int(h), C.int(stride*4)))
 }
 func (d *nativeDecoder) resetAudio() { C.st_video_audio_reset(d.handle) }
 func (d *nativeDecoder) audio(rate int, speed float64, flush bool) ([]byte, error) {

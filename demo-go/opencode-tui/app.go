@@ -1045,10 +1045,16 @@ func (application *app) run() error {
 
 	var parser inputParser
 	var input [8192]byte
+	var sshDone <-chan struct{}
+	if application.api.tunnel != nil {
+		sshDone = application.api.tunnel.Done()
+	}
 	for application.running {
 	drain:
 		for count := 0; count < 256; count++ {
 			select {
+			case <-sshDone:
+				return application.api.tunnel.Err()
 			case item := <-application.stream:
 				application.applyStream(item)
 			case result := <-application.operations:
