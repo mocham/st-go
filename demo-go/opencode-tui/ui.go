@@ -161,9 +161,6 @@ func (application *app) statusLine() (string, string) {
 		return " Type DELETE to confirm session deletion · Esc cancels ", warningStyle
 	}
 	if application.attachTarget != "" {
-		if application.subscribeOnAttach != "" {
-			return " Opening " + application.attachTarget + " · /Subscribe " + application.subscribeOnAttach + " queued · Esc cancels ", statusStyle
-		}
 		return " Opening session… · Esc cancels ", statusStyle
 	}
 	if len(application.permissions) > 0 {
@@ -201,11 +198,7 @@ func (application *app) statusLine() (string, string) {
 	if application.streamConnected {
 		connection = "live"
 	}
-	status := application.status
-	if application.writer != nil {
-		status = "[" + application.writer.bus.Channel + "] " + status
-	}
-	return " " + status + " · events " + connection + " ", statusStyle
+	return " " + application.status + " · events " + connection + " ", statusStyle
 }
 
 func (application *app) helpLine() string {
@@ -228,7 +221,7 @@ func (application *app) helpLine() string {
 	if application.preview == nil || !application.preview.enabled {
 		previewKey = "text response"
 	}
-	return "F4 fold prompt · Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /Subscribe /sessions /models /variants /export · Ctrl-Q quit · " + previewKey
+	return "F4 fold prompt · Tab files · Ctrl-U/D preview page · Reclick prompt: end · More/F3 +10 · Alt-↑/↓ select · /sessions /models /variants /export · Ctrl-Q quit · " + previewKey
 }
 
 func writeFull(writer io.Writer, data []byte) error {

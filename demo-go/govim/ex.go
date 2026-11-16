@@ -159,8 +159,6 @@ func (e *Editor) execute(command string) {
 			return
 		}
 		e.error(e.inlineUninsert(args))
-	case "Subscribe", "AICheckpoint", "AINext", "AIList", "AIView", "AIEdit", "AIIns", "AIDismiss", "AIRefine", "AIRetry", "AIReasoning", "AICancel", "AIBack":
-		e.aiCommand(name, args)
 	case "w", "write", "wnomove", "wq", "x", "xit", "exit", "saveas", "sav":
 		noMove := name == "wnomove"
 		if args != "" {

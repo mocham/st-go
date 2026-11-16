@@ -126,7 +126,6 @@ type Editor struct {
 	fullRedraw                       bool
 	syntax                           *syntaxHighlighter
 	preview                          *editorPreview
-	ai                               *editorAI
 	inlineAI                         *inlineAI
 	inlineOptions                    inlineAIOptions
 	clip                             clipboard
@@ -389,10 +388,6 @@ func firstNonblank(b *Buffer, row int) int {
 }
 
 func (e *Editor) Feed(event keyEvent) {
-	if event.Bus != "" {
-		e.aiReceive(event.Bus)
-		return
-	}
 	if e.quit {
 		return
 	}
@@ -477,9 +472,6 @@ func (e *Editor) Feed(event keyEvent) {
 		}
 	}
 	if len(e.pager) > 0 {
-		if e.aiPickerKey(key) {
-			return
-		}
 		e.pager = nil
 		return
 	}
@@ -1070,7 +1062,6 @@ func (e *Editor) playRegisterMacro(value register, count int) {
 }
 
 func (e *Editor) tick(now time.Time) {
-	e.aiTick(now)
 	e.inlineTick()
 	e.pollCJK()
 	e.pollPrompt()
@@ -1086,15 +1077,6 @@ func (e *Editor) tick(now time.Time) {
 }
 func (e *Editor) close(normalExit bool) error {
 	first := e.closeInlineAI()
-	if e.ai != nil {
-		if err := e.aiSaveDraft(); first == nil {
-			first = err
-		}
-		_ = e.ai.bus.Close()
-		if err := e.ai.store.db.Close(); first == nil {
-			first = err
-		}
-	}
 	e.closeCJK()
 	if e.promptEditor != nil {
 		e.promptEditor.Close()

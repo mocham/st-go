@@ -28,27 +28,6 @@ needed; EOF before a response usually indicates an address, port, or HTTP/HTTPS
 mismatch. Browser sign-in is not inherited by this client. For containers, use
 a reachable server address rather than another container's loopback address.
 
-## Govim writing
-
-Run both applications from the same local working directory in the same terminal
-instance. Select a normal OpenCode session, then enter `/subscribe paper` here and
-`:Subscribe paper` in govim. Govim automatically creates the project history DB
-if needed. See the [AI writing workflow](../govim/AI-WRITING.md).
-
-Govim requests run in the session selected by `/subscribe`, with live responses,
-reasoning, tools, and permissions in the normal interface. Use `/models` and
-`/variants` there. The writing activity panel shows connection and request status.
-Use govim's `:AICheckpoint` to mark the beginning of source context. Each new
-request sends the excerpt from the last checkpoint to the cursor; previous
-context remains in the normal session history.
-After a client crash, reopen the same existing session and `/subscribe paper`
-again to recover pending work. Select another session and repeat `/subscribe`
-to change the binding once active writing requests have settled.
-After a sidebar click, `/Subscribe` waits for that selected session to finish
-loading and confirms its ID. Cancelling or changing the selection cancels the
-queued subscription. Background writing updates preserve your selected session;
-click the subscribed-session row in the writing activity panel to return to it.
-
 ## Rich responses
 
 

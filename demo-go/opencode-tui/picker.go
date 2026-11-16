@@ -45,12 +45,6 @@ type pickerResult struct {
 func (application *app) slashCommand(text string) bool {
 	command, query, _ := strings.Cut(text, " ")
 	switch command {
-	case "/Subscribe", "/subscribe":
-		if err := application.subscribeWriting(strings.TrimSpace(query)); err != nil {
-			application.status = err.Error()
-		}
-		application.dirty = true
-		return true
 	case "/export":
 		application.exportSession(application.session.ID, strings.TrimSpace(query))
 		return true

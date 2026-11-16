@@ -529,7 +529,7 @@ func (layout *pdfDocumentLayout) renderNode(node *html.Node, indent float64) {
 			layout.renderNumberedEquation(node, indent)
 			return
 		}
-		if classes["statement"] || classes["abstract"] || classes["lecture-box"] || classes["govim-ai"] {
+		if classes["statement"] || classes["abstract"] || classes["lecture-box"] {
 			layout.renderBoxedEnvironment(node, indent, classes)
 			return
 		}

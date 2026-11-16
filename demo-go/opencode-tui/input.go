@@ -15,7 +15,6 @@ type regionLayout struct {
 }
 
 type inputEvent struct {
-	bus    string
 	key    string
 	paste  string
 	region *regionLayout
@@ -84,9 +83,7 @@ func (parser *inputParser) feed(data []byte, now time.Time, emit func(inputEvent
 			parser.pending = parser.pending[1:]
 			if character == 0x18 || character == 0x1a || character == 7 || parser.dcsEscape && character == '\\' {
 				if character == '\\' && !parser.discardDCS {
-					if strings.HasPrefix(string(parser.dcs), "app-bus ") {
-						emit(inputEvent{bus: string(parser.dcs)})
-					} else if layout := parseRegionLayout(string(parser.dcs)); layout != nil {
+					if layout := parseRegionLayout(string(parser.dcs)); layout != nil {
 						emit(inputEvent{region: layout})
 					}
 				}

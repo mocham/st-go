@@ -108,7 +108,6 @@ type app struct {
 	attachSequence           uint64
 	attachTarget             string
 	attachCancel             context.CancelFunc
-	subscribeOnAttach        string
 	paintedLayout            paneLayout
 	paintedRows, paintedCols int
 	sessionEpoch             uint64
@@ -136,7 +135,6 @@ type app struct {
 	fileSelection             *fileSelection
 	fileSequence              uint64
 	fileCancel                context.CancelFunc
-	writer                    *writingBridge
 }
 
 func newApp(client *apiClient, session sessionInfo, messages []apiMessage, permissions []permissionRequest, output io.Writer, fd int, rich *richPreview) *app {
@@ -720,8 +718,7 @@ func (application *app) submitPrompt() {
 	if text == "" {
 		return
 	}
-	command, _, _ := strings.Cut(text, " ")
-	if application.attachTarget != "" && command != "/subscribe" && command != "/Subscribe" {
+	if application.attachTarget != "" {
 		application.status = "Wait for the selected session to open before sending"
 		application.dirty = true
 		return // Keep the draft rather than sending it to the previous session.
@@ -812,12 +809,6 @@ func (application *app) interrupt() {
 }
 
 func (application *app) handleInput(event inputEvent) {
-	if event.bus != "" {
-		if application.writer != nil {
-			application.writer.receive(event.bus)
-		}
-		return
-	}
 	if event.err != "" {
 		application.status = event.err
 		application.dirty = true
@@ -1045,12 +1036,7 @@ func (application *app) run() error {
 		application.status = "Terminal is too small for the rich pane; press F2 after resizing"
 	}
 	defer application.preview.close()
-	defer func() {
-		application.cancel() // Detaching must leave server-side execution recoverable.
-		if application.writer != nil {
-			application.writer.close()
-		}
-	}()
+	defer application.cancel() // Detaching must leave server-side execution recoverable.
 	application.queuePreview()
 	application.startEventStream()
 	application.requestCatalog()
@@ -1081,9 +1067,6 @@ func (application *app) run() error {
 			}
 		}
 		now := time.Now()
-		if application.writer != nil {
-			application.writer.tick(now)
-		}
 		application.tickPicker(now)
 		application.tickConnection(now)
 		if !application.catalogRefresh.IsZero() && !now.Before(application.catalogRefresh) && !application.catalogLoading {

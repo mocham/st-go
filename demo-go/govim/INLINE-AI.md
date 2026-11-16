@@ -34,7 +34,7 @@ model request. Govim does not need a provider API key. It authenticates to the
   `localhost`/`127.0.0.1` aliases on the same port.
 - For a separately launched/password-protected server, `OPENCODE_PASSWORD` sets
   its Basic-auth password (username `opencode`).
-- Existing opencode-tui settings also work: `OPENCODE_TUI_AUTHORIZATION` supplies
+- Compatibility settings also work: `OPENCODE_TUI_AUTHORIZATION` supplies
   a complete header, or `OPENCODE_TUI_PASSWORD` and optional
   `OPENCODE_TUI_USERNAME` supply Basic authentication (default username `opencode`).
 - `GOVIM_AI_AUTHORIZATION` overrides automatic authentication with a complete
@@ -222,5 +222,3 @@ discovery also uses one GET. There is no automatic generation retry. A request
 left Processing by another editor or a crash must be discarded with `:UnIns`
 before `:AI` can retry it. Closing the editor cancels its HTTP requests;
 cancellation does not promise that the remote provider stops computing.
-
-The separate, session-backed workflow remains documented in [AI-WRITING.md](AI-WRITING.md).

@@ -396,16 +396,6 @@ Preview slots: Initial gray / Processing yellow / Ready green / Inserted white.
 Paths are relative to the document. Inputs and UUID versions are stored locally.
 Only instruction + explicit context + current document enter the stateless prompt.
 
-Session-backed AI writing (govim + opencode-tui in tabs of one st):
-:AICheckpoint inserts a source comment marking the start of AI context.
-:AINext [instruction] creates a durable UUID paragraph placeholder.
-Only source between the last checkpoint and the request cursor enters the prompt.
-:AIEdit [UUID] adapts a prediction; :AIRefine instruction requests a revision.
-:AIIns [UUID] inserts as one undo operation; absent cursor marker opens a picker.
-:AIView / :AIReasoning / :AIRetry / :AICancel / :AIDismiss [UUID]
-:Subscribe Channel connects AI writing using the current working directory.
-:AIList lists proposals; :AIBack returns to source.
-History and immutable snapshots live in the project's .govim/ directory.
 :toggle seeks the disk preview to the cursor; :toggle! draws unsaved buffers
 and seeks there instead. Neither writes files; both override %cursor.
 Normal Shift-Tab toggles the same panel between preview and source TOC.

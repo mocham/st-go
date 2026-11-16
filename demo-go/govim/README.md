@@ -59,9 +59,6 @@ govim manages an `ssh -N -L` tunnel to the remote `%server=` address.
 The preview footer tracks each slot: gray Initial, yellow Processing, green Ready,
 white Inserted. Removing a UUID from source removes its footer entry.
 
-For the session-backed opencode-tui subscription workflow, see
-[AI writing](AI-WRITING.md).
-
 ## Recovery and saving
 
 

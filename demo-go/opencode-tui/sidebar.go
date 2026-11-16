@@ -97,7 +97,6 @@ func (application *app) cancelAttach() {
 	}
 	application.attachSequence++
 	application.attachTarget = ""
-	application.subscribeOnAttach = ""
 	application.dirty = true
 }
 
@@ -140,13 +139,7 @@ func (application *app) applyAttach(result operationResult) {
 		application.queuePreview()
 		return
 	}
-	channel := application.subscribeOnAttach
 	application.installSession(result.sessionSnapshot)
-	if channel != "" {
-		if err := application.subscribeWriting(channel); err != nil {
-			application.status = err.Error()
-		}
-	}
 }
 
 func (application *app) installSession(snapshot sessionSnapshot) {
@@ -321,9 +314,6 @@ func (application *app) sidebarRows(width int) []displayRow {
 		expanded = application.attachTarget
 	}
 	rows := []displayRow{{text: "+ New session", style: sessionNameStyle, action: "new"}, {}}
-	if application.writer != nil {
-		rows = append(application.writer.rows(width), rows...)
-	}
 	for _, session := range sessions {
 		active := session.ID == expanded
 		label, border, highlighted := application.sessionBoxState(session.ID, active)

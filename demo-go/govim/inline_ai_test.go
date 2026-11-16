@@ -149,8 +149,8 @@ func TestInlineAIIMAPAcceptUninsertAndVersions(t *testing.T) {
 		t.Fatal("Ctrl-J requested an Initial slot")
 	}
 	e.execute("AI")
-	if e.ai != nil || e.inlineAI == nil {
-		t.Fatal("inline AI required the old subscription bridge")
+	if e.inlineAI == nil {
+		t.Fatal("AI command did not initialize the paragraph harness")
 	}
 	e.setPos(0)
 	editKeys(e, "<C-j>")

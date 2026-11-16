@@ -8,8 +8,7 @@ These implement subscription, broadcast publication, and unsubscription.
 The terminal brokers channels across its native tabs or one web session service.
 Subscriptions belong to an application identity and an owning PTY, never a
 focused tab. Background readers receive the same messages. A publisher receives
-its own publications. All payloads remain application-defined; govim's versioned
-contract is in `../writing` and contains no OpenCode HTTP types.
+its own publications. All payloads remain application-defined.
 
 Wire controls (DCS `ESC P` / ST `ESC \\` framing):
 
